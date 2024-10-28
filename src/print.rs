@@ -21,12 +21,6 @@ pub fn print_value<X: Clone + Ord + std::fmt::Debug + std::fmt::Display>(
 ) -> std::fmt::Result {
     write!(w, "{}", value)?;
     match value {
-        Value::Continue(context, _) => {
-            print_context(w, context, level + 1)?;
-        }
-        Value::Receive(context, _, _) => {
-            print_context(w, context, level + 1)?;
-        }
         Value::Suspend(context, _, _) => {
             print_context(w, context, level + 1)?;
         }

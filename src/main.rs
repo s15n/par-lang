@@ -13,9 +13,9 @@ fn main() {
     let mut machine = Machine {
         log: Box::new(|tag: &'static str| println!("LOG: {}", tag)),
     };
-    /*let mut context = Context::empty();
-    let mut process = Arc::new(merger());*/
-    let (mut context, mut process) = logger();
+    let mut context = Context::empty();
+    let mut process = Arc::new(merger());
+    //let (mut context, mut process) = logger();
 
     loop {
         println!("{}", process);
@@ -40,58 +40,58 @@ fn main() {
 
 fn atm() -> Process<&'static str> {
     let_("client", fork_(&[], "atm",
-        send_to_("atm", tag_("Alice"),
-        send_to_("atm", tag_("Withdraw"),
-        receive_from_("atm", "money",
+        send_("atm", tag_("Alice"),
+        send_("atm", tag_("Withdraw"),
+        receive_("atm", "money",
         log_(var_("money"),
-        continue_from_("atm",
+        continue_("atm",
         halt_())))))),
-    receive_from_("client", "account",
-    receive_from_("client", "request",
+    receive_("client", "account",
+    receive_("client", "request",
     log_(var_("account"),
-    send_to_("client", tag_("Bank"),
+    send_("client", tag_("Bank"),
     log_(var_("request"),
-    break_to_("client")))))))
+    break_("client")))))))
 }
 
 fn merger() -> Process<&'static str> {
     let_("left", fork_(&[], "parent",
         let_("left", fork_(&[], "parent",
-            send_to_("parent", tag_("A"),
-            send_to_("parent", tag_("X"),
-            break_to_("parent")))),
+            send_("parent", tag_("A"),
+            send_("parent", tag_("X"),
+            break_("parent")))),
         let_("right", fork_(&[], "parent",
-            send_to_("parent", tag_("B"),
-            break_to_("parent"))),
-        receive_from_("left", "value",
-        receive_from_("left", "secret",
-        send_to_("parent", var_("value"),
-        send_to_("parent", var_("secret"),
-        continue_from_("left",
+            send_("parent", tag_("B"),
+            break_("parent"))),
+        receive_("left", "value",
+        receive_("left", "secret",
+        send_("parent", var_("value"),
+        send_("parent", var_("secret"),
+        continue_("left",
         link_("parent", var_("right")))))))))),
     let_("right", fork_(&[], "parent",
-        receive_from_("parent", "secret",
+        receive_("parent", "secret",
         let_("left", fork_(&[], "parent",
-            receive_from_("parent", "secret",
-            send_to_("parent", tag_("C"),
+            receive_("parent", "secret",
+            send_("parent", tag_("C"),
             log_(var_("secret"),
-            break_to_("parent"))))),
+            break_("parent"))))),
         let_("right", fork_(&[], "parent",
-            send_to_("parent", tag_("D"),
-            break_to_("parent"))),
-        send_to_("left", var_("secret"),
-        receive_from_("left", "value",
-        continue_from_("left",
-        send_to_("parent", var_("value"),
+            send_("parent", tag_("D"),
+            break_("parent"))),
+        send_("left", var_("secret"),
+        receive_("left", "value",
+        continue_("left",
+        send_("parent", var_("value"),
         link_("parent", var_("right")))))))))),
-    receive_from_("left", "p",
-    receive_from_("left", "secret",
-    receive_from_("left", "q",
-    send_to_("right", var_("secret"),
-    receive_from_("right", "r",
-    receive_from_("right", "s",
-    continue_from_("left",
-    continue_from_("right",
+    receive_("left", "p",
+    receive_("left", "secret",
+    receive_("left", "q",
+    send_("right", var_("secret"),
+    receive_("right", "r",
+    receive_("right", "s",
+    continue_("left",
+    continue_("right",
     log_(var_("p"),
     log_(var_("q"),
     log_(var_("r"),
@@ -101,22 +101,22 @@ fn merger() -> Process<&'static str> {
 
 fn logger() -> (Context<&'static str>, Arc<Process<&'static str>>) {
     let logger = fork_(&[], "feed",
-        handle_in_("feed", "done", break_to_("feed"),
-        handle_in_("feed", "next",
-        receive_from_("feed", "msg",
+        handle_("feed", "done", break_("feed"),
+        handle_("feed", "next",
+        receive_("feed", "msg",
         log_(var_("msg"),
         link_("feed", static_("logger")))),
-        exhaust_in_("feed"))));
+        exhaust_("feed"))));
 
     let feeder = let_("lg", static_("logger"),
-        select_on_("lg", "next",
-        send_to_("lg", tag_("A"),
-        select_on_("lg", "next",
-        send_to_("lg", tag_("B"),
-        select_on_("lg", "next",
-        send_to_("lg", tag_("C"),
-        select_on_("lg", "done",
-        continue_from_("lg",
+        select_("lg", "next",
+        send_("lg", tag_("A"),
+        select_("lg", "next",
+        send_("lg", tag_("B"),
+        select_("lg", "next",
+        send_("lg", tag_("C"),
+        select_("lg", "done",
+        continue_("lg",
         halt_())))))))));
 
     (Context {
