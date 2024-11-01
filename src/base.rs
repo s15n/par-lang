@@ -16,16 +16,14 @@ pub enum RuntimeError<X: Clone + Ord> {
     CannotSendTo(Value<X>),
     CannotReceiveFrom(Value<X>),
 
-    Exhausted(Value<X>),
-    CannotHandleIn(Value<X>, X),
-    CannotSelectOn(Value<X>, X),
+    MissingCase(Value<X>, X),
+    CannotSelectFrom(Value<X>, Vector<X>),
 }
 
 #[derive(Clone, Debug)]
 pub enum Expression<X: Clone> {
     Tag(X),
-    Static(X),
-    Variable(X),
+    Ref(X),
     Fork(Capture<X>, X, Arc<Process<X>>),
 }
 
@@ -46,7 +44,7 @@ pub enum Command<X: Clone> {
     Receive(X, Arc<Process<X>>),
     Exhaust,
     Select(X, Arc<Process<X>>),
-    Handle(X, Arc<Process<X>>, Arc<Process<X>>),
+    Case(Vector<(X, Arc<Process<X>>)>, Arc<Process<X>>),
 }
 
 impl<X: Clone + Ord> Command<X> {
@@ -56,9 +54,16 @@ impl<X: Clone + Ord> Command<X> {
             Command::Continue(_) => RuntimeError::CannotContinueFrom(value),
             Command::Send(_, _) => RuntimeError::CannotSendTo(value),
             Command::Receive(_, _) => RuntimeError::CannotReceiveFrom(value),
-            Command::Exhaust => RuntimeError::Exhausted(value),
-            Command::Select(branch, _) => RuntimeError::CannotSelectOn(value, branch.clone()),
-            Command::Handle(branch, _, _) => RuntimeError::CannotHandleIn(value, branch.clone()),
+            Command::Exhaust => RuntimeError::CannotSelectFrom(value, Vector::new()),
+            Command::Select(branch, _) => RuntimeError::MissingCase(value, branch.clone()),
+            Command::Case(branches, _) => RuntimeError::CannotSelectFrom(
+                value,
+                branches
+                    .into_iter()
+                    .map(|(branch, _)| branch)
+                    .cloned()
+                    .collect(),
+            ),
         }
     }
 }
@@ -77,7 +82,7 @@ pub struct Capture<X: Clone> {
 #[derive(Clone, Debug, Default)]
 pub struct Context<X: Clone + Ord> {
     pub statics: OrdMap<X, Arc<Expression<X>>>,
-    pub variables: OrdMap<X, Value<X>>,
+    pub variables: OrdMap<X, Vector<Value<X>>>,
 }
 
 impl<X: Clone + Ord> Context<X> {
@@ -95,24 +100,28 @@ pub struct Machine<X> {
 
 impl<X: Ord + Clone> Context<X> {
     fn set(&mut self, name: &X, value: Value<X>) -> Result<(), RuntimeError<X>> {
-        match self.variables.insert(name.clone(), value) {
-            Some(_) => Err(RuntimeError::AlreadyDefined(name.clone())),
-            None => Ok(()),
-        }
+        Ok(self
+            .variables
+            .entry(name.clone())
+            .or_default()
+            .push_back(value))
     }
 
     fn get(&mut self, name: &X) -> Result<Value<X>, RuntimeError<X>> {
-        match self.variables.remove(name) {
-            Some(value) => Ok(value),
-            None => Err(RuntimeError::DoesNotExist(name.clone())),
+        if let Some(value) = self.variables.get_mut(name).and_then(|v| v.pop_back()) {
+            return Ok(value);
         }
-    }
-
-    fn get_static(&mut self, name: &X) -> Result<Arc<Expression<X>>, RuntimeError<X>> {
-        match self.statics.get(name) {
-            Some(definition) => Ok(Arc::clone(definition)),
-            None => Err(RuntimeError::DoesNotExist(name.clone())),
+        if let Some(definition) = self.statics.get(name) {
+            return Ok(evaluate(
+                Context {
+                    statics: self.statics.clone(),
+                    variables: OrdMap::new(),
+                },
+                Arc::clone(definition),
+            )?
+            .1);
         }
+        Err(RuntimeError::DoesNotExist(name.clone()))
     }
 
     fn extract(&mut self, capture: &Capture<X>) -> Result<Context<X>, RuntimeError<X>> {
@@ -139,12 +148,8 @@ pub mod notation {
         Expression::Tag(tag)
     }
 
-    pub fn static_<X: Clone>(name: X) -> Expression<X> {
-        Expression::Static(name)
-    }
-
-    pub fn var_<X: Clone>(name: X) -> Expression<X> {
-        Expression::Variable(name)
+    pub fn ref_<X: Clone>(name: X) -> Expression<X> {
+        Expression::Ref(name)
     }
 
     pub fn fork_<X: Clone>(cap: &[X], chan: X, proc: Process<X>) -> Expression<X> {
@@ -197,8 +202,25 @@ pub mod notation {
         Process::Do(id, Command::Select(branch, Arc::new(then)))
     }
 
-    pub fn handle_<X: Clone>(id: X, branch: X, mch: Process<X>, oth: Process<X>) -> Process<X> {
-        Process::Do(id, Command::Handle(branch, Arc::new(mch), Arc::new(oth)))
+    pub fn case_<X: Clone>(
+        id: X,
+        branches: &[(X, Process<X>)],
+        otherwise: Process<X>,
+    ) -> Process<X> {
+        Process::Do(
+            id,
+            Command::Case(
+                branches
+                    .into_iter()
+                    .map(|(branch, then)| (branch.clone(), Arc::new(then.clone())))
+                    .collect(),
+                Arc::new(otherwise),
+            ),
+        )
+    }
+
+    pub fn case_exhaust_<X: Clone>(id: X, branches: &[(X, Process<X>)]) -> Process<X> {
+        case_(id.clone(), branches, exhaust_(id))
     }
 }
 
@@ -209,23 +231,7 @@ pub fn evaluate<X: Ord + Clone>(
     match expression.as_ref() {
         Expression::Tag(tag) => Ok((context, Value::Tag(tag.clone()))),
 
-        Expression::Static(name) => {
-            let definition = context.get_static(name)?;
-            let statics = context.statics.clone();
-            Ok((
-                context,
-                evaluate(
-                    Context {
-                        statics,
-                        variables: OrdMap::new(),
-                    },
-                    definition,
-                )?
-                .1,
-            ))
-        }
-
-        Expression::Variable(name) => {
+        Expression::Ref(name) => {
             let value = context.get(name)?;
             Ok((context, value))
         }
@@ -344,39 +350,37 @@ impl<X: Ord + Clone> Machine<X> {
 
                     (
                         (mut select_context, name, Command::Select(selected, after_select)),
-                        (handle_context, channel, Command::Handle(branch, matching, otherwise)),
+                        (mut handle_context, channel, Command::Case(branches, otherwise)),
                     )
                     | (
-                        (handle_context, channel, Command::Handle(branch, matching, otherwise)),
+                        (mut handle_context, channel, Command::Case(branches, otherwise)),
                         (mut select_context, name, Command::Select(selected, after_select)),
                     ) => {
-                        if selected == branch {
-                            select_context.set(
-                                name,
-                                Value::Suspend(
-                                    handle_context,
-                                    channel.clone(),
-                                    Arc::clone(matching),
-                                ),
-                            )?;
-                            Ok((select_context, Arc::clone(after_select)))
-                        } else {
-                            select_context.set(
-                                name,
-                                Value::Suspend(
-                                    handle_context,
-                                    channel.clone(),
-                                    Arc::clone(otherwise),
-                                ),
-                            )?;
-                            Ok((
+                        for (branch, then) in branches {
+                            if selected == branch {
+                                select_context.set(
+                                    name,
+                                    Value::Suspend(
+                                        handle_context,
+                                        channel.clone(),
+                                        Arc::clone(then),
+                                    ),
+                                )?;
+                                return Ok((select_context, Arc::clone(after_select)));
+                            }
+                        }
+                        handle_context.set(
+                            channel,
+                            Value::Suspend(
                                 select_context,
+                                name.clone(),
                                 Arc::new(Process::Do(
                                     name.clone(),
                                     Command::Select(selected.clone(), Arc::clone(after_select)),
                                 )),
-                            ))
-                        }
+                            ),
+                        )?;
+                        Ok((handle_context, Arc::clone(otherwise)))
                     }
 
                     (_, (target_context, channel, command)) => Err(command.cannot(Value::Suspend(
@@ -394,8 +398,7 @@ impl<X: Clone + Ord + std::fmt::Display> std::fmt::Display for Expression<X> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Expression::Tag(tag) => write!(f, "\"{}\"", tag),
-            Expression::Static(name) => write!(f, "@{}", name),
-            Expression::Variable(name) => write!(f, "{}", name),
+            Expression::Ref(name) => write!(f, "{}", name),
             Expression::Fork(_, name, process) => write!(f, "{}{{ {} }}", name, process),
         }
     }
@@ -408,7 +411,7 @@ impl<X: Clone + Ord + std::fmt::Display> std::fmt::Display for Process<X> {
             Process::Let(name, definition, process) => {
                 write!(f, "let {} = {}; {}", name, definition, process)
             }
-            Process::Link(left, right) => write!(f, "{} <-> {}", left, right),
+            Process::Link(left, right) => write!(f, "{} <> {}", left, right),
             Process::Halt => write!(f, "~"),
             Process::Do(name, Command::Break) => write!(f, "{}()", name),
             Process::Do(name, Command::Continue(process)) => write!(f, "{}[]; {}", name, process),
@@ -418,12 +421,18 @@ impl<X: Clone + Ord + std::fmt::Display> std::fmt::Display for Process<X> {
             Process::Do(name, Command::Receive(parameter, process)) => {
                 write!(f, "{}[{}]; {}", name, parameter, process)
             }
-            Process::Do(name, Command::Exhaust) => write!(f, "{}/0", name),
-            Process::Do(name, Command::Select(branch, process)) => {
-                write!(f, "{}:{}; {}", name, branch, process)
+            Process::Do(name, Command::Exhaust) => {
+                write!(f, "{}/0", name)
             }
-            Process::Do(name, Command::Handle(branch, matching, otherwise)) => {
-                write!(f, "{}/{}{{ {} }}; {}", name, branch, matching, otherwise)
+            Process::Do(name, Command::Select(branch, process)) => {
+                write!(f, "{}.{}; {}", name, branch, process)
+            }
+            Process::Do(name, Command::Case(branches, otherwise)) => {
+                write!(f, "{}.case{{ ", name)?;
+                for (branch, process) in branches {
+                    write!(f, "{} => {{ {} }} ", branch, process)?;
+                }
+                write!(f, "}}; {}", otherwise)
             }
         }
     }

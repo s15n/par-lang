@@ -5,11 +5,13 @@ pub fn print_context<X: Clone + Ord + std::fmt::Debug + std::fmt::Display>(
     context: &Context<X>,
     level: usize,
 ) -> std::fmt::Result {
-    for (name, value) in &context.variables {
-        write!(w, "\n")?;
-        indent(w, level)?;
-        write!(w, "{}: ", name)?;
-        print_value(w, value, level)?;
+    for (name, values) in &context.variables {
+        for value in values {
+            write!(w, "\n")?;
+            indent(w, level)?;
+            write!(w, "{} = ", name)?;
+            print_value(w, value, level)?;
+        }
     }
     Ok(())
 }
