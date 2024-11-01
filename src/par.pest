@@ -1,0 +1,28 @@
+WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
+
+program = { SOI ~ definition* ~ EOI }
+
+name = @{ (("_" | ASCII_ALPHA) ~ ("_" | ASCII_ALPHANUMERIC)*) }
+
+definition = { "define" ~ name ~ "=" ~ expression }
+
+expression = { fork | reference }
+reference  = { name }
+fork       = { object ~ "{" ~ process ~ "}" }
+
+process = { p_let | p_link | p_break | p_continue | p_send | p_receive | p_case | p_select }
+
+p_let      = { "let" ~ name ~ "=" ~ expression ~ ";" ~ process }
+p_link     = { subject ~ "<>" ~ expression }
+p_break    = { subject ~ "(" ~ ")" }
+p_continue = { subject ~ "[" ~ "]" ~ ";" ~ process }
+p_send     = { subject ~ "(" ~ expression ~ ")" ~ ";" ~ process }
+p_receive  = { subject ~ "[" ~ name ~ "]" ~ ";" ~ process }
+p_select   = { subject ~ "." ~ branch ~ ";" ~ process }
+p_case     = { subject ~ "." ~ "case" ~ "{" ~ p_branches ~ "}" ~ (";" ~ process)? }
+p_branches = { p_branch* }
+p_branch   = { branch ~ "=>" ~ "{" ~ process ~ "}" }
+
+object    = { name }
+subject   = { name }
+branch    = { name }

@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use base::{Context, Machine, Process, notation::*};
 use im::OrdMap;
+use parse::parse_program;
 use print::print_context;
 
 mod base;
@@ -11,11 +12,19 @@ mod print;
 mod parse;
 
 fn main() {
-    let mut machine = Machine {
+    match parse_program(CODE) {
+        Err(e) => println!("{:?}", e),
+        Ok(context) => {
+            for (name, def) in context.statics {
+                println!("define {} = {}\n", name, def);
+            }
+        }
+    }
+    /*let mut machine = Machine {
         log: Box::new(|tag: &'static str| println!("LOG: {}", tag)),
     };
-    /*let mut context = Context::empty();
-    let mut process = Arc::new(merger());*/
+    let mut context = Context::empty();
+    let mut process = Arc::new(merger());
     let (mut context, mut process) = stack();
 
     loop {
@@ -36,7 +45,7 @@ fn main() {
         };
 
         println!("-----");
-    }
+    }*/
 }
 
 fn atm() -> Process<&'static str> {
@@ -192,3 +201,39 @@ fn stack() -> (Context<&'static str>, Arc<Process<&'static str>>) {
         variables: OrdMap::new(),
     }, Arc::new(program))
 }
+
+static CODE: &'static str = r#"
+define drained = items {
+    items.case {
+        pop => {
+            items.empty;
+            items()
+        }
+        push => {
+            let above = stacked;
+            above(drained);
+            items <> above
+        }
+    }
+}
+
+define stacked = items {
+    items[under];
+    items[top];
+    items.case {
+        pop => {
+            items.item;
+            items(top);
+            items <> under
+        }
+        push => {
+            let above = stacked;
+            let self = stacked;
+            self(under);
+            self(top);
+            above(self);
+            items <> above
+        }
+    }
+}
+"#;

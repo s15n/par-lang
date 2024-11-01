@@ -76,7 +76,7 @@ pub enum Value<X: Clone + Ord> {
 
 #[derive(Clone, Debug)]
 pub struct Capture<X: Clone> {
-    variables: Vector<X>,
+    pub variables: Vector<X>,
 }
 
 #[derive(Clone, Debug, Default)]
