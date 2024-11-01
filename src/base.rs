@@ -109,6 +109,9 @@ impl<X: Ord + Clone> Context<X> {
 
     fn get(&mut self, name: &X) -> Result<Value<X>, RuntimeError<X>> {
         if let Some(value) = self.variables.get_mut(name).and_then(|v| v.pop_back()) {
+            if self.variables.get(name).filter(|v| !v.is_empty()).is_none() {
+                self.variables.remove(name);
+            }
             return Ok(value);
         }
         if let Some(definition) = self.statics.get(name) {
