@@ -1,8 +1,11 @@
 use crate::base::{Context, Value};
 
-pub fn print_context<X: Clone + Ord + std::fmt::Debug + std::fmt::Display>(
+pub fn print_context<
+    I: std::fmt::Debug + std::fmt::Display,
+    X: std::fmt::Debug,
+>(
     w: &mut impl std::fmt::Write,
-    context: &Context<X>,
+    context: &Context<I, X>,
     level: usize,
 ) -> std::fmt::Result {
     for (name, values) in &context.variables {
@@ -16,9 +19,12 @@ pub fn print_context<X: Clone + Ord + std::fmt::Debug + std::fmt::Display>(
     Ok(())
 }
 
-pub fn print_value<X: Clone + Ord + std::fmt::Debug + std::fmt::Display>(
+pub fn print_value<
+    I: std::fmt::Debug + std::fmt::Display,
+    X: std::fmt::Debug,
+>(
     w: &mut impl std::fmt::Write,
-    value: &Value<X>,
+    value: &Value<I, X>,
     level: usize,
 ) -> std::fmt::Result {
     write!(w, "{}", value)?;

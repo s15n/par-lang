@@ -1,6 +1,5 @@
 use std::{cmp::Ordering, sync::Arc};
 
-use im::Vector;
 use pest::{
     error::LineColLocation,
     iterators::{Pair, Pairs},
@@ -32,7 +31,7 @@ pub struct Location {
 #[grammar = "par.pest"]
 pub struct Par;
 
-pub fn parse_program(source: &str) -> Result<Context<Arc<Name>>, ParseError> {
+pub fn parse_program<X>(source: &str) -> Result<Context<Arc<Name>, X>, ParseError> {
     let mut context = Context::empty();
     for pair in Par::parse(Rule::program, source)?
         .next()
@@ -43,7 +42,7 @@ pub fn parse_program(source: &str) -> Result<Context<Arc<Name>>, ParseError> {
             continue;
         }
         let mut pairs = pair.into_inner();
-        let mut free = Vector::new();
+        let mut free = Vec::new();
         let name = parse_name(&mut pairs)?;
         let expr = parse_expression(&mut pairs, &mut free)?;
         if let Some(_) = context.statics.insert(name.clone(), expr) {
@@ -63,7 +62,7 @@ fn parse_name(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Name>, ParseError> {
 
 fn parse_expression(
     pairs: &mut Pairs<'_, Rule>,
-    free: &mut Vector<Arc<Name>>,
+    free: &mut Vec<Arc<Name>>,
 ) -> Result<Arc<Expression<Arc<Name>>>, ParseError> {
     let pair = pairs.next().unwrap().into_inner().next().unwrap();
     match pair.as_rule() {
@@ -71,8 +70,8 @@ fn parse_expression(
             let mut pairs = pair.into_inner();
             let object = parse_name(&mut pairs)?;
             let process = parse_process(&mut pairs, free)?;
-            if let Some(index) = free.index_of(&object) {
-                free.remove(index);
+            if let Some(index) = free.iter().position(|v| v == &object) {
+                free.swap_remove(index);
             }
             Ok(Arc::new(Expression::Fork(
                 Capture {
@@ -84,7 +83,7 @@ fn parse_expression(
         }
         Rule::reference => {
             let name = Arc::new(pair.into());
-            free.push_back(Arc::clone(&name));
+            free.push(Arc::clone(&name));
             Ok(Arc::new(Expression::Ref(name)))
         }
         _ => unreachable!(),
@@ -93,7 +92,7 @@ fn parse_expression(
 
 fn parse_process(
     pairs: &mut Pairs<'_, Rule>,
-    free: &mut Vector<Arc<Name>>,
+    free: &mut Vec<Arc<Name>>,
 ) -> Result<Arc<Process<Arc<Name>>>, ParseError> {
     let pair = pairs.next().unwrap().into_inner().next().unwrap();
     let rule = pair.as_rule();
@@ -103,26 +102,26 @@ fn parse_process(
             let name = parse_name(&mut pairs)?;
             let expr = parse_expression(&mut pairs, free)?;
             let proc = parse_process(&mut pairs, free)?;
-            if let Some(index) = free.index_of(&name) {
-                free.remove(index);
+            if let Some(index) = free.iter().position(|v| v == &name) {
+                free.swap_remove(index);
             }
             Ok(Arc::new(Process::Let(name, expr, proc)))
         }
         Rule::p_link => {
             let subject = parse_name(&mut pairs)?;
             let argument = parse_expression(&mut pairs, free)?;
-            free.push_back(subject.clone());
+            free.push(subject.clone());
             Ok(Arc::new(Process::Link(subject, argument)))
         }
         Rule::p_break => {
             let subject = parse_name(&mut pairs)?;
-            free.push_back(subject.clone());
+            free.push(subject.clone());
             Ok(Arc::new(Process::Do(subject, Command::Break)))
         }
         Rule::p_continue => {
             let subject = parse_name(&mut pairs)?;
             let then = parse_process(&mut pairs, free)?;
-            free.push_back(subject.clone());
+            free.push(subject.clone());
             Ok(Arc::new(Process::Do(subject, Command::Continue(then))))
         }
         Rule::p_send => {
@@ -138,8 +137,8 @@ fn parse_process(
             let subject = parse_name(&mut pairs)?;
             let parameter = parse_name(&mut pairs)?;
             let then = parse_process(&mut pairs, free)?;
-            if let Some(index) = free.index_of(&parameter) {
-                free.remove(index);
+            if let Some(index) = free.iter().position(|v| v == &parameter) {
+                free.swap_remove(index);
             }
             Ok(Arc::new(Process::Do(
                 subject,
@@ -159,15 +158,15 @@ fn parse_process(
             let subject = parse_name(&mut pairs)?;
             let pair = pairs.next().unwrap();
             assert_eq!(pair.as_rule(), Rule::p_branches);
-            let mut branches = Vector::new();
+            let mut branches = Vec::new();
             for mut pairs in pair.into_inner().map(Pair::into_inner) {
                 let branch = parse_name(&mut pairs)?;
                 let process = parse_process(&mut pairs, free)?;
-                branches.push_back((branch, process));
+                branches.push((branch, process));
             }
             let otherwise = match pairs.next() {
-                Some(pair) => parse_process(&mut Pairs::single(pair), free)?,
-                None => Arc::new(Process::Do(subject.clone(), Command::Exhaust)),
+                Some(pair) => Some(parse_process(&mut Pairs::single(pair), free)?),
+                None => None,
             };
             Ok(Arc::new(Process::Do(
                 subject,
