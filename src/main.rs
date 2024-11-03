@@ -3,6 +3,7 @@
 use parse::parse_program;
 
 mod base;
+mod interact;
 mod parse;
 mod print;
 

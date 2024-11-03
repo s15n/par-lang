@@ -69,6 +69,21 @@ pub enum Value<I, X> {
 }
 
 #[derive(Clone, Debug)]
+pub enum Request<I, X> {
+    Break,
+    Continue,
+    Send(Value<I, X>),
+    Receive,
+    Select(I),
+    Case(Vec<I>, Option<()>),
+}
+
+pub enum Response<I, X> {
+    Receive(Value<I, X>),
+    Case(Option<I>),
+}
+
+#[derive(Clone, Debug)]
 pub struct Capture<I> {
     pub variables: Vec<I>,
 }
@@ -127,6 +142,17 @@ impl<I: Clone + Ord, X> Context<I, X> {
             }
         }
         Ok(captured)
+    }
+}
+
+pub struct Running<I, X> {
+    pub context: Context<I, X>,
+    pub process: Arc<Process<I>>,
+}
+
+impl<I, X> Running<I, X> {
+    pub fn some(context: Context<I, X>, process: Arc<Process<I>>) -> Option<Self> {
+        Some(Self { context, process })
     }
 }
 
@@ -226,15 +252,18 @@ pub fn evaluate<I: Clone + Ord, X>(
     }
 }
 
-pub fn step<I: Clone + Ord, X>(
-    mut context: Context<I, X>,
-    process: Arc<Process<I>>,
-) -> Result<(Context<I, X>, Arc<Process<I>>), RuntimeError<I, X>> {
+pub fn step<I: Clone + Ord, X: Clone + Ord>(
+    Running {
+        mut context,
+        process,
+    }: Running<I, X>,
+    responses: &mut BTreeMap<X, Response<I, X>>,
+) -> Result<(Option<Running<I, X>>, Option<(X, Request<I, X>)>), RuntimeError<I, X>> {
     match process.as_ref() {
         Process::Let(name, expression, process) => {
             let (mut context, value) = evaluate(context, Arc::clone(expression))?;
             context.set(name, value)?;
-            Ok((context, Arc::clone(process)))
+            Ok((Running::some(context, Arc::clone(process)), None))
         }
 
         Process::Link(name, expression) => {
@@ -248,7 +277,7 @@ pub fn step<I: Clone + Ord, X>(
                 (Value::Suspend(mut context, name, process), value)
                 | (value, Value::Suspend(mut context, name, process)) => {
                     context.set(&name, value)?;
-                    Ok((context, process))
+                    Ok((Running::some(context, process), None))
                 }
 
                 (left, right) => Err(RuntimeError::CannotLink(left, right)),
@@ -257,6 +286,87 @@ pub fn step<I: Clone + Ord, X>(
 
         Process::Do(name, command) => {
             let target = context.get(name)?;
+
+            if let Value::External(ext) = target {
+                return match command {
+                    Command::Break => {
+                        if !context.variables.is_empty() {
+                            return Err(RuntimeError::Unused(context));
+                        }
+                        drop(context);
+                        Ok((None, Some((ext, Request::Break))))
+                    }
+
+                    Command::Continue(then) => Ok((
+                        Running::some(context, Arc::clone(then)),
+                        Some((ext, Request::Continue)),
+                    )),
+
+                    Command::Send(argument, after_send) => {
+                        let (mut context, argument) = evaluate(context, Arc::clone(argument))?;
+                        context.set(name, Value::External(ext.clone()))?;
+                        Ok((
+                            Running::some(context, Arc::clone(after_send)),
+                            Some((ext, Request::Send(argument))),
+                        ))
+                    }
+
+                    Command::Receive(parameter, after_receive) => match responses.remove(&ext) {
+                        Some(Response::Receive(argument)) => {
+                            context.set(parameter, argument)?;
+                            context.set(name, Value::External(ext))?;
+                            Ok((Running::some(context, Arc::clone(after_receive)), None))
+                        }
+                        Some(_) => Err(command.cannot(Value::External(ext))),
+                        None => {
+                            context.set(name, Value::External(ext.clone()))?;
+                            Ok((
+                                Running::some(context, Arc::clone(&process)),
+                                Some((ext, Request::Receive)),
+                            ))
+                        }
+                    },
+
+                    Command::Select(selected, after_select) => {
+                        context.set(name, Value::External(ext.clone()))?;
+                        Ok((
+                            Running::some(context, Arc::clone(after_select)),
+                            Some((ext, Request::Select(selected.clone()))),
+                        ))
+                    }
+
+                    Command::Case(branches, otherwise) => match responses.remove(&ext) {
+                        Some(Response::Case(selected)) => {
+                            for (branch, then) in branches {
+                                if selected.as_ref() == Some(branch) {
+                                    context.set(name, Value::External(ext))?;
+                                    return Ok((Running::some(context, Arc::clone(then)), None));
+                                }
+                            }
+                            let Some(otherwise) = otherwise else {
+                                return Err(command.cannot(Value::External(ext)));
+                            };
+                            context.set(name, Value::External(ext))?;
+                            Ok((Running::some(context, Arc::clone(otherwise)), None))
+                        }
+                        Some(_) => Err(command.cannot(Value::External(ext))),
+                        None => {
+                            context.set(name, Value::External(ext.clone()))?;
+                            Ok((
+                                Running::some(context, Arc::clone(&process)),
+                                Some((
+                                    ext,
+                                    Request::Case(
+                                        branches.iter().map(|(branch, _)| branch.clone()).collect(),
+                                        otherwise.as_ref().map(|_| ()),
+                                    ),
+                                )),
+                            ))
+                        }
+                    },
+                };
+            }
+
             let Value::Suspend(mut target_context, channel, target_process) = target else {
                 return Err(command.cannot(target));
             };
@@ -264,7 +374,7 @@ pub fn step<I: Clone + Ord, X>(
                 Process::Do(head, command) if head == &channel => command,
                 _ => {
                     target_context.set(&channel, Value::Suspend(context, name.clone(), process))?;
-                    return Ok((target_context, target_process));
+                    return Ok((Running::some(target_context, target_process), None));
                 }
             };
 
@@ -284,7 +394,7 @@ pub fn step<I: Clone + Ord, X>(
                         return Err(RuntimeError::Unused(break_context));
                     }
                     drop(break_context);
-                    Ok((continue_context, Arc::clone(then)))
+                    Ok((Running::some(continue_context, Arc::clone(then)), None))
                 }
 
                 (
@@ -302,7 +412,7 @@ pub fn step<I: Clone + Ord, X>(
                         name,
                         Value::Suspend(receive_context, channel.clone(), Arc::clone(after_receive)),
                     )?;
-                    Ok((send_context, Arc::clone(after_send)))
+                    Ok((Running::some(send_context, Arc::clone(after_send)), None))
                 }
 
                 (
@@ -319,7 +429,10 @@ pub fn step<I: Clone + Ord, X>(
                                 name,
                                 Value::Suspend(handle_context, channel.clone(), Arc::clone(then)),
                             )?;
-                            return Ok((select_context, Arc::clone(after_select)));
+                            return Ok((
+                                Running::some(select_context, Arc::clone(after_select)),
+                                None,
+                            ));
                         }
                     }
                     let Some(otherwise) = otherwise else {
@@ -346,7 +459,7 @@ pub fn step<I: Clone + Ord, X>(
                             )),
                         ),
                     )?;
-                    Ok((handle_context, Arc::clone(otherwise)))
+                    Ok((Running::some(handle_context, Arc::clone(otherwise)), None))
                 }
 
                 (_, (target_context, channel, command)) => Err(command.cannot(Value::Suspend(
@@ -401,9 +514,7 @@ impl<I: std::fmt::Display> std::fmt::Display for Process<I> {
     }
 }
 
-impl<I: std::fmt::Display, X: std::fmt::Debug> std::fmt::Display
-    for Value<I, X>
-{
+impl<I: std::fmt::Display, X: std::fmt::Debug> std::fmt::Display for Value<I, X> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Suspend(_, name, process) => write!(f, "{}{{ {} }}", name, process),
