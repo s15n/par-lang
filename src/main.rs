@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use eframe::egui;
 use playground::Playground;
 

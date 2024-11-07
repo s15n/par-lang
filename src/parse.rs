@@ -23,9 +23,12 @@ impl Name {
 #[derive(Clone, Debug)]
 pub struct ParseError {
     pub message: String,
+
+    #[allow(unused)]
     pub location: Location,
 }
 
+#[allow(unused)]
 #[derive(Clone, Debug)]
 pub struct Location {
     pub line: usize,

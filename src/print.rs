@@ -1,5 +1,6 @@
 use crate::base::{Context, Value};
 
+#[allow(unused)]
 pub fn print_context<I: std::fmt::Display, X: std::fmt::Display>(
     w: &mut impl std::fmt::Write,
     context: &Context<I, X>,

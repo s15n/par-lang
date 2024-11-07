@@ -1,9 +1,9 @@
-#![allow(dead_code)]
-
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
+
+use crate::print::print_context;
 
 #[derive(Clone, Debug)]
 pub enum RuntimeError<I, X> {
@@ -70,13 +70,15 @@ pub enum Value<I, X> {
     External(X),
 }
 
-impl<I: Ord, X: Clone> Value<I, X> {
-    fn state(&self) -> ValueState<X> {
+impl<I: Ord, X: Clone + Ord> Value<I, X> {
+    fn value_state(&self) -> ValueState<X> {
         match self {
             Value::Suspend(context, channel, process) => match process.as_ref() {
                 Process::Do(subject, _) if subject == channel => ValueState::HeadNormal,
                 Process::Do(subject, Command::Case(_, _) | Command::Receive(_, _)) => {
                     if let Some(Value::External(ext)) = context.variables.get(subject) {
+                        ValueState::BlockingOn(BTreeSet::from([ext.clone()]))
+                    } else if let Some(ext) = context.state.blocking_on.get(subject) {
                         ValueState::BlockingOn(ext.clone())
                     } else {
                         ValueState::Unnormalized
@@ -85,6 +87,13 @@ impl<I: Ord, X: Clone> Value<I, X> {
                 _ => ValueState::Unnormalized,
             },
             Value::External(_) => ValueState::HeadNormal,
+        }
+    }
+
+    fn context_state(&self) -> Option<&ContextState<I, X>> {
+        match self {
+            Value::Suspend(context, _, _) => Some(&context.state),
+            Value::External(_) => None,
         }
     }
 }
@@ -118,12 +127,11 @@ pub struct Capture<I> {
     pub variables: BTreeSet<I>,
 }
 
-//FIXME: this is insufficient
 #[derive(Clone, Debug)]
 pub enum ValueState<X> {
     Unnormalized,
     HeadNormal,
-    BlockingOn(X),
+    BlockingOn(BTreeSet<X>),
 }
 
 #[derive(Clone, Debug)]
@@ -136,15 +144,13 @@ pub struct Context<I, X> {
 #[derive(Clone, Debug)]
 struct ContextState<I, X> {
     unnormalized: BTreeSet<I>,
-    head_normal: BTreeSet<I>,
-    blocking_on: BTreeMap<X, I>,
+    blocking_on: BTreeMap<I, BTreeSet<X>>,
 }
 
 impl<I, X> ContextState<I, X> {
     fn new() -> Self {
         Self {
             unnormalized: BTreeSet::new(),
-            head_normal: BTreeSet::new(),
             blocking_on: BTreeMap::new(),
         }
     }
@@ -165,16 +171,30 @@ impl<I: Clone + Ord, X: Clone + Ord> Context<I, X> {
         if let Some(_) = self.variables.remove(name) {
             return Err(RuntimeError::AlreadyDefined(name.clone()));
         }
-        match value.state() {
+        if let Some(context_state) = value.context_state() {
+            if !context_state.unnormalized.is_empty() {
+                self.state.unnormalized.insert(name.clone());
+            }
+            for (_, exts) in &context_state.blocking_on {
+                self.state
+                    .blocking_on
+                    .entry(name.clone())
+                    .or_default()
+                    .extend(exts.iter().cloned());
+            }
+        }
+        match value.value_state() {
             ValueState::Unnormalized => {
                 self.state.unnormalized.insert(name.clone());
             }
-            ValueState::HeadNormal => {
-                self.state.head_normal.insert(name.clone());
+            ValueState::BlockingOn(exts) => {
+                self.state
+                    .blocking_on
+                    .entry(name.clone())
+                    .or_default()
+                    .extend(exts);
             }
-            ValueState::BlockingOn(ext) => {
-                self.state.blocking_on.insert(ext.clone(), name.clone());
-            }
+            _ => (),
         }
         self.variables.insert(name.clone(), value);
         Ok(())
@@ -182,17 +202,8 @@ impl<I: Clone + Ord, X: Clone + Ord> Context<I, X> {
 
     pub fn get(&mut self, name: &I) -> Result<Value<I, X>, RuntimeError<I, X>> {
         if let Some(value) = self.variables.remove(name) {
-            match value.state() {
-                ValueState::Unnormalized => {
-                    self.state.unnormalized.remove(name);
-                }
-                ValueState::HeadNormal => {
-                    self.state.head_normal.remove(name);
-                }
-                ValueState::BlockingOn(ext) => {
-                    self.state.blocking_on.remove(&ext);
-                }
-            }
+            self.state.unnormalized.remove(name);
+            self.state.blocking_on.remove(name);
             return Ok(value);
         }
         if let Some(definition) = self.statics.get(name) {
@@ -225,12 +236,13 @@ impl<I: Clone + Ord, X: Clone + Ord> Context<I, X> {
     }
 
     pub fn get_unblocked(&self, responses: &BTreeMap<X, Response<I, X>>) -> Option<I> {
+        let available = responses.keys().cloned().collect::<BTreeSet<_>>();
         self.state.unnormalized.first().cloned().or_else(|| {
             self.state
                 .blocking_on
                 .iter()
-                .filter(|&(ext, _)| responses.contains_key(ext))
-                .map(|(_, name)| name)
+                .filter(|&(_, exts)| !exts.is_disjoint(&available))
+                .map(|(name, _)| name)
                 .cloned()
                 .next()
         })
@@ -248,28 +260,36 @@ impl<I, X> Running<I, X> {
     }
 }
 
-pub fn run_to_suspension<I: Clone + Ord, X: Clone + Ord>(
+pub fn run_to_suspension<I: Clone + Ord + std::fmt::Display, X: Clone + Ord + std::fmt::Display>(
     mut running: Running<I, X>,
     responses: &mut BTreeMap<X, Response<I, X>>,
 ) -> Result<(Option<Running<I, X>>, Vec<(X, Request<I, X>)>), RuntimeError<I, X>> {
     let mut requests = Vec::new();
+    let mut head_normal = false;
 
     loop {
-        loop {
-            let (new_running, request) = step(running, responses)?;
-            let block = match request {
-                Some((ext, req)) => {
-                    requests.push((ext, req.clone()));
-                    req.is_blocking()
+        let mut buf = String::new();
+        let _ = print_context(&mut buf, &running.context, 0);
+        println!("{}\n{}", buf, running.process);
+        println!("---");
+
+        if !head_normal {
+            loop {
+                let (new_running, request) = step(running, responses)?;
+                let block = match request {
+                    Some((ext, req)) => {
+                        requests.push((ext, req.clone()));
+                        req.is_blocking()
+                    }
+                    None => false,
+                };
+                running = match new_running {
+                    Some(new) => new,
+                    None => return Ok((None, requests)),
+                };
+                if block {
+                    break;
                 }
-                None => false,
-            };
-            running = match new_running {
-                Some(new) => new,
-                None => return Ok((None, requests)),
-            };
-            if block {
-                break;
             }
         }
 
@@ -277,8 +297,11 @@ pub fn run_to_suspension<I: Clone + Ord, X: Clone + Ord>(
             return Ok((Some(running), requests));
         };
 
-        let Ok(Value::Suspend(mut context, channel, process)) = running.context.get(&unblocked)
-        else {
+        let Ok(value) = running.context.get(&unblocked) else {
+            unreachable!();
+        };
+        head_normal = matches!(value.value_state(), ValueState::HeadNormal);
+        let Value::Suspend(mut context, channel, process) = value else {
             unreachable!();
         };
 
@@ -623,10 +646,17 @@ impl<I: std::fmt::Display, X: std::fmt::Display> std::fmt::Display for RuntimeEr
                 write!(f, "cannot receive from\n--> {}", value)
             }
             RuntimeError::MissingCase(value, branch) => {
-                write!(f, "missing case {}\n--> {}", branch, value)
+                write!(f, "missing case {} in\n--> {}", branch, value)
             }
-            RuntimeError::CannotSelectFrom(value, _) => {
-                write!(f, "cannot select from\n--> {}", value)
+            RuntimeError::CannotSelectFrom(value, branches) => {
+                write!(f, "cannot select from [")?;
+                for (i, branch) in branches.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", branch)?;
+                }
+                write!(f, "] in\n--> {}", value)
             }
         }
     }
