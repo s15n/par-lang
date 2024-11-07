@@ -3,8 +3,6 @@ use std::{
     sync::Arc,
 };
 
-use crate::print::print_context;
-
 #[derive(Clone, Debug)]
 pub enum RuntimeError<I, X> {
     DoesNotExist(I),
@@ -260,7 +258,7 @@ impl<I, X> Running<I, X> {
     }
 }
 
-pub fn run_to_suspension<I: Clone + Ord + std::fmt::Display, X: Clone + Ord + std::fmt::Display>(
+pub fn run_to_suspension<I: Clone + Ord, X: Clone + Ord>(
     mut running: Running<I, X>,
     responses: &mut BTreeMap<X, Response<I, X>>,
 ) -> Result<(Option<Running<I, X>>, Vec<(X, Request<I, X>)>), RuntimeError<I, X>> {
@@ -268,11 +266,6 @@ pub fn run_to_suspension<I: Clone + Ord + std::fmt::Display, X: Clone + Ord + st
     let mut head_normal = false;
 
     loop {
-        let mut buf = String::new();
-        let _ = print_context(&mut buf, &running.context, 0);
-        println!("{}\n{}", buf, running.process);
-        println!("---");
-
         if !head_normal {
             loop {
                 let (new_running, request) = step(running, responses)?;

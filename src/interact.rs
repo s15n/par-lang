@@ -32,7 +32,7 @@ pub enum Event<I, X> {
     Case(I),
 }
 
-impl<I: Clone + Ord + std::fmt::Display> Environment<I> {
+impl<I: Clone + Ord> Environment<I> {
     pub fn new(
         mut context: Context<I, External>,
         program: &I,

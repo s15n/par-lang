@@ -22,8 +22,9 @@ impl Playground {
             style.text_styles.extend([
                 (egui::TextStyle::Monospace, egui::FontId::monospace(16.0)),
                 (egui::TextStyle::Button, egui::FontId::monospace(18.0)),
-                (egui::TextStyle::Body, egui::FontId::monospace(16.0)),
+                (egui::TextStyle::Body, egui::FontId::proportional(16.0)),
             ]);
+            style.visuals.code_bg_color = egui::Color32::TRANSPARENT;
         });
         Box::new(Self {
             code: DEFAULT_CODE.to_string(),
@@ -45,12 +46,6 @@ impl eframe::App for Playground {
                     ui.horizontal_top(|ui| {
                         if ui.button(RichText::new("PARSE").strong()).clicked() {
                             self.parsed = Some(parse_program(self.code.as_str()));
-                            if let Some(Ok(context)) = &self.parsed {
-                                for (name, def) in &context.statics {
-                                    println!("{} = {}\n", name, def);
-                                }
-                                println!("---");
-                            }
                         }
 
                         if let Some(Ok(context)) = &self.parsed {
