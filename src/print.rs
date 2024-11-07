@@ -1,22 +1,20 @@
 use crate::base::{Context, Value};
 
-pub fn print_context<I: std::fmt::Debug + std::fmt::Display, X: std::fmt::Debug>(
+pub fn print_context<I: std::fmt::Display, X: std::fmt::Display>(
     w: &mut impl std::fmt::Write,
     context: &Context<I, X>,
     level: usize,
 ) -> std::fmt::Result {
-    for (name, values) in &context.variables {
-        for value in values {
-            write!(w, "\n")?;
-            indent(w, level)?;
-            write!(w, "{} = ", name)?;
-            print_value(w, value, level)?;
-        }
+    for (name, value) in &context.variables {
+        write!(w, "\n")?;
+        indent(w, level)?;
+        write!(w, "{} = ", name)?;
+        print_value(w, value, level)?;
     }
     Ok(())
 }
 
-pub fn print_value<I: std::fmt::Debug + std::fmt::Display, X: std::fmt::Debug>(
+pub fn print_value<I: std::fmt::Display, X: std::fmt::Display>(
     w: &mut impl std::fmt::Write,
     value: &Value<I, X>,
     level: usize,

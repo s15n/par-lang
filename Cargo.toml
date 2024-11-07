@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 pest = "2.7.14"
 pest_derive = "2.7.14"
+eframe = { version = "0.29.1", features = ["default", "__screenshot"] }

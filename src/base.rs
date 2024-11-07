@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 #[derive(Clone, Debug)]
 pub enum RuntimeError<I, X> {
@@ -8,7 +11,6 @@ pub enum RuntimeError<I, X> {
     AlreadyDefined(I),
     Unused(Context<I, X>),
 
-    CannotLog(Value<I, X>),
     CannotLink(Value<I, X>, Value<I, X>),
     CannotBreakTo(Value<I, X>),
     CannotContinueFrom(Value<I, X>),
@@ -68,6 +70,25 @@ pub enum Value<I, X> {
     External(X),
 }
 
+impl<I: Ord, X: Clone> Value<I, X> {
+    fn state(&self) -> ValueState<X> {
+        match self {
+            Value::Suspend(context, channel, process) => match process.as_ref() {
+                Process::Do(subject, _) if subject == channel => ValueState::HeadNormal,
+                Process::Do(subject, Command::Case(_, _) | Command::Receive(_, _)) => {
+                    if let Some(Value::External(ext)) = context.variables.get(subject) {
+                        ValueState::BlockingOn(ext.clone())
+                    } else {
+                        ValueState::Unnormalized
+                    }
+                }
+                _ => ValueState::Unnormalized,
+            },
+            Value::External(_) => ValueState::HeadNormal,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Request<I, X> {
     Break,
@@ -78,6 +99,15 @@ pub enum Request<I, X> {
     Case(Vec<I>, Option<()>),
 }
 
+impl<I, X> Request<I, X> {
+    pub fn is_blocking(&self) -> bool {
+        match self {
+            Self::Receive | Self::Case(_, _) => true,
+            _ => false,
+        }
+    }
+}
+
 pub enum Response<I, X> {
     Receive(Value<I, X>),
     Case(Option<I>),
@@ -85,33 +115,83 @@ pub enum Response<I, X> {
 
 #[derive(Clone, Debug)]
 pub struct Capture<I> {
-    pub variables: Vec<I>,
+    pub variables: BTreeSet<I>,
 }
 
-#[derive(Clone, Debug, Default)]
+//FIXME: this is insufficient
+#[derive(Clone, Debug)]
+pub enum ValueState<X> {
+    Unnormalized,
+    HeadNormal,
+    BlockingOn(X),
+}
+
+#[derive(Clone, Debug)]
 pub struct Context<I, X> {
     pub statics: BTreeMap<I, Arc<Expression<I>>>,
-    pub variables: BTreeMap<I, Vec<Value<I, X>>>,
+    pub variables: BTreeMap<I, Value<I, X>>,
+    state: ContextState<I, X>,
 }
 
-impl<I, X> Context<I, X> {
-    pub fn empty() -> Self {
+#[derive(Clone, Debug)]
+struct ContextState<I, X> {
+    unnormalized: BTreeSet<I>,
+    head_normal: BTreeSet<I>,
+    blocking_on: BTreeMap<X, I>,
+}
+
+impl<I, X> ContextState<I, X> {
+    fn new() -> Self {
         Self {
-            statics: BTreeMap::new(),
-            variables: BTreeMap::new(),
+            unnormalized: BTreeSet::new(),
+            head_normal: BTreeSet::new(),
+            blocking_on: BTreeMap::new(),
         }
     }
 }
 
-impl<I: Clone + Ord, X> Context<I, X> {
-    fn set(&mut self, name: &I, value: Value<I, X>) -> Result<(), RuntimeError<I, X>> {
-        Ok(self.variables.entry(name.clone()).or_default().push(value))
+impl<I, X> Context<I, X> {
+    pub fn new() -> Self {
+        Self {
+            statics: BTreeMap::new(),
+            variables: BTreeMap::new(),
+            state: ContextState::new(),
+        }
+    }
+}
+
+impl<I: Clone + Ord, X: Clone + Ord> Context<I, X> {
+    pub fn set(&mut self, name: &I, value: Value<I, X>) -> Result<(), RuntimeError<I, X>> {
+        if let Some(_) = self.variables.remove(name) {
+            return Err(RuntimeError::AlreadyDefined(name.clone()));
+        }
+        match value.state() {
+            ValueState::Unnormalized => {
+                self.state.unnormalized.insert(name.clone());
+            }
+            ValueState::HeadNormal => {
+                self.state.head_normal.insert(name.clone());
+            }
+            ValueState::BlockingOn(ext) => {
+                self.state.blocking_on.insert(ext.clone(), name.clone());
+            }
+        }
+        self.variables.insert(name.clone(), value);
+        Ok(())
     }
 
-    fn get(&mut self, name: &I) -> Result<Value<I, X>, RuntimeError<I, X>> {
-        if let Some(value) = self.variables.get_mut(name).and_then(|v| v.pop()) {
-            if self.variables.get(name).filter(|v| !v.is_empty()).is_none() {
-                self.variables.remove(name);
+    pub fn get(&mut self, name: &I) -> Result<Value<I, X>, RuntimeError<I, X>> {
+        if let Some(value) = self.variables.remove(name) {
+            match value.state() {
+                ValueState::Unnormalized => {
+                    self.state.unnormalized.remove(name);
+                }
+                ValueState::HeadNormal => {
+                    self.state.head_normal.remove(name);
+                }
+                ValueState::BlockingOn(ext) => {
+                    self.state.blocking_on.remove(&ext);
+                }
             }
             return Ok(value);
         }
@@ -120,6 +200,7 @@ impl<I: Clone + Ord, X> Context<I, X> {
                 Context {
                     statics: self.statics.clone(),
                     variables: BTreeMap::new(),
+                    state: ContextState::new(),
                 },
                 Arc::clone(definition),
             )?
@@ -128,20 +209,31 @@ impl<I: Clone + Ord, X> Context<I, X> {
         Err(RuntimeError::DoesNotExist(name.clone()))
     }
 
-    fn extract(&mut self, capture: &Capture<I>) -> Result<Context<I, X>, RuntimeError<I, X>> {
+    pub fn extract(&mut self, capture: &Capture<I>) -> Result<Context<I, X>, RuntimeError<I, X>> {
         let mut captured = Context {
             statics: self.statics.clone(),
             variables: BTreeMap::new(),
+            state: ContextState::new(),
         };
         for name in &capture.variables {
-            let Some(value) = self.variables.remove(name) else {
-                return Err(RuntimeError::DoesNotExist(name.clone()));
-            };
-            if let Some(_) = captured.variables.insert(name.clone(), value) {
-                return Err(RuntimeError::AlreadyDefined(name.clone()));
+            if !self.variables.contains_key(name) && self.statics.contains_key(name) {
+                continue;
             }
+            captured.set(name, self.get(name)?)?;
         }
         Ok(captured)
+    }
+
+    pub fn get_unblocked(&self, responses: &BTreeMap<X, Response<I, X>>) -> Option<I> {
+        self.state.unnormalized.first().cloned().or_else(|| {
+            self.state
+                .blocking_on
+                .iter()
+                .filter(|&(ext, _)| responses.contains_key(ext))
+                .map(|(_, name)| name)
+                .cloned()
+                .next()
+        })
     }
 }
 
@@ -156,7 +248,49 @@ impl<I, X> Running<I, X> {
     }
 }
 
-pub fn evaluate<I: Clone + Ord, X>(
+pub fn run_to_suspension<I: Clone + Ord, X: Clone + Ord>(
+    mut running: Running<I, X>,
+    responses: &mut BTreeMap<X, Response<I, X>>,
+) -> Result<(Option<Running<I, X>>, Vec<(X, Request<I, X>)>), RuntimeError<I, X>> {
+    let mut requests = Vec::new();
+
+    loop {
+        loop {
+            let (new_running, request) = step(running, responses)?;
+            let block = match request {
+                Some((ext, req)) => {
+                    requests.push((ext, req.clone()));
+                    req.is_blocking()
+                }
+                None => false,
+            };
+            running = match new_running {
+                Some(new) => new,
+                None => return Ok((None, requests)),
+            };
+            if block {
+                break;
+            }
+        }
+
+        let Some(unblocked) = running.context.get_unblocked(responses) else {
+            return Ok((Some(running), requests));
+        };
+
+        let Ok(Value::Suspend(mut context, channel, process)) = running.context.get(&unblocked)
+        else {
+            unreachable!();
+        };
+
+        context.set(
+            &channel,
+            Value::Suspend(running.context, unblocked, running.process),
+        )?;
+        running = Running { context, process };
+    }
+}
+
+pub fn evaluate<I: Clone + Ord, X: Clone + Ord>(
     mut context: Context<I, X>,
     expression: Arc<Expression<I>>,
 ) -> Result<(Context<I, X>, Value<I, X>), RuntimeError<I, X>> {
@@ -400,7 +534,15 @@ impl<I: std::fmt::Display> std::fmt::Display for Expression<I> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Expression::Ref(name) => write!(f, "{}", name),
-            Expression::Fork(_, name, process) => write!(f, "{}{{ {} }}", name, process),
+            Expression::Fork(capture, name, process) => {
+                let names = capture
+                    .variables
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                write!(f, "{}[{}]{{ {} }}", name, names, process)
+            }
         }
     }
 }
@@ -438,11 +580,54 @@ impl<I: std::fmt::Display> std::fmt::Display for Process<I> {
     }
 }
 
-impl<I: std::fmt::Display, X: std::fmt::Debug> std::fmt::Display for Value<I, X> {
+impl<I: std::fmt::Display, X: std::fmt::Display> std::fmt::Display for Value<I, X> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Suspend(_, name, process) => write!(f, "{}{{ {} }}", name, process),
-            Value::External(x) => write!(f, "#{{{:?}}}", x),
+            Value::Suspend(context, name, process) => {
+                let names = context
+                    .variables
+                    .keys()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                write!(f, "{}[{}]{{ {} }}", name, names, process)
+            }
+            Value::External(x) => write!(f, "{}", x),
+        }
+    }
+}
+
+impl<I: std::fmt::Display, X: std::fmt::Display> std::fmt::Display for RuntimeError<I, X> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RuntimeError::DoesNotExist(name) => write!(f, "{} does not exist", name),
+            RuntimeError::AlreadyDefined(name) => write!(f, "{} is already defined", name),
+            RuntimeError::Unused(context) => write!(
+                f,
+                "{} was not used",
+                context
+                    .variables
+                    .values()
+                    .next()
+                    .expect("no unused variables")
+            ),
+            RuntimeError::CannotLink(left, right) => {
+                write!(f, "cannot link\n--> {}\n--> {}", left, right)
+            }
+            RuntimeError::CannotBreakTo(value) => write!(f, "cannot break to\n--> {}", value),
+            RuntimeError::CannotContinueFrom(value) => {
+                write!(f, "cannot continue from\n--> {}", value)
+            }
+            RuntimeError::CannotSendTo(value) => write!(f, "cannot send to\n--> {}", value),
+            RuntimeError::CannotReceiveFrom(value) => {
+                write!(f, "cannot receive from\n--> {}", value)
+            }
+            RuntimeError::MissingCase(value, branch) => {
+                write!(f, "missing case {}\n--> {}", branch, value)
+            }
+            RuntimeError::CannotSelectFrom(value, _) => {
+                write!(f, "cannot select from\n--> {}", value)
+            }
         }
     }
 }

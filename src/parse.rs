@@ -1,30 +1,35 @@
-use std::{cmp::Ordering, sync::Arc};
+use std::{cmp::Ordering, collections::BTreeSet, sync::Arc};
 
-use pest::{
-    error::LineColLocation,
-    iterators::{Pair, Pairs},
-    Parser,
-};
+use pest::{error::LineColLocation, iterators::Pair, Parser};
 use pest_derive::Parser;
 
 use crate::base::{Capture, Command, Context, Expression, Process};
 
 #[derive(Clone, Debug)]
 pub struct Name {
-    string: String,
-    location: Location,
+    pub string: String,
+    pub location: Location,
+}
+
+impl Name {
+    pub fn of<S: AsRef<str>>(s: S) -> Arc<Self> {
+        Arc::new(Self {
+            string: String::from(s.as_ref()),
+            location: Location { line: 0, column: 0 },
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct ParseError {
-    message: String,
-    location: Location,
+    pub message: String,
+    pub location: Location,
 }
 
 #[derive(Clone, Debug)]
 pub struct Location {
-    line: usize,
-    column: usize,
+    pub line: usize,
+    pub column: usize,
 }
 
 #[derive(Parser)]
@@ -32,7 +37,7 @@ pub struct Location {
 pub struct Par;
 
 pub fn parse_program<X>(source: &str) -> Result<Context<Arc<Name>, X>, ParseError> {
-    let mut context = Context::empty();
+    let mut context = Context::new();
     for pair in Par::parse(Rule::program, source)?
         .next()
         .unwrap()
@@ -42,9 +47,11 @@ pub fn parse_program<X>(source: &str) -> Result<Context<Arc<Name>, X>, ParseErro
             continue;
         }
         let mut pairs = pair.into_inner();
-        let mut free = Vec::new();
-        let name = parse_name(&mut pairs)?;
-        let expr = parse_expression(&mut pairs, &mut free)?;
+
+        let (p1, p2) = (pairs.next().unwrap(), pairs.next().unwrap());
+        let expr = parse_expression(p2, &mut BTreeSet::new())?;
+        let name = parse_name(p1)?;
+
         if let Some(_) = context.statics.insert(name.clone(), expr) {
             return Err(ParseError {
                 message: format!("\"{}\" is already defined", name.string),
@@ -55,24 +62,25 @@ pub fn parse_program<X>(source: &str) -> Result<Context<Arc<Name>, X>, ParseErro
     Ok(context)
 }
 
-fn parse_name(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Name>, ParseError> {
-    let pair = pairs.next().unwrap();
+fn parse_name(pair: Pair<'_, Rule>) -> Result<Arc<Name>, ParseError> {
     Ok(Arc::new(pair.into()))
 }
 
 fn parse_expression(
-    pairs: &mut Pairs<'_, Rule>,
-    free: &mut Vec<Arc<Name>>,
+    pair: Pair<'_, Rule>,
+    free: &mut BTreeSet<Arc<Name>>,
 ) -> Result<Arc<Expression<Arc<Name>>>, ParseError> {
-    let pair = pairs.next().unwrap().into_inner().next().unwrap();
+    let pair = pair.into_inner().next().unwrap();
+
     match pair.as_rule() {
         Rule::fork => {
             let mut pairs = pair.into_inner();
-            let object = parse_name(&mut pairs)?;
-            let process = parse_process(&mut pairs, free)?;
-            if let Some(index) = free.iter().position(|v| v == &object) {
-                free.swap_remove(index);
-            }
+
+            let (p1, p2) = (pairs.next().unwrap(), pairs.next().unwrap());
+            let process = parse_process(p2, free)?;
+            let object = parse_name(p1)?;
+            free.remove(&object);
+
             Ok(Arc::new(Expression::Fork(
                 Capture {
                     variables: free.clone(),
@@ -83,7 +91,8 @@ fn parse_expression(
         }
         Rule::reference => {
             let name = Arc::new(pair.into());
-            free.push(Arc::clone(&name));
+            free.remove(&name);
+            free.replace(name.clone());
             Ok(Arc::new(Expression::Ref(name)))
         }
         _ => unreachable!(),
@@ -91,83 +100,126 @@ fn parse_expression(
 }
 
 fn parse_process(
-    pairs: &mut Pairs<'_, Rule>,
-    free: &mut Vec<Arc<Name>>,
+    pair: Pair<'_, Rule>,
+    free: &mut BTreeSet<Arc<Name>>,
 ) -> Result<Arc<Process<Arc<Name>>>, ParseError> {
-    let pair = pairs.next().unwrap().into_inner().next().unwrap();
+    let pair = pair.into_inner().next().unwrap();
     let rule = pair.as_rule();
     let mut pairs = pair.into_inner();
     match rule {
         Rule::p_let => {
-            let name = parse_name(&mut pairs)?;
-            let expr = parse_expression(&mut pairs, free)?;
-            let proc = parse_process(&mut pairs, free)?;
-            if let Some(index) = free.iter().position(|v| v == &name) {
-                free.swap_remove(index);
-            }
+            let (p1, p2, p3) = (
+                pairs.next().unwrap(),
+                pairs.next().unwrap(),
+                pairs.next().unwrap(),
+            );
+            let proc = parse_process(p3, free)?;
+            let mut expr_free = BTreeSet::new();
+            let expr = parse_expression(p2, &mut expr_free)?;
+            let name = parse_name(p1)?;
+            free.remove(&name);
+            free.extend(expr_free);
             Ok(Arc::new(Process::Let(name, expr, proc)))
         }
         Rule::p_link => {
-            let subject = parse_name(&mut pairs)?;
-            let argument = parse_expression(&mut pairs, free)?;
-            free.push(subject.clone());
+            let (p1, p2) = (pairs.next().unwrap(), pairs.next().unwrap());
+            let argument = parse_expression(p2, free)?;
+            let subject = parse_name(p1)?;
+            free.replace(subject.clone());
             Ok(Arc::new(Process::Link(subject, argument)))
         }
         Rule::p_break => {
-            let subject = parse_name(&mut pairs)?;
-            free.push(subject.clone());
+            let subject = parse_name(pairs.next().unwrap())?;
+            free.replace(subject.clone());
             Ok(Arc::new(Process::Do(subject, Command::Break)))
         }
         Rule::p_continue => {
-            let subject = parse_name(&mut pairs)?;
-            let then = parse_process(&mut pairs, free)?;
-            free.push(subject.clone());
+            let (p1, p2) = (pairs.next().unwrap(), pairs.next().unwrap());
+            let then = parse_process(p2, free)?;
+            let subject = parse_name(p1)?;
+            free.replace(subject.clone());
             Ok(Arc::new(Process::Do(subject, Command::Continue(then))))
         }
         Rule::p_send => {
-            let subject = parse_name(&mut pairs)?;
-            let argument = parse_expression(&mut pairs, free)?;
-            let then = parse_process(&mut pairs, free)?;
+            let (p1, p2, p3) = (
+                pairs.next().unwrap(),
+                pairs.next().unwrap(),
+                pairs.next().unwrap(),
+            );
+            let then = parse_process(p3, free)?;
+            let mut arg_free = BTreeSet::new();
+            let argument = parse_expression(p2, &mut arg_free)?;
+            let subject = parse_name(p1)?;
+            free.replace(subject.clone());
+            free.extend(arg_free);
             Ok(Arc::new(Process::Do(
                 subject,
                 Command::Send(argument, then),
             )))
         }
         Rule::p_receive => {
-            let subject = parse_name(&mut pairs)?;
-            let parameter = parse_name(&mut pairs)?;
-            let then = parse_process(&mut pairs, free)?;
-            if let Some(index) = free.iter().position(|v| v == &parameter) {
-                free.swap_remove(index);
-            }
+            let (p1, p2, p3) = (
+                pairs.next().unwrap(),
+                pairs.next().unwrap(),
+                pairs.next().unwrap(),
+            );
+            let then = parse_process(p3, free)?;
+            let parameter = parse_name(p2)?;
+            let subject = parse_name(p1)?;
+            free.remove(&parameter);
+            free.replace(subject.clone());
             Ok(Arc::new(Process::Do(
                 subject,
                 Command::Receive(parameter, then),
             )))
         }
         Rule::p_select => {
-            let subject = parse_name(&mut pairs)?;
-            let branch = parse_name(&mut pairs)?;
-            let then = parse_process(&mut pairs, free)?;
+            let (p1, p2, p3) = (
+                pairs.next().unwrap(),
+                pairs.next().unwrap(),
+                pairs.next().unwrap(),
+            );
+            let then = parse_process(p3, free)?;
+            let branch = parse_name(p2)?;
+            let subject = parse_name(p1)?;
+            free.replace(subject.clone());
             Ok(Arc::new(Process::Do(
                 subject,
                 Command::Select(branch, then),
             )))
         }
         Rule::p_case => {
-            let subject = parse_name(&mut pairs)?;
+            let subject = parse_name(pairs.next().unwrap())?;
             let pair = pairs.next().unwrap();
             assert_eq!(pair.as_rule(), Rule::p_branches);
+
             let mut branches = Vec::new();
+            let mut free_in_branches = Vec::new();
+
             for mut pairs in pair.into_inner().map(Pair::into_inner) {
-                let branch = parse_name(&mut pairs)?;
-                let process = parse_process(&mut pairs, free)?;
+                let (p1, p2) = (pairs.next().unwrap(), pairs.next().unwrap());
+
+                let mut branch_free = free.clone();
+                let process = parse_process(p2, &mut branch_free)?;
+                free_in_branches.push(branch_free);
+
+                let branch = parse_name(p1)?;
                 branches.push((branch, process));
             }
+
             let otherwise = match pairs.next() {
-                Some(pair) => Some(parse_process(&mut Pairs::single(pair), free)?),
+                Some(pair) => {
+                    let mut other_free = free.clone();
+                    let process = parse_process(pair, &mut other_free)?;
+                    free_in_branches.push(other_free);
+                    Some(process)
+                }
                 None => None,
             };
+
+            free.extend(free_in_branches.into_iter().flatten());
+            free.replace(subject.clone());
+
             Ok(Arc::new(Process::Do(
                 subject,
                 Command::Case(branches, otherwise),

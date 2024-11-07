@@ -1,63 +1,24 @@
 #![allow(dead_code)]
 
-use parse::parse_program;
+use eframe::egui;
+use playground::Playground;
 
 mod base;
 mod interact;
 mod parse;
+mod playground;
 mod print;
 
 fn main() {
-    match parse_program::<()>(CODE) {
-        Err(e) => println!("{:?}", e),
-        Ok(context) => {
-            for (name, def) in context.statics {
-                println!("define {} = {}\n", name, def);
-            }
-        }
-    }
-}
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size([1000.0, 700.0]),
+        ..Default::default()
+    };
 
-static CODE: &str = r#"
-define yes_or_no = ask {
-    ask[value];
-    value.case {
-        yes => { ask.yes; ask() }
-        no  => { ask.no; ask() }
-    }
+    eframe::run_native(
+        "⅋layground",
+        options,
+        Box::new(|cc| Ok(Playground::new(cc))),
+    )
+    .expect("egui crashed");
 }
-
-define drained = items {
-    items.case {
-        pop => {
-            items.empty;
-            items()
-        }
-        push => {
-            let above = stacked;
-            above(drained);
-            items <> above
-        }
-    }
-}
-
-define stacked = items {
-    items[under];
-    items[top];
-    items.case {
-        pop => {
-            items.item;
-            items(top);
-            items <> under
-        }
-        push => {
-            let above = stacked;
-            let self = stacked;
-            self(under);
-            self(top);
-            above(self);
-            items <> above
-        }
-    }
-}
-"#;
