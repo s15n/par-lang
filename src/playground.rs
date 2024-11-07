@@ -147,7 +147,7 @@ fn show_external(
                         match event {
                             Event::Break => {
                                 ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new("break").italics());
+                                    ui.label(egui::RichText::new("break").italics().code());
                                     if ui.small_button("X").clicked() {
                                         hidden.insert(external.clone());
                                     }
@@ -155,7 +155,7 @@ fn show_external(
                             }
                             Event::Continue => {
                                 ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new("continue").italics());
+                                    ui.label(egui::RichText::new("continue").italics().code());
                                     if ui.small_button("X").clicked() {
                                         hidden.insert(external.clone());
                                     }
@@ -172,9 +172,10 @@ fn show_external(
                                     ui.label(
                                         RichText::new("+")
                                             .strong()
+                                            .code()
                                             .color(egui::Color32::from_hex("#118ab2").unwrap()),
                                     );
-                                    ui.label(egui::RichText::new(&selected.string).strong());
+                                    ui.label(egui::RichText::new(&selected.string).strong().code());
                                 });
                             }
                             Event::Case(selected) => {
@@ -182,9 +183,10 @@ fn show_external(
                                     ui.label(
                                         RichText::new("&")
                                             .strong()
+                                            .code()
                                             .color(egui::Color32::from_hex("#7ac74f").unwrap()),
                                     );
-                                    ui.label(egui::RichText::new(&selected.string).strong());
+                                    ui.label(egui::RichText::new(&selected.string).strong().code());
                                 });
                             }
                         }

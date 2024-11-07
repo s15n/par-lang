@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
@@ -22,7 +23,21 @@ pub enum RuntimeError<I, X> {
 #[derive(Clone, Debug)]
 pub enum Expression<I> {
     Ref(I),
-    Fork(Capture<I>, I, Arc<Process<I>>),
+    Fork(RefCell<Capture<I>>, I, Arc<Process<I>>),
+}
+
+impl<I: Clone + Ord> Expression<I> {
+    pub fn fix_captures(&self) -> BTreeSet<I> {
+        match self {
+            Self::Ref(name) => BTreeSet::from([name.clone()]),
+            Self::Fork(capture, bound, process) => {
+                let mut free = process.fix_captures();
+                free.remove(bound);
+                capture.borrow_mut().variables = free.clone();
+                free
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -30,6 +45,58 @@ pub enum Process<I> {
     Let(I, Arc<Expression<I>>, Arc<Self>),
     Link(I, Arc<Expression<I>>),
     Do(I, Command<I>),
+}
+
+impl<I: Clone + Ord> Process<I> {
+    pub fn fix_captures(&self) -> BTreeSet<I> {
+        match self {
+            Process::Let(bound, expression, process) => {
+                let mut free = expression.fix_captures();
+                free.extend(process.fix_captures());
+                free.remove(bound);
+                free
+            }
+            Process::Link(name, expression) => {
+                let mut free = expression.fix_captures();
+                free.insert(name.clone());
+                free
+            }
+            Process::Do(name, Command::Break) => BTreeSet::from([name.clone()]),
+            Process::Do(name, Command::Continue(process)) => {
+                let mut free = process.fix_captures();
+                free.insert(name.clone());
+                free
+            }
+            Process::Do(name, Command::Send(expression, process)) => {
+                let mut free = expression.fix_captures();
+                free.extend(process.fix_captures());
+                free.insert(name.clone());
+                free
+            }
+            Process::Do(name, Command::Receive(bound, process)) => {
+                let mut free = process.fix_captures();
+                free.remove(bound);
+                free.insert(name.clone());
+                free
+            }
+            Process::Do(name, Command::Select(_, process)) => {
+                let mut free = process.fix_captures();
+                free.insert(name.clone());
+                free
+            }
+            Process::Do(name, Command::Case(branches, otherwise)) => {
+                let mut free = BTreeSet::new();
+                for (_, process) in branches {
+                    free.extend(process.fix_captures());
+                }
+                if let Some(process) = otherwise {
+                    free.extend(process.fix_captures());
+                }
+                free.insert(name.clone());
+                free
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -66,6 +133,18 @@ impl<I: Clone> Command<I> {
 pub enum Value<I, X> {
     Suspend(Context<I, X>, I, Arc<Process<I>>),
     External(X),
+}
+
+impl<I: Clone + Ord, X> Value<I, X> {
+    pub fn fix_captures(&self) {
+        match self {
+            Value::Suspend(context, _, process) => {
+                context.fix_captures();
+                process.fix_captures();
+            }
+            _ => (),
+        }
+    }
 }
 
 impl<I: Ord, X: Clone + Ord> Value<I, X> {
@@ -125,6 +204,14 @@ pub struct Capture<I> {
     pub variables: BTreeSet<I>,
 }
 
+impl<I> Default for Capture<I> {
+    fn default() -> Self {
+        Self {
+            variables: BTreeSet::new(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum ValueState<X> {
     Unnormalized,
@@ -160,6 +247,17 @@ impl<I, X> Context<I, X> {
             statics: BTreeMap::new(),
             variables: BTreeMap::new(),
             state: ContextState::new(),
+        }
+    }
+}
+
+impl<I: Clone + Ord, X> Context<I, X> {
+    pub fn fix_captures(&self) {
+        for (_, definition) in &self.statics {
+            definition.fix_captures();
+        }
+        for (_, value) in &self.variables {
+            value.fix_captures();
         }
     }
 }
@@ -317,7 +415,7 @@ pub fn evaluate<I: Clone + Ord, X: Clone + Ord>(
         }
 
         Expression::Fork(capture, channel, process) => {
-            let captured = context.extract(capture)?;
+            let captured = context.extract(&capture.borrow())?;
             Ok((
                 context,
                 Value::Suspend(captured, channel.clone(), Arc::clone(process)),
@@ -552,6 +650,7 @@ impl<I: std::fmt::Display> std::fmt::Display for Expression<I> {
             Expression::Ref(name) => write!(f, "{}", name),
             Expression::Fork(capture, name, process) => {
                 let names = capture
+                    .borrow()
                     .variables
                     .iter()
                     .map(|v| v.to_string())
