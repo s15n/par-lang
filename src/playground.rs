@@ -86,19 +86,7 @@ impl Playground {
     fn show_interaction(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             ui.horizontal_top(|ui| {
-                if ui
-                    .add(
-                        egui::Button::new(
-                            RichText::new("PARSE").strong().color(egui::Color32::BLACK),
-                        )
-                        .fill(
-                            red()
-                                .lerp_to_gamma(green(), 0.5)
-                                .lerp_to_gamma(egui::Color32::WHITE, 0.5),
-                        ),
-                    )
-                    .clicked()
-                {
+                if ui.button(RichText::new("PARSE").strong()).clicked() {
                     self.parsed = parse_program(self.code.as_str()).map_err(Some);
                 }
 
@@ -110,7 +98,7 @@ impl Playground {
                                 .strong()
                                 .color(egui::Color32::BLACK),
                         )
-                        .fill(green().lerp_to_gamma(egui::Color32::WHITE, 0.4)),
+                        .fill(green().lerp_to_gamma(egui::Color32::WHITE, 0.3)),
                         |ui| {
                             for name in context.statics.keys() {
                                 if ui.button(&name.string).clicked() {
@@ -267,34 +255,25 @@ fn show_external(
                     }
 
                     if let Some(Request::Case(branches, otherwise)) = requests.get(&external) {
-                        egui::menu::menu_custom_button(
-                            ui,
-                            egui::Button::new(
-                                egui::RichText::new("CASE")
-                                    .strong()
-                                    .color(egui::Color32::BLACK),
-                            )
-                            .fill(blue().lerp_to_gamma(egui::Color32::WHITE, 0.6)),
-                            |ui| {
-                                for branch in branches {
-                                    if ui.button(&branch.string).clicked() {
-                                        environment.respond(
-                                            external.clone(),
-                                            Response::Case(Some(branch.clone())),
-                                        );
-                                        need_run = true;
-                                        ui.close_menu();
-                                    }
+                        ui.menu_button(egui::RichText::new("CASE").strong(), |ui| {
+                            for branch in branches {
+                                if ui.button(&branch.string).clicked() {
+                                    environment.respond(
+                                        external.clone(),
+                                        Response::Case(Some(branch.clone())),
+                                    );
+                                    need_run = true;
+                                    ui.close_menu();
                                 }
-                                if *otherwise {
-                                    if ui.button("---").clicked() {
-                                        environment.respond(external.clone(), Response::Case(None));
-                                        need_run = true;
-                                        ui.close_menu();
-                                    }
+                            }
+                            if *otherwise {
+                                if ui.button("---").clicked() {
+                                    environment.respond(external.clone(), Response::Case(None));
+                                    need_run = true;
+                                    ui.close_menu();
                                 }
-                            },
-                        );
+                            }
+                        });
                     }
                 });
 
