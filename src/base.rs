@@ -152,18 +152,39 @@ impl<I: Clone + Ord, X> Value<I, X> {
     }
 }
 
-impl<I: Ord, X: Clone + Ord> Value<I, X> {
-    fn value_state(&self) -> ValueState<X> {
+impl<I: Clone + Ord, X: Clone + Ord> Value<I, X> {
+    fn value_state(&self) -> ValueState<I, X> {
         match self {
             Self::Suspend(context, channel, process) => match process.as_ref() {
                 Process::Do(subject, _) if subject == channel => ValueState::HeadNormal,
-                Process::Do(subject, Command::Case(_, _) | Command::Receive(_, _)) => {
-                    if let Some(Value::External(ext)) = context.variables.get(subject) {
-                        ValueState::BlockingOn(BTreeSet::from([ext.clone()]))
-                    } else if let Some(ext) = context.state.blocking_on.get(subject) {
-                        ValueState::BlockingOn(ext.clone())
-                    } else {
+                Process::Do(subject, command) => {
+                    let mut requesting = context
+                        .state
+                        .requesting
+                        .get(subject)
+                        .cloned()
+                        .unwrap_or_else(|| BTreeMap::new());
+                    if let Some(Value::External(external)) = context.variables.get(subject) {
+                        match command {
+                            Command::Receive(_, _) => {
+                                requesting.insert(external.clone(), Request::Receive);
+                            }
+                            Command::Case(branches, otherwise) => {
+                                requesting.insert(
+                                    external.clone(),
+                                    Request::Case(
+                                        branches.iter().map(|(branch, _)| branch.clone()).collect(),
+                                        otherwise.is_some(),
+                                    ),
+                                );
+                            }
+                            _ => (),
+                        }
+                    }
+                    if requesting.is_empty() {
                         ValueState::Unnormalized
+                    } else {
+                        ValueState::Requesting(requesting)
                     }
                 }
                 _ => ValueState::Unnormalized,
@@ -181,17 +202,19 @@ impl<I: Ord, X: Clone + Ord> Value<I, X> {
 }
 
 #[derive(Clone, Debug)]
-pub enum Request<I, X> {
+pub enum Action<I, X> {
     Break,
     Continue,
     Send(Value<I, X>),
     Receive,
     Select(I),
-    Case(Vec<I>, Option<()>),
+
+    #[allow(unused)]
+    Case(Vec<I>, bool),
 }
 
-impl<I, X> Request<I, X> {
-    pub fn is_blocking(&self) -> bool {
+impl<I, X> Action<I, X> {
+    pub fn is_requesting(&self) -> bool {
         match self {
             Self::Receive | Self::Case(_, _) => true,
             _ => false,
@@ -199,6 +222,13 @@ impl<I, X> Request<I, X> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum Request<I> {
+    Receive,
+    Case(Vec<I>, bool),
+}
+
+#[derive(Clone, Debug)]
 pub enum Response<I, X> {
     Receive(Value<I, X>),
     Case(Option<I>),
@@ -218,30 +248,30 @@ impl<I> Default for Capture<I> {
 }
 
 #[derive(Clone, Debug)]
-pub enum ValueState<X> {
+pub enum ValueState<I, X> {
     Unnormalized,
     HeadNormal,
-    BlockingOn(BTreeSet<X>),
+    Requesting(BTreeMap<X, Request<I>>),
 }
 
 #[derive(Clone, Debug)]
 pub struct Context<I, X> {
     pub statics: BTreeMap<I, Arc<Expression<I>>>,
     pub variables: BTreeMap<I, Value<I, X>>,
-    state: ContextState<I, X>,
+    pub state: ContextState<I, X>,
 }
 
 #[derive(Clone, Debug)]
-struct ContextState<I, X> {
-    unnormalized: BTreeSet<I>,
-    blocking_on: BTreeMap<I, BTreeSet<X>>,
+pub struct ContextState<I, X> {
+    pub unnormalized: BTreeSet<I>,
+    pub requesting: BTreeMap<I, BTreeMap<X, Request<I>>>,
 }
 
 impl<I, X> ContextState<I, X> {
     fn new() -> Self {
         Self {
             unnormalized: BTreeSet::new(),
-            blocking_on: BTreeMap::new(),
+            requesting: BTreeMap::new(),
         }
     }
 }
@@ -276,24 +306,28 @@ impl<I: Clone + Ord, X: Clone + Ord> Context<I, X> {
             if !context_state.unnormalized.is_empty() {
                 self.state.unnormalized.insert(name.clone());
             }
-            for (_, exts) in &context_state.blocking_on {
+            for (_, requests) in &context_state.requesting {
                 self.state
-                    .blocking_on
+                    .requesting
                     .entry(name.clone())
                     .or_default()
-                    .extend(exts.iter().cloned());
+                    .extend(
+                        requests
+                            .iter()
+                            .map(|(external, request)| (external.clone(), request.clone())),
+                    );
             }
         }
         match value.value_state() {
             ValueState::Unnormalized => {
                 self.state.unnormalized.insert(name.clone());
             }
-            ValueState::BlockingOn(exts) => {
+            ValueState::Requesting(requests) => {
                 self.state
-                    .blocking_on
+                    .requesting
                     .entry(name.clone())
                     .or_default()
-                    .extend(exts);
+                    .extend(requests);
             }
             _ => (),
         }
@@ -304,7 +338,7 @@ impl<I: Clone + Ord, X: Clone + Ord> Context<I, X> {
     pub fn get(&mut self, name: &I) -> Result<Value<I, X>, RuntimeError<I, X>> {
         if let Some(value) = self.variables.remove(name) {
             self.state.unnormalized.remove(name);
-            self.state.blocking_on.remove(name);
+            self.state.requesting.remove(name);
             return Ok(value);
         }
         if let Some(definition) = self.statics.get(name) {
@@ -337,12 +371,15 @@ impl<I: Clone + Ord, X: Clone + Ord> Context<I, X> {
     }
 
     pub fn get_unblocked(&self, responses: &BTreeMap<X, Response<I, X>>) -> Option<I> {
-        let available = responses.keys().cloned().collect::<BTreeSet<_>>();
         self.state.unnormalized.first().cloned().or_else(|| {
             self.state
-                .blocking_on
+                .requesting
                 .iter()
-                .filter(|&(_, exts)| !exts.is_disjoint(&available))
+                .filter(|&(_, requests)| {
+                    responses
+                        .keys()
+                        .any(|external| requests.contains_key(external))
+                })
                 .map(|(name, _)| name)
                 .cloned()
                 .next()
@@ -364,24 +401,24 @@ impl<I, X> Running<I, X> {
 pub fn run_to_suspension<I: Clone + Ord, X: Clone + Ord>(
     mut running: Running<I, X>,
     responses: &mut BTreeMap<X, Response<I, X>>,
-) -> Result<(Option<Running<I, X>>, Vec<(X, Request<I, X>)>), RuntimeError<I, X>> {
-    let mut requests = Vec::new();
+) -> Result<(Option<Running<I, X>>, Vec<(X, Action<I, X>)>), RuntimeError<I, X>> {
+    let mut actions = Vec::new();
     let mut head_normal = false;
 
     loop {
         if !head_normal {
             loop {
-                let (new_running, request) = step(running, responses)?;
-                let block = match request {
-                    Some((ext, req)) => {
-                        requests.push((ext, req.clone()));
-                        req.is_blocking()
+                let (new_running, action) = step(running, responses)?;
+                let block = match action {
+                    Some((ext, act)) => {
+                        actions.push((ext, act.clone()));
+                        act.is_requesting()
                     }
                     None => false,
                 };
                 running = match new_running {
                     Some(new) => new,
-                    None => return Ok((None, requests)),
+                    None => return Ok((None, actions)),
                 };
                 if block {
                     break;
@@ -390,7 +427,7 @@ pub fn run_to_suspension<I: Clone + Ord, X: Clone + Ord>(
         }
 
         let Some(unblocked) = running.context.get_unblocked(responses) else {
-            return Ok((Some(running), requests));
+            return Ok((Some(running), actions));
         };
 
         let Ok(value) = running.context.get(&unblocked) else {
@@ -437,7 +474,7 @@ pub fn step<I: Clone + Ord, X: Clone + Ord>(
         process,
     }: Running<I, X>,
     responses: &mut BTreeMap<X, Response<I, X>>,
-) -> Result<(Option<Running<I, X>>, Option<(X, Request<I, X>)>), RuntimeError<I, X>> {
+) -> Result<(Option<Running<I, X>>, Option<(X, Action<I, X>)>), RuntimeError<I, X>> {
     match process.as_ref() {
         Process::Let(name, expression, process) => {
             let (mut context, value) = evaluate(context, Arc::clone(expression))?;
@@ -473,12 +510,12 @@ pub fn step<I: Clone + Ord, X: Clone + Ord>(
                             return Err(RuntimeError::Unused(context));
                         }
                         drop(context);
-                        Ok((None, Some((ext, Request::Break))))
+                        Ok((None, Some((ext, Action::Break))))
                     }
 
                     Command::Continue(then) => Ok((
                         Running::some(context, Arc::clone(then)),
-                        Some((ext, Request::Continue)),
+                        Some((ext, Action::Continue)),
                     )),
 
                     Command::Send(argument, after_send) => {
@@ -486,7 +523,7 @@ pub fn step<I: Clone + Ord, X: Clone + Ord>(
                         context.set(name, Value::External(ext.clone()))?;
                         Ok((
                             Running::some(context, Arc::clone(after_send)),
-                            Some((ext, Request::Send(argument))),
+                            Some((ext, Action::Send(argument))),
                         ))
                     }
 
@@ -501,7 +538,7 @@ pub fn step<I: Clone + Ord, X: Clone + Ord>(
                             context.set(name, Value::External(ext.clone()))?;
                             Ok((
                                 Running::some(context, Arc::clone(&process)),
-                                Some((ext, Request::Receive)),
+                                Some((ext, Action::Receive)),
                             ))
                         }
                     },
@@ -510,7 +547,7 @@ pub fn step<I: Clone + Ord, X: Clone + Ord>(
                         context.set(name, Value::External(ext.clone()))?;
                         Ok((
                             Running::some(context, Arc::clone(after_select)),
-                            Some((ext, Request::Select(selected.clone()))),
+                            Some((ext, Action::Select(selected.clone()))),
                         ))
                     }
 
@@ -535,9 +572,9 @@ pub fn step<I: Clone + Ord, X: Clone + Ord>(
                                 Running::some(context, Arc::clone(&process)),
                                 Some((
                                     ext,
-                                    Request::Case(
+                                    Action::Case(
                                         branches.iter().map(|(branch, _)| branch.clone()).collect(),
-                                        otherwise.as_ref().map(|_| ()),
+                                        otherwise.is_some(),
                                     ),
                                 )),
                             ))
@@ -655,16 +692,7 @@ impl<I: std::fmt::Display> std::fmt::Display for Expression<I> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Ref(name) => write!(f, "{}", name),
-            Self::Fork(capture, name, process) => {
-                let names = capture
-                    .borrow()
-                    .variables
-                    .iter()
-                    .map(|v| v.to_string())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                write!(f, "{}[{}]{{ {} }}", name, names, process)
-            }
+            Self::Fork(_, name, process) => write!(f, "{} {{ {} }}", name, process),
             Self::String(literal) => write!(f, "{:?}", literal),
         }
     }
@@ -689,7 +717,7 @@ impl<I: std::fmt::Display> std::fmt::Display for Process<I> {
                 write!(f, "{}.{}; {}", name, branch, process)
             }
             Self::Do(name, Command::Case(branches, otherwise)) => {
-                write!(f, "{}.case{{ ", name)?;
+                write!(f, "{}.case {{ ", name)?;
                 for (branch, process) in branches {
                     write!(f, "{} => {{ {} }} ", branch, process)?;
                 }
@@ -706,15 +734,7 @@ impl<I: std::fmt::Display> std::fmt::Display for Process<I> {
 impl<I: std::fmt::Display, X: std::fmt::Display> std::fmt::Display for Value<I, X> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Suspend(context, name, process) => {
-                let names = context
-                    .variables
-                    .keys()
-                    .map(|v| v.to_string())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                write!(f, "{}[{}]{{ {} }}", name, names, process)
-            }
+            Self::Suspend(_, name, process) => write!(f, "{} {{ {} }}", name, process),
             Self::External(x) => write!(f, "{}", x),
             Self::String(s) => write!(f, "{:?}", s),
         }

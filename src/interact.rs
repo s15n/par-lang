@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
 
-use crate::base::{run_to_suspension, Context, Request, Response, Running, RuntimeError, Value};
+use crate::base::{
+    run_to_suspension, Action, Command, Context, Process, Request, Response, Running, RuntimeError,
+    Value,
+};
 
 pub struct Environment<I> {
     pub histories: BTreeMap<External, Vec<Event<I, External>>>,
-    pub blockers: BTreeMap<External, Blocker<I>>,
     pub responses: BTreeMap<External, Response<I, External>>,
     pub runnings: Vec<Running<I, External>>,
     pub primary: External,
@@ -14,12 +16,6 @@ pub struct Environment<I> {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct External {
     id: u64,
-}
-
-#[derive(Clone, Debug)]
-pub enum Blocker<I> {
-    Receive,
-    Case(Vec<I>, Option<()>),
 }
 
 #[derive(Clone, Debug)]
@@ -47,7 +43,6 @@ impl<I: Clone + Ord> Environment<I> {
         context.set(&channel, Value::External(primary.clone()))?;
         Ok(Self {
             histories: BTreeMap::new(),
-            blockers: BTreeMap::new(),
             responses: BTreeMap::new(),
             runnings: Vec::from([Running { context, process }]),
             primary,
@@ -58,6 +53,35 @@ impl<I: Clone + Ord> Environment<I> {
     fn generate(&mut self) -> External {
         let next_id = self.next.id + 1;
         std::mem::replace(&mut self.next, External { id: next_id })
+    }
+
+    pub fn get_requests(&self) -> BTreeMap<External, Request<I>> {
+        let mut requests = BTreeMap::new();
+        for running in &self.runnings {
+            for (_, requesting) in &running.context.state.requesting {
+                requests.extend(requesting.iter().map(|(k, v)| (k.clone(), v.clone())));
+            }
+            if let Process::Do(subject, command) = &*running.process {
+                if let Some(Value::External(external)) = running.context.variables.get(subject) {
+                    match command {
+                        Command::Receive(_, _) => {
+                            requests.insert(external.clone(), Request::Receive);
+                        }
+                        Command::Case(branches, otherwise) => {
+                            requests.insert(
+                                external.clone(),
+                                Request::Case(
+                                    branches.iter().map(|(branch, _)| branch.clone()).collect(),
+                                    otherwise.is_some(),
+                                ),
+                            );
+                        }
+                        _ => (),
+                    }
+                }
+            }
+        }
+        requests
     }
 
     pub fn respond(&mut self, external: External, response: Response<I, External>) {
@@ -76,25 +100,23 @@ impl<I: Clone + Ord> Environment<I> {
             }
             _ => (),
         }
-        self.blockers.remove(&external);
         self.responses.insert(external.clone(), response);
     }
 
     pub fn run_to_suspension(&mut self) -> Result<(), RuntimeError<I, External>> {
         loop {
             self.run_all()?;
-            let mut receives = self
-                .blockers
-                .iter()
-                .filter(|&(_, b)| matches!(b, Blocker::Receive))
-                .map(|(ext, _)| ext.clone())
-                .collect::<Vec<_>>();
-            if receives.is_empty() {
-                return Ok(());
+
+            let mut responded = false;
+            for (external, request) in self.get_requests() {
+                if matches!(request, Request::Receive) {
+                    let new_external = self.generate();
+                    self.respond(external, Response::Receive(Value::External(new_external)));
+                    responded = true;
+                }
             }
-            for external in receives.drain(..) {
-                let ext = self.generate();
-                self.respond(external, Response::Receive(Value::External(ext)));
+            if !responded {
+                return Ok(());
             }
         }
     }
@@ -106,19 +128,19 @@ impl<I: Clone + Ord> Environment<I> {
             self.runnings.extend(new_running.into_iter());
             for (external, request) in requests {
                 match request {
-                    Request::Break => {
+                    Action::Break => {
                         self.histories
                             .entry(external)
                             .or_default()
                             .push(Event::Break);
                     }
-                    Request::Continue => {
+                    Action::Continue => {
                         self.histories
                             .entry(external)
                             .or_default()
                             .push(Event::Continue);
                     }
-                    Request::Send(Value::Suspend(mut context, channel, process)) => {
+                    Action::Send(Value::Suspend(mut context, channel, process)) => {
                         let new_external = self.generate();
                         context.set(&channel, Value::External(new_external.clone()))?;
                         pending.push(Running { context, process });
@@ -127,28 +149,23 @@ impl<I: Clone + Ord> Environment<I> {
                             .or_default()
                             .push(Event::Send(new_external));
                     }
-                    Request::Send(Value::External(escaped)) => {
+                    Action::Send(Value::External(escaped)) => {
                         return Err(RuntimeError::ExternalEscaped(escaped))
                     }
-                    Request::Send(Value::String(message)) => {
+                    Action::Send(Value::String(message)) => {
                         self.histories
                             .entry(external)
                             .or_default()
                             .push(Event::Message(message));
                     }
-                    Request::Receive => {
-                        self.blockers.insert(external.clone(), Blocker::Receive);
-                    }
-                    Request::Select(selected) => {
+                    Action::Receive => (),
+                    Action::Select(selected) => {
                         self.histories
                             .entry(external)
                             .or_default()
                             .push(Event::Select(selected));
                     }
-                    Request::Case(branches, otherwise) => {
-                        self.blockers
-                            .insert(external.clone(), Blocker::Case(branches, otherwise));
-                    }
+                    Action::Case(_, _) => (),
                 }
             }
         }

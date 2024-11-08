@@ -1,11 +1,15 @@
 use core::f32;
-use std::{collections::BTreeSet, fmt::Write, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::Write,
+    sync::Arc,
+};
 
 use eframe::egui::{self, RichText};
 
 use crate::{
-    base::{Context, Response, RuntimeError},
-    interact::{Blocker, Environment, Event, External},
+    base::{Context, Request, Response, RuntimeError},
+    interact::{Environment, Event, External},
     parse::{parse_program, Name, ParseError},
     print::print_context,
 };
@@ -117,6 +121,7 @@ impl Playground {
                     if show_external(
                         ui,
                         environment,
+                        &environment.get_requests(),
                         environment.primary.clone(),
                         &mut self.hidden,
                     ) {
@@ -169,6 +174,7 @@ impl Playground {
 fn show_external(
     ui: &mut egui::Ui,
     environment: &mut Environment<Arc<Name>>,
+    requests: &BTreeMap<External, Request<Arc<Name>>>,
     external: External,
     hidden: &mut BTreeSet<External>,
 ) -> bool {
@@ -212,8 +218,9 @@ fn show_external(
                                 });
                             }
                             Event::Send(child) => {
-                                need_run = show_external(ui, environment, child.clone(), hidden)
-                                    || need_run;
+                                need_run =
+                                    show_external(ui, environment, requests, child.clone(), hidden)
+                                        || need_run;
                             }
                             Event::Message(message) => {
                                 ui.horizontal(|ui| {
@@ -254,9 +261,7 @@ fn show_external(
                         }
                     }
 
-                    if let Some(Blocker::Case(branches, otherwise)) =
-                        environment.blockers.get(&external).cloned()
-                    {
+                    if let Some(Request::Case(branches, otherwise)) = requests.get(&external) {
                         ui.menu_button(RichText::new("CASE").strong(), |ui| {
                             for branch in branches {
                                 if ui.button(&branch.string).clicked() {
@@ -268,7 +273,7 @@ fn show_external(
                                     ui.close_menu();
                                 }
                             }
-                            if let Some(()) = otherwise {
+                            if *otherwise {
                                 if ui.button("---").clicked() {
                                     environment.respond(external.clone(), Response::Case(None));
                                     need_run = true;
@@ -280,7 +285,7 @@ fn show_external(
                 });
 
                 for side in to_the_side {
-                    need_run = show_external(ui, environment, side, hidden) || need_run;
+                    need_run = show_external(ui, environment, requests, side, hidden) || need_run;
                 }
             })
         });
@@ -299,30 +304,14 @@ fn run_to_suspension(
 }
 
 static DEFAULT_CODE: &str = r#"
-define yes_or_no = ask {
-  ask[value];
-  value.case {
-    no => {
-      ask(r{ r.no; r() });
-      value[];
-      ask()
-    }
-    yes => {
-      ask(r{ r.yes; r() });
-      value[];
-      ask()
-    }
-  }
-}
-
 define play_with_stack = user {
   user("Happy poppin'");
-  let loop = yes_no_stack_loop;
+  let loop = stack_loop;
   loop(drained);
   user <> loop
 }
 
-define yes_no_stack_loop = user {
+define stack_loop = user {
   user[stack];
   user.case {
     pop => {
@@ -337,24 +326,21 @@ define yes_no_stack_loop = user {
           user.item;
           stack[value];
           user(value);
-          let loop = yes_no_stack_loop;
+          let loop = stack_loop;
           loop(stack);
           user <> loop
         }
       }
     }
     push => {
-      user[value];
-      let validated = out {
-        let validate = yes_or_no;
-        validate(value);
-        validate[value];
-        validate[];
-        out <> value
+      user[query];
+      let value = return {
+        query.oneof(yes no);
+        return <> query
       };
       stack.push;
-      stack(validated);
-      let loop = yes_no_stack_loop;
+      stack(value);
+      let loop = stack_loop;
       loop(stack);
       user <> loop
     }
