@@ -61,8 +61,10 @@ impl eframe::App for Playground {
                 });
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
-                egui::ScrollArea::both().show(ui, |ui| {
-                    self.show_interaction(ui);
+                egui::CentralPanel::default().show_inside(ui, |ui| {
+                    egui::ScrollArea::both().show(ui, |ui| {
+                        self.show_interaction(ui);
+                    });
                 });
 
                 egui::TopBottomPanel::bottom("introspection")
@@ -84,22 +86,43 @@ impl Playground {
     fn show_interaction(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             ui.horizontal_top(|ui| {
-                if ui.button(RichText::new("PARSE").strong()).clicked() {
+                if ui
+                    .add(
+                        egui::Button::new(
+                            RichText::new("PARSE").strong().color(egui::Color32::BLACK),
+                        )
+                        .fill(
+                            red()
+                                .lerp_to_gamma(green(), 0.5)
+                                .lerp_to_gamma(egui::Color32::WHITE, 0.5),
+                        ),
+                    )
+                    .clicked()
+                {
                     self.parsed = parse_program(self.code.as_str()).map_err(Some);
                 }
 
                 if let Ok(context) = &self.parsed {
-                    ui.menu_button(RichText::new("RUN").strong(), |ui| {
-                        for name in context.statics.keys() {
-                            if ui.button(&name.string).clicked() {
-                                self.environment =
-                                    Environment::new(context.clone(), name).map_err(Some);
-                                self.hidden.clear();
-                                run_to_suspension(&mut self.environment);
-                                ui.close_menu();
+                    egui::menu::menu_custom_button(
+                        ui,
+                        egui::Button::new(
+                            egui::RichText::new("RUN")
+                                .strong()
+                                .color(egui::Color32::BLACK),
+                        )
+                        .fill(green().lerp_to_gamma(egui::Color32::WHITE, 0.4)),
+                        |ui| {
+                            for name in context.statics.keys() {
+                                if ui.button(&name.string).clicked() {
+                                    self.environment =
+                                        Environment::new(context.clone(), name).map_err(Some);
+                                    self.hidden.clear();
+                                    run_to_suspension(&mut self.environment);
+                                    ui.close_menu();
+                                }
                             }
-                        }
-                    });
+                        },
+                    );
                 }
             });
 
@@ -108,7 +131,7 @@ impl Playground {
             if let Err(Some(parse_error)) = &self.parsed {
                 ui.label(
                     egui::RichText::new(&parse_error.message)
-                        .color(egui::Color32::from_hex("#DE3C4B").unwrap())
+                        .color(red())
                         .code(),
                 );
             }
@@ -128,7 +151,7 @@ impl Playground {
                 Err(Some(runtime_error)) => {
                     ui.label(
                         egui::RichText::new(format!("{}", runtime_error))
-                            .color(egui::Color32::from_hex("#DE3C4B").unwrap())
+                            .color(red())
                             .code(),
                     );
                 }
@@ -221,12 +244,7 @@ fn show_external(
                             }
                             Event::Message(message) => {
                                 ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new("!")
-                                            .strong()
-                                            .code()
-                                            .color(egui::Color32::from_hex("#118ab2").unwrap()),
-                                    );
+                                    ui.label(RichText::new("!").strong().code().color(blue()));
                                     ui.label(egui::RichText::new(&message).strong());
                                 });
                             }
@@ -235,23 +253,13 @@ fn show_external(
                             }
                             Event::Select(selected) => {
                                 ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new("+")
-                                            .strong()
-                                            .code()
-                                            .color(egui::Color32::from_hex("#118ab2").unwrap()),
-                                    );
+                                    ui.label(RichText::new("+").strong().code().color(blue()));
                                     ui.label(egui::RichText::new(&selected.string).strong().code());
                                 });
                             }
                             Event::Case(selected) => {
                                 ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new("&")
-                                            .strong()
-                                            .code()
-                                            .color(egui::Color32::from_hex("#7ac74f").unwrap()),
-                                    );
+                                    ui.label(RichText::new("&").strong().code().color(green()));
                                     ui.label(egui::RichText::new(&selected.string).strong().code());
                                 });
                             }
@@ -259,25 +267,34 @@ fn show_external(
                     }
 
                     if let Some(Request::Case(branches, otherwise)) = requests.get(&external) {
-                        ui.menu_button(RichText::new("CASE").strong(), |ui| {
-                            for branch in branches {
-                                if ui.button(&branch.string).clicked() {
-                                    environment.respond(
-                                        external.clone(),
-                                        Response::Case(Some(branch.clone())),
-                                    );
-                                    need_run = true;
-                                    ui.close_menu();
+                        egui::menu::menu_custom_button(
+                            ui,
+                            egui::Button::new(
+                                egui::RichText::new("CASE")
+                                    .strong()
+                                    .color(egui::Color32::BLACK),
+                            )
+                            .fill(blue().lerp_to_gamma(egui::Color32::WHITE, 0.6)),
+                            |ui| {
+                                for branch in branches {
+                                    if ui.button(&branch.string).clicked() {
+                                        environment.respond(
+                                            external.clone(),
+                                            Response::Case(Some(branch.clone())),
+                                        );
+                                        need_run = true;
+                                        ui.close_menu();
+                                    }
                                 }
-                            }
-                            if *otherwise {
-                                if ui.button("---").clicked() {
-                                    environment.respond(external.clone(), Response::Case(None));
-                                    need_run = true;
-                                    ui.close_menu();
+                                if *otherwise {
+                                    if ui.button("---").clicked() {
+                                        environment.respond(external.clone(), Response::Case(None));
+                                        need_run = true;
+                                        ui.close_menu();
+                                    }
                                 }
-                            }
-                        });
+                            },
+                        );
                     }
                 });
 
@@ -298,6 +315,18 @@ fn run_to_suspension(
             *environment = Err(Some(runtime_error));
         }
     }
+}
+
+fn red() -> egui::Color32 {
+    egui::Color32::from_hex("#DE3C4B").unwrap()
+}
+
+fn green() -> egui::Color32 {
+    egui::Color32::from_hex("#7ac74f").unwrap()
+}
+
+fn blue() -> egui::Color32 {
+    egui::Color32::from_hex("#118ab2").unwrap()
 }
 
 static DEFAULT_CODE: &str = r#"
