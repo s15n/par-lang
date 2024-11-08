@@ -3,6 +3,7 @@ use playground::Playground;
 
 mod base;
 mod interact;
+mod notation;
 mod parse;
 mod playground;
 mod print;
