@@ -6,8 +6,10 @@ pub fn print_context<I: std::fmt::Display, X: std::fmt::Display>(
     context: &Context<I, X>,
     level: usize,
 ) -> std::fmt::Result {
-    for (name, value) in &context.variables {
-        write!(w, "\n")?;
+    for (i, (name, value)) in context.variables.iter().enumerate() {
+        if i > 0 {
+            write!(w, "\n")?;
+        }
         indent(w, level)?;
         write!(w, "{} = ", name)?;
         print_value(w, value, level)?;
@@ -22,7 +24,8 @@ pub fn print_value<I: std::fmt::Display, X: std::fmt::Display>(
 ) -> std::fmt::Result {
     write!(w, "{}", value)?;
     match value {
-        Value::Suspend(context, _, _) => {
+        Value::Suspend(context, _, _) if !context.variables.is_empty() => {
+            write!(w, "\n")?;
             print_context(w, context, level + 1)?;
         }
         _ => (),

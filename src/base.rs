@@ -18,12 +18,15 @@ pub enum RuntimeError<I, X> {
 
     MissingCase(Value<I, X>, I),
     CannotSelectFrom(Value<I, X>, Vec<I>),
+
+    ExternalEscaped(X),
 }
 
 #[derive(Clone, Debug)]
 pub enum Expression<I> {
     Ref(I),
     Fork(RefCell<Capture<I>>, I, Arc<Process<I>>),
+    String(Arc<str>),
 }
 
 impl<I: Clone + Ord> Expression<I> {
@@ -36,6 +39,7 @@ impl<I: Clone + Ord> Expression<I> {
                 capture.borrow_mut().variables = free.clone();
                 free
             }
+            Self::String(_) => BTreeSet::new(),
         }
     }
 }
@@ -50,41 +54,41 @@ pub enum Process<I> {
 impl<I: Clone + Ord> Process<I> {
     pub fn fix_captures(&self) -> BTreeSet<I> {
         match self {
-            Process::Let(bound, expression, process) => {
-                let mut free = expression.fix_captures();
-                free.extend(process.fix_captures());
-                free.remove(bound);
-                free
-            }
-            Process::Link(name, expression) => {
-                let mut free = expression.fix_captures();
-                free.insert(name.clone());
-                free
-            }
-            Process::Do(name, Command::Break) => BTreeSet::from([name.clone()]),
-            Process::Do(name, Command::Continue(process)) => {
-                let mut free = process.fix_captures();
-                free.insert(name.clone());
-                free
-            }
-            Process::Do(name, Command::Send(expression, process)) => {
-                let mut free = expression.fix_captures();
-                free.extend(process.fix_captures());
-                free.insert(name.clone());
-                free
-            }
-            Process::Do(name, Command::Receive(bound, process)) => {
+            Self::Let(bound, expression, process) => {
                 let mut free = process.fix_captures();
                 free.remove(bound);
+                free.extend(expression.fix_captures());
+                free
+            }
+            Self::Link(name, expression) => {
+                let mut free = expression.fix_captures();
                 free.insert(name.clone());
                 free
             }
-            Process::Do(name, Command::Select(_, process)) => {
+            Self::Do(name, Command::Break) => BTreeSet::from([name.clone()]),
+            Self::Do(name, Command::Continue(process)) => {
                 let mut free = process.fix_captures();
                 free.insert(name.clone());
                 free
             }
-            Process::Do(name, Command::Case(branches, otherwise)) => {
+            Self::Do(name, Command::Send(expression, process)) => {
+                let mut free = expression.fix_captures();
+                free.extend(process.fix_captures());
+                free.insert(name.clone());
+                free
+            }
+            Self::Do(name, Command::Receive(bound, process)) => {
+                let mut free = process.fix_captures();
+                free.remove(bound);
+                free.insert(name.clone());
+                free
+            }
+            Self::Do(name, Command::Select(_, process)) => {
+                let mut free = process.fix_captures();
+                free.insert(name.clone());
+                free
+            }
+            Self::Do(name, Command::Case(branches, otherwise)) => {
                 let mut free = BTreeSet::new();
                 for (_, process) in branches {
                     free.extend(process.fix_captures());
@@ -112,12 +116,12 @@ pub enum Command<I> {
 impl<I: Clone> Command<I> {
     fn cannot<X>(&self, value: Value<I, X>) -> RuntimeError<I, X> {
         match self {
-            Command::Break => RuntimeError::CannotBreakTo(value),
-            Command::Continue(_) => RuntimeError::CannotContinueFrom(value),
-            Command::Send(_, _) => RuntimeError::CannotSendTo(value),
-            Command::Receive(_, _) => RuntimeError::CannotReceiveFrom(value),
-            Command::Select(branch, _) => RuntimeError::MissingCase(value, branch.clone()),
-            Command::Case(branches, _) => RuntimeError::CannotSelectFrom(
+            Self::Break => RuntimeError::CannotBreakTo(value),
+            Self::Continue(_) => RuntimeError::CannotContinueFrom(value),
+            Self::Send(_, _) => RuntimeError::CannotSendTo(value),
+            Self::Receive(_, _) => RuntimeError::CannotReceiveFrom(value),
+            Self::Select(branch, _) => RuntimeError::MissingCase(value, branch.clone()),
+            Self::Case(branches, _) => RuntimeError::CannotSelectFrom(
                 value,
                 branches
                     .into_iter()
@@ -133,12 +137,13 @@ impl<I: Clone> Command<I> {
 pub enum Value<I, X> {
     Suspend(Context<I, X>, I, Arc<Process<I>>),
     External(X),
+    String(String),
 }
 
 impl<I: Clone + Ord, X> Value<I, X> {
     pub fn fix_captures(&self) {
         match self {
-            Value::Suspend(context, _, process) => {
+            Self::Suspend(context, _, process) => {
                 context.fix_captures();
                 process.fix_captures();
             }
@@ -150,7 +155,7 @@ impl<I: Clone + Ord, X> Value<I, X> {
 impl<I: Ord, X: Clone + Ord> Value<I, X> {
     fn value_state(&self) -> ValueState<X> {
         match self {
-            Value::Suspend(context, channel, process) => match process.as_ref() {
+            Self::Suspend(context, channel, process) => match process.as_ref() {
                 Process::Do(subject, _) if subject == channel => ValueState::HeadNormal,
                 Process::Do(subject, Command::Case(_, _) | Command::Receive(_, _)) => {
                     if let Some(Value::External(ext)) = context.variables.get(subject) {
@@ -163,14 +168,14 @@ impl<I: Ord, X: Clone + Ord> Value<I, X> {
                 }
                 _ => ValueState::Unnormalized,
             },
-            Value::External(_) => ValueState::HeadNormal,
+            _ => ValueState::HeadNormal,
         }
     }
 
     fn context_state(&self) -> Option<&ContextState<I, X>> {
         match self {
             Value::Suspend(context, _, _) => Some(&context.state),
-            Value::External(_) => None,
+            _ => None,
         }
     }
 }
@@ -421,6 +426,8 @@ pub fn evaluate<I: Clone + Ord, X: Clone + Ord>(
                 Value::Suspend(captured, channel.clone(), Arc::clone(process)),
             ))
         }
+
+        Expression::String(literal) => Ok((context, Value::String(literal.to_string()))),
     }
 }
 
@@ -647,8 +654,8 @@ pub fn step<I: Clone + Ord, X: Clone + Ord>(
 impl<I: std::fmt::Display> std::fmt::Display for Expression<I> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Expression::Ref(name) => write!(f, "{}", name),
-            Expression::Fork(capture, name, process) => {
+            Self::Ref(name) => write!(f, "{}", name),
+            Self::Fork(capture, name, process) => {
                 let names = capture
                     .borrow()
                     .variables
@@ -658,6 +665,7 @@ impl<I: std::fmt::Display> std::fmt::Display for Expression<I> {
                     .join(" ");
                 write!(f, "{}[{}]{{ {} }}", name, names, process)
             }
+            Self::String(literal) => write!(f, "{:?}", literal),
         }
     }
 }
@@ -665,22 +673,22 @@ impl<I: std::fmt::Display> std::fmt::Display for Expression<I> {
 impl<I: std::fmt::Display> std::fmt::Display for Process<I> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Process::Let(name, definition, process) => {
+            Self::Let(name, definition, process) => {
                 write!(f, "let {} = {}; {}", name, definition, process)
             }
-            Process::Link(left, right) => write!(f, "{} <> {}", left, right),
-            Process::Do(name, Command::Break) => write!(f, "{}()", name),
-            Process::Do(name, Command::Continue(process)) => write!(f, "{}[]; {}", name, process),
-            Process::Do(name, Command::Send(argument, process)) => {
+            Self::Link(left, right) => write!(f, "{} <> {}", left, right),
+            Self::Do(name, Command::Break) => write!(f, "{}()", name),
+            Self::Do(name, Command::Continue(process)) => write!(f, "{}[]; {}", name, process),
+            Self::Do(name, Command::Send(argument, process)) => {
                 write!(f, "{}({}); {}", name, argument, process)
             }
-            Process::Do(name, Command::Receive(parameter, process)) => {
+            Self::Do(name, Command::Receive(parameter, process)) => {
                 write!(f, "{}[{}]; {}", name, parameter, process)
             }
-            Process::Do(name, Command::Select(branch, process)) => {
+            Self::Do(name, Command::Select(branch, process)) => {
                 write!(f, "{}.{}; {}", name, branch, process)
             }
-            Process::Do(name, Command::Case(branches, otherwise)) => {
+            Self::Do(name, Command::Case(branches, otherwise)) => {
                 write!(f, "{}.case{{ ", name)?;
                 for (branch, process) in branches {
                     write!(f, "{} => {{ {} }} ", branch, process)?;
@@ -698,7 +706,7 @@ impl<I: std::fmt::Display> std::fmt::Display for Process<I> {
 impl<I: std::fmt::Display, X: std::fmt::Display> std::fmt::Display for Value<I, X> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Suspend(context, name, process) => {
+            Self::Suspend(context, name, process) => {
                 let names = context
                     .variables
                     .keys()
@@ -707,7 +715,8 @@ impl<I: std::fmt::Display, X: std::fmt::Display> std::fmt::Display for Value<I, 
                     .join(" ");
                 write!(f, "{}[{}]{{ {} }}", name, names, process)
             }
-            Value::External(x) => write!(f, "{}", x),
+            Self::External(x) => write!(f, "{}", x),
+            Self::String(s) => write!(f, "{:?}", s),
         }
     }
 }
@@ -715,9 +724,9 @@ impl<I: std::fmt::Display, X: std::fmt::Display> std::fmt::Display for Value<I, 
 impl<I: std::fmt::Display, X: std::fmt::Display> std::fmt::Display for RuntimeError<I, X> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RuntimeError::DoesNotExist(name) => write!(f, "{} does not exist", name),
-            RuntimeError::AlreadyDefined(name) => write!(f, "{} is already defined", name),
-            RuntimeError::Unused(context) => write!(
+            Self::DoesNotExist(name) => write!(f, "{} does not exist", name),
+            Self::AlreadyDefined(name) => write!(f, "{} is already defined", name),
+            Self::Unused(context) => write!(
                 f,
                 "{} was not used",
                 context
@@ -726,21 +735,21 @@ impl<I: std::fmt::Display, X: std::fmt::Display> std::fmt::Display for RuntimeEr
                     .next()
                     .expect("no unused variables")
             ),
-            RuntimeError::CannotLink(left, right) => {
+            Self::CannotLink(left, right) => {
                 write!(f, "cannot link\n--> {}\n--> {}", left, right)
             }
-            RuntimeError::CannotBreakTo(value) => write!(f, "cannot break to\n--> {}", value),
-            RuntimeError::CannotContinueFrom(value) => {
+            Self::CannotBreakTo(value) => write!(f, "cannot break to\n--> {}", value),
+            Self::CannotContinueFrom(value) => {
                 write!(f, "cannot continue from\n--> {}", value)
             }
-            RuntimeError::CannotSendTo(value) => write!(f, "cannot send to\n--> {}", value),
-            RuntimeError::CannotReceiveFrom(value) => {
+            Self::CannotSendTo(value) => write!(f, "cannot send to\n--> {}", value),
+            Self::CannotReceiveFrom(value) => {
                 write!(f, "cannot receive from\n--> {}", value)
             }
-            RuntimeError::MissingCase(value, branch) => {
+            Self::MissingCase(value, branch) => {
                 write!(f, "missing case {} in\n--> {}", branch, value)
             }
-            RuntimeError::CannotSelectFrom(value, branches) => {
+            Self::CannotSelectFrom(value, branches) => {
                 write!(f, "cannot select from [")?;
                 for (i, branch) in branches.iter().enumerate() {
                     if i > 0 {
@@ -750,6 +759,7 @@ impl<I: std::fmt::Display, X: std::fmt::Display> std::fmt::Display for RuntimeEr
                 }
                 write!(f, "] in\n--> {}", value)
             }
+            Self::ExternalEscaped(external) => write!(f, "external {} escaped", external),
         }
     }
 }

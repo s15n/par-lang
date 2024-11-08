@@ -34,7 +34,9 @@ pub struct Location {
 #[grammar = "par.pest"]
 pub struct Par;
 
-pub fn parse_program<X: std::fmt::Display>(source: &str) -> Result<Context<Arc<Name>, X>, ParseError> {
+pub fn parse_program<X: std::fmt::Display>(
+    source: &str,
+) -> Result<Context<Arc<Name>, X>, ParseError> {
     let mut context = Context::new();
     for pair in Par::parse(Rule::program, source)?
         .next()
@@ -79,6 +81,11 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Expression<Arc<Na
         Rule::reference => {
             let name = Arc::new(pair.into());
             Ok(Arc::new(Expression::Ref(name)))
+        }
+        Rule::string => {
+            let slice = pair.as_str();
+            let literal = Arc::from(&slice[1..slice.len() - 1]);
+            Ok(Arc::new(Expression::String(literal)))
         }
         _ => unreachable!(),
     }
@@ -155,6 +162,55 @@ fn parse_process(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Process<Arc<Name>>>,
                 Command::Case(branches, otherwise),
             )))
         }
+
+        Rule::sugar_oneof => {
+            use crate::notation::*;
+
+            let subject = parse_name(&mut pairs)?;
+            let branches = pairs
+                .next()
+                .unwrap()
+                .into_inner()
+                .map(|pair| parse_name(&mut Pairs::single(pair)))
+                .collect::<Result<Vec<_>, _>>()?;
+            let then = parse_process(&mut pairs)?;
+
+            // subject.oneof(yes no);
+            // -->
+            // let subject = result {
+            //   subject.case {
+            //     yes => { result.yes; subject[]; result() }
+            //     no  => { result.no;  subject[]; result() }
+            //   }
+            // }
+
+            let result = Arc::new(Name {
+                string: "result".to_string(),
+                location: subject.location.clone(),
+            });
+
+            Ok(Arc::new(let_(
+                subject.clone(),
+                fork_(
+                    result.clone(),
+                    case_exhaust_(
+                        subject.clone(),
+                        branches.into_iter().map(|branch| {
+                            (
+                                branch.clone(),
+                                select_(
+                                    result.clone(),
+                                    branch,
+                                    continue_(subject.clone(), break_(result.clone())),
+                                ),
+                            )
+                        }),
+                    ),
+                ),
+                (*then).clone(),
+            )))
+        }
+
         _ => unreachable!(),
     }
 }

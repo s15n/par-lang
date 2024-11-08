@@ -5,8 +5,8 @@ use crate::base::{run_to_suspension, Context, Request, Response, Running, Runtim
 pub struct Environment<I> {
     pub histories: BTreeMap<External, Vec<Event<I, External>>>,
     pub blockers: BTreeMap<External, Blocker<I>>,
-    responses: BTreeMap<External, Response<I, External>>,
-    runnings: Vec<Running<I, External>>,
+    pub responses: BTreeMap<External, Response<I, External>>,
+    pub runnings: Vec<Running<I, External>>,
     pub primary: External,
     next: External,
 }
@@ -27,6 +27,7 @@ pub enum Event<I, X> {
     Break,
     Continue,
     Send(X),
+    Message(String),
     Receive(X),
     Select(I),
     Case(I),
@@ -117,11 +118,7 @@ impl<I: Clone + Ord> Environment<I> {
                             .or_default()
                             .push(Event::Continue);
                     }
-                    Request::Send(value) => {
-                        let Value::Suspend(mut context, channel, process) = value else {
-                            //return Err(RuntimeError::ExternalEscaped(external));
-                            return Ok(());
-                        };
+                    Request::Send(Value::Suspend(mut context, channel, process)) => {
                         let new_external = self.generate();
                         context.set(&channel, Value::External(new_external.clone()))?;
                         pending.push(Running { context, process });
@@ -129,6 +126,15 @@ impl<I: Clone + Ord> Environment<I> {
                             .entry(external)
                             .or_default()
                             .push(Event::Send(new_external));
+                    }
+                    Request::Send(Value::External(escaped)) => {
+                        return Err(RuntimeError::ExternalEscaped(escaped))
+                    }
+                    Request::Send(Value::String(message)) => {
+                        self.histories
+                            .entry(external)
+                            .or_default()
+                            .push(Event::Message(message));
                     }
                     Request::Receive => {
                         self.blockers.insert(external.clone(), Blocker::Receive);
