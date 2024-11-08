@@ -333,11 +333,8 @@ define stack_loop = user {
       }
     }
     push => {
-      user[query];
-      let value = return {
-        query.oneof(yes no);
-        return <> query
-      };
+      user[value];
+      value.oneof(yes no);
       stack.push;
       stack(value);
       let loop = stack_loop;
