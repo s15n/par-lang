@@ -61,11 +61,8 @@ impl eframe::App for Playground {
                 });
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
-                egui::CentralPanel::default().show_inside(ui, |ui| {
-                    egui::ScrollArea::both().show(ui, |ui| {
-                        self.show_interaction(ui);
-                        ui.allocate_space(ui.available_size());
-                    });
+                egui::ScrollArea::both().show(ui, |ui| {
+                    self.show_interaction(ui);
                 });
 
                 egui::TopBottomPanel::bottom("introspection")
