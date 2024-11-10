@@ -40,11 +40,7 @@ pub fn select_<I>(id: I, branch: I, then: Process<I>) -> Process<I> {
     Process::Do(id, Command::Select(branch, Arc::new(then)))
 }
 
-pub fn case_<I>(
-    id: I,
-    branches: impl IntoIterator<Item = (I, Process<I>)>,
-    otherwise: Process<I>,
-) -> Process<I> {
+pub fn case_<I>(id: I, branches: impl IntoIterator<Item = (I, Process<I>)>) -> Process<I> {
     Process::Do(
         id,
         Command::Case(
@@ -52,20 +48,6 @@ pub fn case_<I>(
                 .into_iter()
                 .map(|(branch, then)| (branch, Arc::new(then)))
                 .collect(),
-            Some(Arc::new(otherwise)),
-        ),
-    )
-}
-
-pub fn case_exhaust_<I>(id: I, branches: impl IntoIterator<Item = (I, Process<I>)>) -> Process<I> {
-    Process::Do(
-        id,
-        Command::Case(
-            branches
-                .into_iter()
-                .map(|(branch, then)| (branch, Arc::new(then)))
-                .collect(),
-            None,
         ),
     )
 }

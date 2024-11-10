@@ -67,12 +67,11 @@ impl<I: Clone + Ord> Environment<I> {
                         Command::Receive(_, _) => {
                             requests.insert(external.clone(), Request::Receive);
                         }
-                        Command::Case(branches, otherwise) => {
+                        Command::Case(branches) => {
                             requests.insert(
                                 external.clone(),
                                 Request::Case(
                                     branches.iter().map(|(branch, _)| branch.clone()).collect(),
-                                    otherwise.is_some(),
                                 ),
                             );
                         }
@@ -92,7 +91,7 @@ impl<I: Clone + Ord> Environment<I> {
                     .or_default()
                     .push(Event::Receive(ext.clone()));
             }
-            Response::Case(Some(selected)) => {
+            Response::Case(selected) => {
                 self.histories
                     .entry(external.clone())
                     .or_default()
@@ -165,7 +164,7 @@ impl<I: Clone + Ord> Environment<I> {
                             .or_default()
                             .push(Event::Select(selected));
                     }
-                    Action::Case(_, _) => (),
+                    Action::Case(_) => (),
                 }
             }
         }

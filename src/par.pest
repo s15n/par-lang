@@ -12,7 +12,7 @@ reference  = { name }
 fork       = { object ~ "{" ~ process ~ "}" }
 string     = @{ "\"" ~ (!("\"" | "\n" | "\r") ~ ANY)* ~ "\"" }
 
-process = { p_let | p_link | p_break | p_continue | p_send | p_receive | p_case | p_select | sugar_oneof }
+process = { p_let | p_link | p_break | p_continue | p_send | p_receive | p_case | p_select | p_pass | sugar_oneof }
 
 p_let      = { "let" ~ name ~ "=" ~ expression ~ ";" ~ process }
 p_link     = { subject ~ "<>" ~ expression }
@@ -24,6 +24,7 @@ p_select   = { subject ~ "." ~ branch ~ ";" ~ process }
 p_case     = { subject ~ "." ~ "case" ~ "{" ~ p_branches ~ "}" ~ (";" ~ process)? }
 p_branches = { p_branch* }
 p_branch   = { branch ~ "=>" ~ "{" ~ process ~ "}" }
+p_pass     = { "pass" }
 
 object    = { name }
 subject   = { name }

@@ -254,21 +254,12 @@ fn show_external(
                         }
                     }
 
-                    if let Some(Request::Case(branches, otherwise)) = requests.get(&external) {
+                    if let Some(Request::Case(branches)) = requests.get(&external) {
                         ui.menu_button(egui::RichText::new("CASE").strong(), |ui| {
                             for branch in branches {
                                 if ui.button(&branch.string).clicked() {
-                                    environment.respond(
-                                        external.clone(),
-                                        Response::Case(Some(branch.clone())),
-                                    );
-                                    need_run = true;
-                                    ui.close_menu();
-                                }
-                            }
-                            if *otherwise {
-                                if ui.button("---").clicked() {
-                                    environment.respond(external.clone(), Response::Case(None));
+                                    environment
+                                        .respond(external.clone(), Response::Case(branch.clone()));
                                     need_run = true;
                                     ui.close_menu();
                                 }

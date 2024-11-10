@@ -71,7 +71,7 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Expression<Arc<Na
         Rule::fork => {
             let mut pairs = pair.into_inner();
             let object = parse_name(&mut pairs)?;
-            let process = parse_process(&mut pairs)?;
+            let process = parse_process(&mut pairs, None)?;
             Ok(Arc::new(Expression::Fork(
                 RefCell::new(Capture::default()),
                 object,
@@ -91,15 +91,19 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Expression<Arc<Na
     }
 }
 
-fn parse_process(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Process<Arc<Name>>>, ParseError> {
+fn parse_process(
+    pairs: &mut Pairs<'_, Rule>,
+    pass: Option<Arc<Process<Arc<Name>>>>,
+) -> Result<Arc<Process<Arc<Name>>>, ParseError> {
     let pair = pairs.next().unwrap().into_inner().next().unwrap();
+    let span = pair.as_span();
     let rule = pair.as_rule();
     let mut pairs = pair.into_inner();
     match rule {
         Rule::p_let => {
             let name = parse_name(&mut pairs)?;
             let expr = parse_expression(&mut pairs)?;
-            let proc = parse_process(&mut pairs)?;
+            let proc = parse_process(&mut pairs, pass)?;
             Ok(Arc::new(Process::Let(name, expr, proc)))
         }
         Rule::p_link => {
@@ -113,13 +117,13 @@ fn parse_process(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Process<Arc<Name>>>,
         }
         Rule::p_continue => {
             let subject = parse_name(&mut pairs)?;
-            let then = parse_process(&mut pairs)?;
+            let then = parse_process(&mut pairs, pass)?;
             Ok(Arc::new(Process::Do(subject, Command::Continue(then))))
         }
         Rule::p_send => {
             let subject = parse_name(&mut pairs)?;
             let argument = parse_expression(&mut pairs)?;
-            let then = parse_process(&mut pairs)?;
+            let then = parse_process(&mut pairs, pass)?;
             Ok(Arc::new(Process::Do(
                 subject,
                 Command::Send(argument, then),
@@ -128,7 +132,7 @@ fn parse_process(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Process<Arc<Name>>>,
         Rule::p_receive => {
             let subject = parse_name(&mut pairs)?;
             let parameter = parse_name(&mut pairs)?;
-            let then = parse_process(&mut pairs)?;
+            let then = parse_process(&mut pairs, pass)?;
             Ok(Arc::new(Process::Do(
                 subject,
                 Command::Receive(parameter, then),
@@ -137,7 +141,7 @@ fn parse_process(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Process<Arc<Name>>>,
         Rule::p_select => {
             let subject = parse_name(&mut pairs)?;
             let branch = parse_name(&mut pairs)?;
-            let then = parse_process(&mut pairs)?;
+            let then = parse_process(&mut pairs, pass)?;
             Ok(Arc::new(Process::Do(
                 subject,
                 Command::Select(branch, then),
@@ -147,21 +151,30 @@ fn parse_process(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Process<Arc<Name>>>,
             let subject = parse_name(&mut pairs)?;
             let pair = pairs.next().unwrap();
             assert_eq!(pair.as_rule(), Rule::p_branches);
+
+            let mut pass = pass;
+            if let Some(pair) = pairs.next() {
+                pass = Some(parse_process(&mut Pairs::single(pair), pass)?);
+            }
+
             let mut branches = Vec::new();
             for mut pairs in pair.into_inner().map(Pair::into_inner) {
                 let branch = parse_name(&mut pairs)?;
-                let process = parse_process(&mut pairs)?;
+                let process = parse_process(&mut pairs, pass.clone())?;
                 branches.push((branch, process));
             }
-            let otherwise = match pairs.next() {
-                Some(pair) => Some(parse_process(&mut Pairs::single(pair))?),
-                None => None,
-            };
-            Ok(Arc::new(Process::Do(
-                subject,
-                Command::Case(branches, otherwise),
-            )))
+            Ok(Arc::new(Process::Do(subject, Command::Case(branches))))
         }
+        Rule::p_pass => match pass {
+            Some(process) => Ok(process),
+            None => Err(pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::ParsingError {
+                    positives: vec![Rule::process],
+                    negatives: vec![],
+                },
+                span,
+            ))?,
+        },
 
         Rule::sugar_oneof => {
             use crate::notation::*;
@@ -173,7 +186,7 @@ fn parse_process(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Process<Arc<Name>>>,
                 .into_inner()
                 .map(|pair| parse_name(&mut Pairs::single(pair)))
                 .collect::<Result<Vec<_>, _>>()?;
-            let then = parse_process(&mut pairs)?;
+            let then = parse_process(&mut pairs, pass)?;
 
             // subject.oneof(yes no);
             // -->
@@ -193,7 +206,7 @@ fn parse_process(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Process<Arc<Name>>>,
                 subject.clone(),
                 fork_(
                     result.clone(),
-                    case_exhaust_(
+                    case_(
                         subject.clone(),
                         branches.into_iter().map(|branch| {
                             (

@@ -88,12 +88,9 @@ impl<I: Clone + Ord> Process<I> {
                 free.insert(name.clone());
                 free
             }
-            Self::Do(name, Command::Case(branches, otherwise)) => {
+            Self::Do(name, Command::Case(branches)) => {
                 let mut free = BTreeSet::new();
                 for (_, process) in branches {
-                    free.extend(process.fix_captures());
-                }
-                if let Some(process) = otherwise {
                     free.extend(process.fix_captures());
                 }
                 free.insert(name.clone());
@@ -110,7 +107,7 @@ pub enum Command<I> {
     Send(Arc<Expression<I>>, Arc<Process<I>>),
     Receive(I, Arc<Process<I>>),
     Select(I, Arc<Process<I>>),
-    Case(Vec<(I, Arc<Process<I>>)>, Option<Arc<Process<I>>>),
+    Case(Vec<(I, Arc<Process<I>>)>),
 }
 
 impl<I: Clone> Command<I> {
@@ -121,7 +118,7 @@ impl<I: Clone> Command<I> {
             Self::Send(_, _) => RuntimeError::CannotSendTo(value),
             Self::Receive(_, _) => RuntimeError::CannotReceiveFrom(value),
             Self::Select(branch, _) => RuntimeError::MissingCase(value, branch.clone()),
-            Self::Case(branches, _) => RuntimeError::CannotSelectFrom(
+            Self::Case(branches) => RuntimeError::CannotSelectFrom(
                 value,
                 branches
                     .into_iter()
@@ -169,12 +166,11 @@ impl<I: Clone + Ord, X: Clone + Ord> Value<I, X> {
                             Command::Receive(_, _) => {
                                 requesting.insert(external.clone(), Request::Receive);
                             }
-                            Command::Case(branches, otherwise) => {
+                            Command::Case(branches) => {
                                 requesting.insert(
                                     external.clone(),
                                     Request::Case(
                                         branches.iter().map(|(branch, _)| branch.clone()).collect(),
-                                        otherwise.is_some(),
                                     ),
                                 );
                             }
@@ -210,13 +206,13 @@ pub enum Action<I, X> {
     Select(I),
 
     #[allow(unused)]
-    Case(Vec<I>, bool),
+    Case(Vec<I>),
 }
 
 impl<I, X> Action<I, X> {
     pub fn is_requesting(&self) -> bool {
         match self {
-            Self::Receive | Self::Case(_, _) => true,
+            Self::Receive | Self::Case(_) => true,
             _ => false,
         }
     }
@@ -225,13 +221,13 @@ impl<I, X> Action<I, X> {
 #[derive(Clone, Debug)]
 pub enum Request<I> {
     Receive,
-    Case(Vec<I>, bool),
+    Case(Vec<I>),
 }
 
 #[derive(Clone, Debug)]
 pub enum Response<I, X> {
     Receive(Value<I, X>),
-    Case(Option<I>),
+    Case(I),
 }
 
 #[derive(Clone, Debug)]
@@ -551,19 +547,15 @@ pub fn step<I: Clone + Ord, X: Clone + Ord>(
                         ))
                     }
 
-                    Command::Case(branches, otherwise) => match responses.remove(&ext) {
+                    Command::Case(branches) => match responses.remove(&ext) {
                         Some(Response::Case(selected)) => {
                             for (branch, then) in branches {
-                                if selected.as_ref() == Some(branch) {
+                                if &selected == branch {
                                     context.set(name, Value::External(ext))?;
                                     return Ok((Running::some(context, Arc::clone(then)), None));
                                 }
                             }
-                            let Some(otherwise) = otherwise else {
-                                return Err(command.cannot(Value::External(ext)));
-                            };
-                            context.set(name, Value::External(ext))?;
-                            Ok((Running::some(context, Arc::clone(otherwise)), None))
+                            Err(command.cannot(Value::External(ext)))
                         }
                         Some(_) => Err(command.cannot(Value::External(ext))),
                         None => {
@@ -574,7 +566,6 @@ pub fn step<I: Clone + Ord, X: Clone + Ord>(
                                     ext,
                                     Action::Case(
                                         branches.iter().map(|(branch, _)| branch.clone()).collect(),
-                                        otherwise.is_some(),
                                     ),
                                 )),
                             ))
@@ -633,10 +624,10 @@ pub fn step<I: Clone + Ord, X: Clone + Ord>(
 
                 (
                     (mut select_context, name, Command::Select(selected, after_select)),
-                    (mut handle_context, channel, Command::Case(branches, otherwise)),
+                    (handle_context, channel, Command::Case(branches)),
                 )
                 | (
-                    (mut handle_context, channel, Command::Case(branches, otherwise)),
+                    (handle_context, channel, Command::Case(branches)),
                     (mut select_context, name, Command::Select(selected, after_select)),
                 ) => {
                     for (branch, then) in branches {
@@ -651,31 +642,14 @@ pub fn step<I: Clone + Ord, X: Clone + Ord>(
                             ));
                         }
                     }
-                    let Some(otherwise) = otherwise else {
-                        return Err(RuntimeError::MissingCase(
-                            Value::Suspend(
-                                handle_context,
-                                channel.clone(),
-                                Arc::new(Process::Do(
-                                    name.clone(),
-                                    Command::Case(branches.clone(), None),
-                                )),
-                            ),
-                            selected.clone(),
-                        ));
-                    };
-                    handle_context.set(
-                        channel,
+                    Err(RuntimeError::MissingCase(
                         Value::Suspend(
-                            select_context,
-                            name.clone(),
-                            Arc::new(Process::Do(
-                                name.clone(),
-                                Command::Select(selected.clone(), Arc::clone(after_select)),
-                            )),
+                            handle_context,
+                            channel.clone(),
+                            Arc::new(Process::Do(name.clone(), Command::Case(branches.clone()))),
                         ),
-                    )?;
-                    Ok((Running::some(handle_context, Arc::clone(otherwise)), None))
+                        selected.clone(),
+                    ))
                 }
 
                 (_, (target_context, channel, command)) => Err(command.cannot(Value::Suspend(
@@ -716,16 +690,12 @@ impl<I: std::fmt::Display> std::fmt::Display for Process<I> {
             Self::Do(name, Command::Select(branch, process)) => {
                 write!(f, "{}.{}; {}", name, branch, process)
             }
-            Self::Do(name, Command::Case(branches, otherwise)) => {
+            Self::Do(name, Command::Case(branches)) => {
                 write!(f, "{}.case {{ ", name)?;
                 for (branch, process) in branches {
                     write!(f, "{} => {{ {} }} ", branch, process)?;
                 }
-                write!(f, "}}")?;
-                if let Some(otherwise) = otherwise {
-                    write!(f, "; {}", otherwise)?;
-                }
-                Ok(())
+                write!(f, "}}")
             }
         }
     }
