@@ -31,7 +31,7 @@ pub struct Location {
 }
 
 #[derive(Parser)]
-#[grammar = "par.pest"]
+#[grammar = "par_core.pest"]
 pub struct Par;
 
 pub fn parse_program<X: std::fmt::Display>(

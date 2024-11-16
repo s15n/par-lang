@@ -4,7 +4,7 @@ use playground::Playground;
 mod base;
 mod interact;
 mod notation;
-mod parse;
+mod parse_core;
 mod playground;
 mod print;
 

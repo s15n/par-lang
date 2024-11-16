@@ -10,7 +10,7 @@ use eframe::egui::{self, RichText};
 use crate::{
     base::{Context, Request, Response, RuntimeError},
     interact::{Environment, Event, External},
-    parse::{parse_program, Name, ParseError},
+    parse_core::{parse_program, Name, ParseError},
     print::print_context,
 };
 
