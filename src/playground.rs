@@ -366,78 +366,53 @@ fn blue() -> egui::Color32 {
     egui::Color32::from_hex("#118ab2").unwrap()
 }
 
-static DEFAULT_CODE: &str = r#"
-define play_with_stack = user {
-  user("Happy poppin'");
-  let loop = stack_loop;
-  loop(drained);
-  user <> loop
+static DEFAULT_CODE: &str =
+r#"define play_with_stack = user {
+  user("Happy poppin'") <> stack_loop(drained)
 }
 
 define stack_loop = user {
-  user[stack];
-  user.case {
+  user[stack].case {
     pop => {
-      stack.pop;
-      stack.case {
+      stack.pop.case {
         empty => {
-          user.empty;
           stack[];
-          user()
+          user.empty()
         }
         item => {
-          user.item;
           stack[value];
-          user(value);
-          let loop = stack_loop;
-          loop(stack);
-          user <> loop
+          user.item(value) <> stack_loop(stack)
         }
       }
     }
     push => {
       user[value];
-      value.oneof(yes no);
-      stack.push;
-      stack(value);
-      let loop = stack_loop;
-      loop(stack);
-      user <> loop
+      stack.push(red_green_blue(value));
+      user <> stack_loop(stack)
     }
   }
 }
 
 define drained = items {
   items.case {
-    pop => {
-      items.empty;
-      items()
-    }
-    push => {
-      let above = stacked;
-      above(drained);
-      items <> above
-    }
+    pop  => { items.empty() }
+    push => { items <> stacked(drained) }
   }
 }
 
 define stacked = items {
-  items[under];
-  items[top];
-  items.case {
-    pop => {
-      items.item;
-      items(top);
-      items <> under
-    }
-    push => {
-      let above = stacked;
-      let self = stacked;
-      self(under);
-      self(top);
-      above(self);
-      items <> above
-    }
+  items[under][top].case {
+    pop  => { items.item(top) <> under }
+    push => { items <> stacked(stacked(under)(top)) }
+  }
+}
+
+define red_green_blue = f {
+  f[value];
+  value.case {
+    red   => { value[]; f.red() }
+    green => { value[]; f.green() }
+    blue  => { value[]; f.blue() }
   }
 }
 "#;
