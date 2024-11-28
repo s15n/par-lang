@@ -26,9 +26,9 @@ p_branches = { p_branch* }
 p_branch   = { branch ~ "=>" ~ "{" ~ process ~ "}" }
 p_pass     = { "pass" }
 
-object    = { name }
-subject   = { name }
-branch    = { name }
+object  = { name }
+subject = { name }
+branch  = { name }
 
 // syntax sugar
 sugar_oneof = { subject ~ "." ~ "oneof" ~ "(" ~ sugar_names ~ ")" ~ ";" ~ process }

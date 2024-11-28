@@ -15,7 +15,6 @@ pub struct Name {
     pub location: Location,
 }
 
-#[allow(unused)]
 #[derive(Clone, Debug)]
 pub struct ParseError {
     pub message: String,
@@ -31,16 +30,21 @@ pub struct Location {
     pub column: usize,
 }
 
-#[allow(unused)]
 #[derive(Parser)]
-#[grammar = "par_core.pest"]
+#[grammar = "par.pest"]
 pub struct Par;
 
-#[allow(unused)]
 pub fn parse_program<X: std::fmt::Display>(
     source: &str,
-) -> Result<Context<Arc<Name>, X>, ParseError> {
+) -> Result<
+    (
+        Context<Arc<Name>, X>,
+        Vec<(Arc<Name>, Arc<Expression<Arc<Name>>>)>,
+    ),
+    ParseError,
+> {
     let mut context = Context::new();
+    let mut definitions = Vec::new();
     for pair in Par::parse(Rule::program, source)?
         .next()
         .unwrap()
@@ -52,6 +56,7 @@ pub fn parse_program<X: std::fmt::Display>(
         let mut pairs = pair.into_inner();
         let name = parse_name(&mut pairs)?;
         let expr = parse_expression(&mut pairs)?;
+        definitions.push((name.clone(), expr.clone()));
         if let Some(_) = context.statics.insert(name.clone(), expr) {
             return Err(ParseError {
                 message: format!("\"{}\" is already defined", name.string),
@@ -60,7 +65,7 @@ pub fn parse_program<X: std::fmt::Display>(
         }
     }
     context.fix_captures();
-    Ok(context)
+    Ok((context, definitions))
 }
 
 fn parse_name(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Name>, ParseError> {
@@ -70,8 +75,15 @@ fn parse_name(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Name>, ParseError> {
 
 fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Expression<Arc<Name>>>, ParseError> {
     let pair = pairs.next().unwrap().into_inner().next().unwrap();
+
     match pair.as_rule() {
-        Rule::fork => {
+        Rule::string => {
+            let slice = pair.as_str();
+            let literal = Arc::from(&slice[1..slice.len() - 1]);
+            Ok(Arc::new(Expression::String(literal)))
+        }
+
+        Rule::expr_fork => {
             let mut pairs = pair.into_inner();
             let object = parse_name(&mut pairs)?;
             let process = parse_process(&mut pairs, None)?;
@@ -81,15 +93,12 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Expression<Arc<Na
                 process,
             )))
         }
-        Rule::reference => {
+
+        Rule::expr_ref => {
             let name = Arc::new(pair.into());
             Ok(Arc::new(Expression::Ref(name)))
         }
-        Rule::string => {
-            let slice = pair.as_str();
-            let literal = Arc::from(&slice[1..slice.len() - 1]);
-            Ok(Arc::new(Expression::String(literal)))
-        }
+
         _ => unreachable!(),
     }
 }
@@ -99,61 +108,52 @@ fn parse_process(
     pass: Option<Arc<Process<Arc<Name>>>>,
 ) -> Result<Arc<Process<Arc<Name>>>, ParseError> {
     let pair = pairs.next().unwrap().into_inner().next().unwrap();
-    let span = pair.as_span();
     let rule = pair.as_rule();
     let mut pairs = pair.into_inner();
+
     match rule {
-        Rule::p_let => {
+        Rule::proc_let => {
             let name = parse_name(&mut pairs)?;
             let expr = parse_expression(&mut pairs)?;
             let proc = parse_process(&mut pairs, pass)?;
             Ok(Arc::new(Process::Let(name, expr, proc)))
         }
-        Rule::p_link => {
+
+        Rule::command => {
             let subject = parse_name(&mut pairs)?;
+            parse_proc_apply(subject, &mut pairs, pass)
+        }
+
+        _ => unreachable!(),
+    }
+}
+
+fn parse_proc_apply(
+    subject: Arc<Name>,
+    pairs: &mut Pairs<'_, Rule>,
+    pass: Option<Arc<Process<Arc<Name>>>>,
+) -> Result<Arc<Process<Arc<Name>>>, ParseError> {
+    let pair = pairs.next().unwrap().into_inner().next().unwrap();
+    let span = pair.as_span();
+    let rule = pair.as_rule();
+    let mut pairs = pair.into_inner();
+
+    match rule {
+        Rule::proc_link => {
             let argument = parse_expression(&mut pairs)?;
             Ok(Arc::new(Process::Link(subject, argument)))
         }
-        Rule::p_break => {
-            let subject = parse_name(&mut pairs)?;
-            Ok(Arc::new(Process::Do(subject, Command::Break)))
-        }
-        Rule::p_continue => {
-            let subject = parse_name(&mut pairs)?;
+
+        Rule::proc_break => Ok(Arc::new(Process::Do(subject, Command::Break))),
+
+        Rule::proc_continue => {
             let then = parse_process(&mut pairs, pass)?;
             Ok(Arc::new(Process::Do(subject, Command::Continue(then))))
         }
-        Rule::p_send => {
-            let subject = parse_name(&mut pairs)?;
-            let argument = parse_expression(&mut pairs)?;
-            let then = parse_process(&mut pairs, pass)?;
-            Ok(Arc::new(Process::Do(
-                subject,
-                Command::Send(argument, then),
-            )))
-        }
-        Rule::p_receive => {
-            let subject = parse_name(&mut pairs)?;
-            let parameter = parse_name(&mut pairs)?;
-            let then = parse_process(&mut pairs, pass)?;
-            Ok(Arc::new(Process::Do(
-                subject,
-                Command::Receive(parameter, then),
-            )))
-        }
-        Rule::p_select => {
-            let subject = parse_name(&mut pairs)?;
-            let branch = parse_name(&mut pairs)?;
-            let then = parse_process(&mut pairs, pass)?;
-            Ok(Arc::new(Process::Do(
-                subject,
-                Command::Select(branch, then),
-            )))
-        }
-        Rule::p_case => {
-            let subject = parse_name(&mut pairs)?;
+
+        Rule::proc_case => {
             let pair = pairs.next().unwrap();
-            assert_eq!(pair.as_rule(), Rule::p_branches);
+            assert_eq!(pair.as_rule(), Rule::proc_branches);
 
             let mut pass = pass;
             if let Some(pair) = pairs.next() {
@@ -166,9 +166,11 @@ fn parse_process(
                 let process = parse_process(&mut pairs, pass.clone())?;
                 branches.push((branch, process));
             }
+
             Ok(Arc::new(Process::Do(subject, Command::Case(branches))))
         }
-        Rule::p_pass => match pass {
+
+        Rule::proc_pass => match pass {
             Some(process) => Ok(process),
             None => Err(pest::error::Error::new_from_span(
                 pest::error::ErrorVariant::ParsingError {
@@ -179,52 +181,46 @@ fn parse_process(
             ))?,
         },
 
-        Rule::sugar_oneof => {
-            use crate::notation::*;
+        Rule::proc_action => {
+            let pair = pairs.next().unwrap();
+            assert_eq!(pair.as_rule(), Rule::action);
+            let action = pair.into_inner().next().unwrap();
 
-            let subject = parse_name(&mut pairs)?;
-            let branches = pairs
-                .next()
-                .unwrap()
-                .into_inner()
-                .map(|pair| parse_name(&mut Pairs::single(pair)))
-                .collect::<Result<Vec<_>, _>>()?;
-            let then = parse_process(&mut pairs, pass)?;
+            let pair = pairs.next().unwrap();
+            let then = match pair.as_rule() {
+                Rule::proc_apply => {
+                    parse_proc_apply(subject.clone(), &mut Pairs::single(pair), pass)?
+                }
+                Rule::process => parse_process(&mut Pairs::single(pair), pass)?,
+                _ => unreachable!(),
+            };
 
-            // subject.oneof(yes no);
-            // -->
-            // let subject = result {
-            //   subject.case {
-            //     yes => { result.yes; subject[]; result() }
-            //     no  => { result.no;  subject[]; result() }
-            //   }
-            // }
-
-            let result = Arc::new(Name {
-                string: "result".to_string(),
-                location: subject.location.clone(),
-            });
-
-            Ok(Arc::new(let_(
-                subject.clone(),
-                fork_(
-                    result.clone(),
-                    case_(
-                        subject.clone(),
-                        branches.into_iter().map(|branch| {
-                            (
-                                branch.clone(),
-                                select_(
-                                    result.clone(),
-                                    branch,
-                                    continue_(subject.clone(), break_(result.clone())),
-                                ),
-                            )
-                        }),
-                    ),
-                ),
-                (*then).clone(),
-            )))
+            let rule = action.as_rule();
+            let mut pairs = action.into_inner();
+            match rule {
+                Rule::send => {
+                    let argument = parse_expression(&mut pairs)?;
+                    Ok(Arc::new(Process::Do(
+                        subject,
+                        Command::Send(argument, then),
+                    )))
+                }
+                Rule::receive => {
+                    let parameter = parse_name(&mut pairs)?;
+                    Ok(Arc::new(Process::Do(
+                        subject,
+                        Command::Receive(parameter, then),
+                    )))
+                }
+                Rule::select => {
+                    let branch = parse_name(&mut pairs)?;
+                    Ok(Arc::new(Process::Do(
+                        subject,
+                        Command::Select(branch, then),
+                    )))
+                }
+                _ => unreachable!(),
+            }
         }
 
         _ => unreachable!(),

@@ -1,0 +1,36 @@
+WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
+COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
+
+name   = @{ (("_" | ASCII_ALPHA) ~ ("_" | ASCII_ALPHANUMERIC)*) }
+string = @{ "\"" ~ (!("\"" | "\n" | "\r") ~ ANY)* ~ "\"" }
+
+program    = { SOI ~ definition* ~ EOI }
+definition = { "define" ~ name ~ "=" ~ expression }
+
+action  = { send | receive | select }
+send    = { "(" ~ expression ~ ")" }
+receive = { "[" ~ name ~ "]"}
+select  = { "." ~ name }
+
+expression = { string | expr_fork | expr_ref }
+
+expr_fork = { name ~ "{" ~ process ~ "}" }
+expr_ref  = { name }
+
+expr_branches = { expr_branch* }
+expr_branch   = { name ~ name ~ "=>" ~ expression }
+
+process   = { proc_let | proc_link | command }
+proc_let  = { "let" ~ name ~ "=" ~ expression ~ ";" ~ process }
+
+command       = { name ~ proc_apply }
+proc_apply    = { proc_link | proc_break | proc_continue | proc_case | proc_pass | proc_action }
+proc_link     = { "<>" ~ expression }
+proc_break    = { "()" }
+proc_continue = { "[]" ~ ";" ~ process }
+proc_case     = { "." ~ "case" ~ "{" ~ proc_branches ~ "}" ~ (";" ~ process)? }
+proc_pass     = { "pass" }
+proc_action   = { action ~ (proc_apply | (";" ~ process)) }
+
+proc_branches = { proc_branch* }
+proc_branch   = { name ~ "=>" ~ "{" ~ process ~ "}" }
