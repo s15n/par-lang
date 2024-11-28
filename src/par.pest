@@ -1,7 +1,7 @@
 WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
 COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
-name   = @{ (("_" | ASCII_ALPHA) ~ ("_" | ASCII_ALPHANUMERIC)*) }
+name   = @{ (ASCII_ALPHA ~ ("_" | ASCII_ALPHANUMERIC)*) }
 string = @{ "\"" ~ (!("\"" | "\n" | "\r") ~ ANY)* ~ "\"" }
 
 program    = { SOI ~ definition* ~ EOI }
@@ -12,10 +12,11 @@ send    = { "(" ~ expression ~ ")" }
 receive = { "[" ~ name ~ "]"}
 select  = { "." ~ name }
 
-expression = { string | expr_fork | expr_ref }
+expression = { string | expr_fork | reference }
+expr_fork  = { name ~ "{" ~ process ~ "}" }
 
-expr_fork = { name ~ "{" ~ process ~ "}" }
-expr_ref  = { name }
+reference  = { name ~ expr_apply? }
+expr_apply = { action ~ expr_apply? }
 
 expr_branches = { expr_branch* }
 expr_branch   = { name ~ name ~ "=>" ~ expression }

@@ -94,11 +94,77 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Expression<Arc<Na
             )))
         }
 
-        Rule::expr_ref => {
-            let name = Arc::new(pair.into());
-            Ok(Arc::new(Expression::Ref(name)))
+        Rule::reference => {
+            let mut pairs = pair.into_inner();
+            let name = Arc::<Name>::new(pairs.next().unwrap().into());
+            match pairs.next() {
+                Some(pair) => {
+                    assert_eq!(pair.as_rule(), Rule::expr_apply);
+                    let result = Arc::new(Name {
+                        string: "_result".to_string(),
+                        location: name.as_ref().location.clone(),
+                    });
+                    let object = Arc::new(Name {
+                        string: "_object".to_string(),
+                        location: name.as_ref().location.clone(),
+                    });
+                    Ok(Arc::new(Expression::Fork(
+                        RefCell::default(),
+                        result.clone(),
+                        Arc::new(Process::Let(
+                            object.clone(),
+                            Arc::new(Expression::Ref(name)),
+                            parse_expr_apply(result, object, &mut pair.into_inner())?,
+                        )),
+                    )))
+                }
+                None => Ok(Arc::new(Expression::Ref(name))),
+            }
         }
 
+        _ => unreachable!(),
+    }
+}
+
+fn parse_expr_apply(
+    result: Arc<Name>,
+    object: Arc<Name>,
+    pairs: &mut Pairs<'_, Rule>,
+) -> Result<Arc<Process<Arc<Name>>>, ParseError> {
+    let pair = pairs.next().unwrap();
+    assert_eq!(pair.as_rule(), Rule::action);
+    let action = pair.into_inner().next().unwrap();
+
+    let then = match pairs.next() {
+        Some(pair) => {
+            assert_eq!(pair.as_rule(), Rule::expr_apply);
+            parse_expr_apply(result, object.clone(), &mut pair.into_inner())?
+        }
+        None => Arc::new(Process::Link(
+            result,
+            Arc::new(Expression::Ref(object.clone())),
+        )),
+    };
+
+    let rule = action.as_rule();
+    let mut pairs = action.into_inner();
+
+    match rule {
+        Rule::send => {
+            let argument = parse_expression(&mut pairs)?;
+            Ok(Arc::new(Process::Do(object, Command::Send(argument, then))))
+        }
+        Rule::receive => {
+            let parameter = parse_name(&mut pairs)?;
+            Ok(Arc::new(Process::Do(
+                object,
+                Command::Receive(parameter, then),
+            )))
+        }
+        Rule::select => {
+            let branch = parse_name(&mut pairs)?;
+            Ok(Arc::new(Process::Do(object, Command::Select(branch, then))))
+        }
         _ => unreachable!(),
     }
 }
