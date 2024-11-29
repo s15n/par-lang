@@ -385,20 +385,14 @@ define loop = [stack] chan user {
   }
 }
 
-define drained = chan items {
-  items {
-    pop => { items.empty() }
-    push => { items <> stacked(drained) }
-  }
+define drained = {
+  pop  => .empty()
+  push => stacked(drained)
 }
 
-define stacked = [under][top] chan items {
-  items {
-    pop => { items.item(top) <> under }
-    push => {
-      items <> stacked(stacked(under)(top))
-    }
-  }
+define stacked = [under][top] {
+  pop  => .item(top) under
+  push => stacked(stacked(under)(top))
 }
 
 define rgb = [value] chan out {

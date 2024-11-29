@@ -13,11 +13,16 @@ receive = { "[" ~ name ~ "]"}
 select  = { "." ~ name }
 close   = { "[]" }
 
-expression = { string | expr_fork | reference | construction }
+expression = { string | expr_break | expr_fork | expr_case | reference | construction }
+expr_break = { "()" }
 expr_fork  = { "chan" ~ name ~ "{" ~ process ~ "}" }
+expr_case  = { "{" ~ expr_branches ~ "}" }
 
 reference    = { name ~ actions? }
 construction = { actions ~ expression }
+
+expr_branches = { expr_branch* }
+expr_branch   = { name ~ "=>" ~ expression }
 
 process  = { proc_let | proc_link | command }
 proc_let = { "let" ~ name ~ "=" ~ expression ~ ";" ~ process }
@@ -27,12 +32,12 @@ proc_apply    = { proc_link | proc_break | proc_continue | proc_case | proc_pass
 proc_link     = { "<>" ~ expression }
 proc_break    = { "()" }
 proc_continue = { "[]" ~ ";" ~ process }
-proc_case     = { "{" ~ branches ~ "}" ~ (";" ~ process)? }
+proc_case     = { "{" ~ proc_branches ~ "}" ~ (";" ~ process)? }
 proc_pass     = { "pass" }
 proc_action   = { action ~ (proc_apply | (";" ~ process)) }
 
-branches    = { branch* }
-branch      = { branch_head ~ "=>" ~ "{" ~ process ~ "}" }
-branch_head = { name ~ actions? }
+proc_branches    = { proc_branch* }
+proc_branch      = { proc_branch_head ~ "=>" ~ "{" ~ process ~ "}" }
+proc_branch_head = { name ~ actions? }
 
 actions = { action ~ actions? }
