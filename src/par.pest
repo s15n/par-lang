@@ -13,10 +13,11 @@ receive = { "[" ~ name ~ "]"}
 select  = { "." ~ name }
 close   = { "[]" }
 
-expression = { string | expr_fork | reference }
+expression = { string | expr_fork | reference | construction }
 expr_fork  = { "chan" ~ name ~ "{" ~ process ~ "}" }
 
-reference = { name ~ actions? }
+reference    = { name ~ actions? }
+construction = { actions ~ expression }
 
 process  = { proc_let | proc_link | command }
 proc_let = { "let" ~ name ~ "=" ~ expression ~ ";" ~ process }

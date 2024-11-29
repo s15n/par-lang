@@ -126,6 +126,26 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Expression<Arc<Na
             }
         }
 
+        Rule::construction => {
+            let mut pairs = pair.into_inner();
+            let pair = pairs.next().unwrap();
+            assert_eq!(pair.as_rule(), Rule::actions);
+            let expression = parse_expression(&mut pairs)?;
+            let construct = Arc::new(Name {
+                string: "_cons".to_string(),
+                location: pair.clone().into(),
+            });
+            let after = Arc::new(Process::Link(
+                construct.clone(),
+                expression,
+            ));
+            Ok(Arc::new(Expression::Fork(
+                RefCell::default(),
+                construct.clone(),
+                parse_actions(&mut pair.into_inner(), construct, after)?,
+            )))
+        }
+
         _ => unreachable!(),
     }
 }

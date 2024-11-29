@@ -370,8 +370,8 @@ static DEFAULT_CODE: &str = r#"define play_with_stack = chan user {
   user("Happy poppin'") <> stack_loop(drained)
 }
 
-define stack_loop = chan user {
-  user[stack] {
+define stack_loop = [stack] chan user {
+  user {
     pop => {
       stack.pop {
         empty[] => { user.empty() }
@@ -394,8 +394,8 @@ define drained = chan items {
   }
 }
 
-define stacked = chan items {
-  items[under][top] {
+define stacked = [under][top] chan items {
+  items {
     pop => { items.item(top) <> under }
     push => {
       items <> stacked(stacked(under)(top))
@@ -403,12 +403,11 @@ define stacked = chan items {
   }
 }
 
-define red_green_blue = chan f {
-  f[value];
+define red_green_blue = [value] chan out {
   value {
-    red[] => { f.red() }
-    green[] => { f.green() }
-    blue[] => { f.blue() }
+    red[] => { out.red() }
+    green[] => { out.green() }
+    blue[] => { out.blue() }
   }
 }
 "#;
