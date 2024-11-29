@@ -366,23 +366,21 @@ fn blue() -> egui::Color32 {
     egui::Color32::from_hex("#118ab2").unwrap()
 }
 
-static DEFAULT_CODE: &str = r#"define play_with_stack = chan user {
-  user("Happy poppin'") <> stack_loop(drained)
-}
+static DEFAULT_CODE: &str = r#"define play = ("Happy poppin'") loop(drained)
 
-define stack_loop = [stack] chan user {
+define loop = [stack] chan user {
   user {
     pop => {
       stack.pop {
         empty[] => { user.empty() }
         item[value] => {
-          user.item(value) <> stack_loop(stack)
+          user.item(value) <> loop(stack)
         }
       }
     }
     push[value] => {
-      stack.push(red_green_blue(value));
-      user <> stack_loop(stack)
+      stack.push(rgb(value));
+      user <> loop(stack)
     }
   }
 }
@@ -403,7 +401,7 @@ define stacked = [under][top] chan items {
   }
 }
 
-define red_green_blue = [value] chan out {
+define rgb = [value] chan out {
   value {
     red[] => { out.red() }
     green[] => { out.green() }
