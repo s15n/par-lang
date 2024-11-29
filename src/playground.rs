@@ -77,7 +77,7 @@ impl eframe::App for Playground {
                             .id_source("code")
                             .with_syntax(par_syntax())
                             .with_rows(32)
-                            .with_fontsize(16.0)
+                            .with_fontsize(22.0)
                             .with_theme(theme)
                             .with_numlines(true)
                             .show(ui, code_to_show);
@@ -395,11 +395,9 @@ define stacked = [under][top] {
   push => stacked(stacked(under)(top))
 }
 
-define rgb = [value] chan out {
-  value {
-    red[] => { out.red() }
-    green[] => { out.green() }
-    blue[] => { out.blue() }
-  }
+define rgb = [value] value {
+  red[]   => .red()
+  green[] => .green()
+  blue[]  => .blue()
 }
 "#;

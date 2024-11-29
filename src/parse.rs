@@ -91,7 +91,7 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Expression<Arc<Na
             Ok(Arc::new(Expression::Fork(
                 RefCell::default(),
                 construct.clone(),
-                Arc::new(Process::Do(construct, Command::Break))
+                Arc::new(Process::Do(construct, Command::Break)),
             )))
         }
 
@@ -136,34 +136,99 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Expression<Arc<Na
             let mut pairs = pair.into_inner();
             let name = Arc::<Name>::new(pairs.next().unwrap().into());
 
-            match pairs.next() {
+            let ref_actions = pairs.next().unwrap();
+            assert_eq!(ref_actions.as_rule(), Rule::reference_actions);
+
+            let result = Arc::new(Name {
+                string: "_result".to_string(),
+                location: name.as_ref().location.clone(),
+            });
+            let object = Arc::new(Name {
+                string: "_object".to_string(),
+                location: name.as_ref().location.clone(),
+            });
+
+            let expression = match ref_actions.into_inner().next() {
                 Some(pair) => {
                     assert_eq!(pair.as_rule(), Rule::actions);
 
-                    let result = Arc::new(Name {
-                        string: "_result".to_string(),
-                        location: name.as_ref().location.clone(),
-                    });
-                    let object = Arc::new(Name {
-                        string: "_object".to_string(),
-                        location: name.as_ref().location.clone(),
-                    });
                     let after = Arc::new(Process::Link(
                         result.clone(),
                         Arc::new(Expression::Ref(object.clone())),
                     ));
+
+                    Arc::new(Expression::Fork(
+                        RefCell::default(),
+                        result.clone(),
+                        Arc::new(Process::Let(
+                            object.clone(),
+                            Arc::new(Expression::Ref(name)),
+                            parse_actions(&mut pair.into_inner(), object.clone(), after)?,
+                        )),
+                    ))
+                }
+                None => Arc::new(Expression::Ref(name)),
+            };
+
+            match pairs.next() {
+                Some(pair) => {
+                    assert_eq!(pair.as_rule(), Rule::apply_case);
+
+                    let mut branches = Vec::new();
+                    for mut pairs in pair
+                        .into_inner()
+                        .next()
+                        .unwrap()
+                        .into_inner()
+                        .map(Pair::into_inner)
+                    {
+                        let mut head = pairs.next().unwrap().into_inner();
+                        let expression = parse_expression(&mut pairs)?;
+                        let branch = parse_name(&mut head)?;
+
+                        let branch_actions = head.next().unwrap();
+                        assert_eq!(branch_actions.as_rule(), Rule::apply_branch_actions);
+
+                        let closing = head.next().unwrap();
+                        let mut process = match closing.as_rule() {
+                            Rule::apply_branch_close => Arc::new(Process::Do(
+                                object.clone(),
+                                Command::Continue(Arc::new(Process::Link(
+                                    result.clone(),
+                                    expression,
+                                ))),
+                            )),
+                            Rule::apply_branch_bind => {
+                                let bound = parse_name(&mut closing.into_inner())?;
+                                Arc::new(Process::Let(
+                                    bound,
+                                    Arc::new(Expression::Ref(object.clone())),
+                                    Arc::new(Process::Link(result.clone(), expression)),
+                                ))
+                            }
+                            _ => unreachable!(),
+                        };
+
+                        process = match branch_actions.into_inner().next() {
+                            Some(actions) => {
+                                parse_actions(&mut actions.into_inner(), object.clone(), process)?
+                            }
+                            None => process,
+                        };
+                        branches.push((branch, process));
+                    }
 
                     Ok(Arc::new(Expression::Fork(
                         RefCell::default(),
                         result.clone(),
                         Arc::new(Process::Let(
                             object.clone(),
-                            Arc::new(Expression::Ref(name)),
-                            parse_actions(&mut pair.into_inner(), object, after)?,
+                            expression,
+                            Arc::new(Process::Do(object, Command::Case(branches))),
                         )),
                     )))
                 }
-                None => Ok(Arc::new(Expression::Ref(name))),
+                None => Ok(expression),
             }
         }
 
@@ -227,7 +292,6 @@ fn parse_actions(
             let branch = parse_name(&mut pairs)?;
             Ok(Arc::new(Process::Do(object, Command::Select(branch, then))))
         }
-        Rule::close => Ok(Arc::new(Process::Do(object, Command::Continue(then)))),
         _ => unreachable!(),
     }
 }
@@ -275,7 +339,7 @@ fn parse_proc_apply(
 
         Rule::proc_break => Ok(Arc::new(Process::Do(subject, Command::Break))),
 
-        Rule::proc_continue => {
+        Rule::proc_close => {
             let then = parse_process(&mut pairs, pass)?;
             Ok(Arc::new(Process::Do(subject, Command::Continue(then))))
         }
@@ -292,17 +356,23 @@ fn parse_proc_apply(
             let mut branches = Vec::new();
             for mut pairs in pair.into_inner().map(Pair::into_inner) {
                 let mut head = pairs.next().unwrap().into_inner();
-                let process = parse_process(&mut pairs, pass.clone())?;
+                let mut process = parse_process(&mut pairs, pass.clone())?;
                 let branch = parse_name(&mut head)?;
-                branches.push((
-                    branch,
-                    match head.next() {
-                        Some(actions) => {
-                            parse_actions(&mut actions.into_inner(), subject.clone(), process)?
-                        }
-                        None => process,
-                    },
-                ));
+
+                let branch_actions = head.next().unwrap();
+                assert_eq!(branch_actions.as_rule(), Rule::proc_branch_actions);
+                if let Some(close) = head.next() {
+                    assert_eq!(close.as_rule(), Rule::proc_branch_close);
+                    process = Arc::new(Process::Do(subject.clone(), Command::Continue(process)));
+                }
+                process = match branch_actions.into_inner().next() {
+                    Some(actions) => {
+                        parse_actions(&mut actions.into_inner(), subject.clone(), process)?
+                    }
+                    None => process,
+                };
+
+                branches.push((branch, process));
             }
 
             Ok(Arc::new(Process::Do(subject, Command::Case(branches))))

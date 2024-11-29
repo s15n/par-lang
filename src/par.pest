@@ -7,19 +7,28 @@ string = @{ "\"" ~ (!("\"" | "\n" | "\r") ~ ANY)* ~ "\"" }
 program    = { SOI ~ definition* ~ EOI }
 definition = { "define" ~ name ~ "=" ~ expression }
 
-action  = { send | receive | select | close }
+action  = { send | receive | select }
 send    = { "(" ~ expression ~ ")" }
 receive = { "[" ~ name ~ "]"}
 select  = { "." ~ name }
-close   = { "[]" }
 
 expression = { string | expr_break | expr_fork | expr_case | reference | construction }
 expr_break = { "()" }
 expr_fork  = { "chan" ~ name ~ "{" ~ process ~ "}" }
 expr_case  = { "{" ~ expr_branches ~ "}" }
 
-reference    = { name ~ actions? }
+reference    = { name ~ reference_actions ~ apply_case? }
 construction = { actions ~ expression }
+
+reference_actions = { actions? }
+
+apply_case           = { "{" ~ apply_branches ~ "}" }
+apply_branches       = { apply_branch* }
+apply_branch         = { apply_branch_head ~ "=>" ~ expression }
+apply_branch_head    = { name ~ apply_branch_actions ~ (apply_branch_close | apply_branch_bind) }
+apply_branch_actions = { actions? }
+apply_branch_close   = { "[]" }
+apply_branch_bind    = { name }
 
 expr_branches = { expr_branch* }
 expr_branch   = { name ~ "=>" ~ expression }
@@ -27,17 +36,19 @@ expr_branch   = { name ~ "=>" ~ expression }
 process  = { proc_let | proc_link | command }
 proc_let = { "let" ~ name ~ "=" ~ expression ~ ";" ~ process }
 
-command       = { name ~ proc_apply }
-proc_apply    = { proc_link | proc_break | proc_continue | proc_case | proc_pass | proc_action }
-proc_link     = { "<>" ~ expression }
-proc_break    = { "()" }
-proc_continue = { "[]" ~ ";" ~ process }
-proc_case     = { "{" ~ proc_branches ~ "}" ~ (";" ~ process)? }
-proc_pass     = { "pass" }
-proc_action   = { action ~ (proc_apply | (";" ~ process)) }
+command     = { name ~ proc_apply }
+proc_apply  = { proc_link | proc_break | proc_close | proc_case | proc_pass | proc_action }
+proc_link   = { "<>" ~ expression }
+proc_break  = { "()" }
+proc_close  = { "[]" ~ ";" ~ process }
+proc_case   = { "{" ~ proc_branches ~ "}" ~ (";" ~ process)? }
+proc_pass   = { "pass" }
+proc_action = { action ~ (proc_apply | (";" ~ process)) }
 
-proc_branches    = { proc_branch* }
-proc_branch      = { proc_branch_head ~ "=>" ~ "{" ~ process ~ "}" }
-proc_branch_head = { name ~ actions? }
+proc_branches       = { proc_branch* }
+proc_branch         = { proc_branch_head ~ "=>" ~ "{" ~ process ~ "}" }
+proc_branch_head    = { name ~ proc_branch_actions ~ proc_branch_close? }
+proc_branch_actions = { actions? }
+proc_branch_close   = { "[]" }
 
 actions = { action ~ actions? }
