@@ -336,7 +336,7 @@ fn par_syntax() -> Syntax {
         comment: "//",
         comment_multiline: [r#"/*"#, r#"*/"#],
         hyperlinks: BTreeSet::from([]),
-        keywords: BTreeSet::from(["define", "let", "case", "pass"]),
+        keywords: BTreeSet::from(["define", "chan", "let", "pass"]),
         types: BTreeSet::from([]),
         special: BTreeSet::from(["<>"]),
     }
@@ -366,14 +366,14 @@ fn blue() -> egui::Color32 {
     egui::Color32::from_hex("#118ab2").unwrap()
 }
 
-static DEFAULT_CODE: &str = r#"define play_with_stack = user {
+static DEFAULT_CODE: &str = r#"define play_with_stack = chan user {
   user("Happy poppin'") <> stack_loop(drained)
 }
 
-define stack_loop = user {
-  user[stack].case {
+define stack_loop = chan user {
+  user[stack] {
     pop => {
-      stack.pop.case {
+      stack.pop {
         empty[] => { user.empty() }
         item[value] => {
           user.item(value) <> stack_loop(stack)
@@ -387,15 +387,15 @@ define stack_loop = user {
   }
 }
 
-define drained = items {
-  items.case {
+define drained = chan items {
+  items {
     pop => { items.empty() }
     push => { items <> stacked(drained) }
   }
 }
 
-define stacked = items {
-  items[under][top].case {
+define stacked = chan items {
+  items[under][top] {
     pop => { items.item(top) <> under }
     push => {
       items <> stacked(stacked(under)(top))
@@ -403,9 +403,9 @@ define stacked = items {
   }
 }
 
-define red_green_blue = f {
+define red_green_blue = chan f {
   f[value];
-  value.case {
+  value {
     red[] => { f.red() }
     green[] => { f.green() }
     blue[] => { f.blue() }

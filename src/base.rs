@@ -666,7 +666,7 @@ impl<I: std::fmt::Display> std::fmt::Display for Expression<I> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Ref(name) => write!(f, "{}", name),
-            Self::Fork(_, name, process) => write!(f, "{} {{ {} }}", name, process),
+            Self::Fork(_, name, process) => write!(f, "chan {} {{ {} }}", name, process),
             Self::String(literal) => write!(f, "{:?}", literal),
         }
     }
@@ -691,7 +691,7 @@ impl<I: std::fmt::Display> std::fmt::Display for Process<I> {
                 write!(f, "{}.{}; {}", name, branch, process)
             }
             Self::Do(name, Command::Case(branches)) => {
-                write!(f, "{}.case {{ ", name)?;
+                write!(f, "{} {{ ", name)?;
                 for (branch, process) in branches {
                     write!(f, "{} => {{ {} }} ", branch, process)?;
                 }

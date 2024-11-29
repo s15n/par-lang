@@ -14,7 +14,7 @@ select  = { "." ~ name }
 close   = { "[]" }
 
 expression = { string | expr_fork | reference }
-expr_fork  = { name ~ "{" ~ process ~ "}" }
+expr_fork  = { "chan" ~ name ~ "{" ~ process ~ "}" }
 
 reference = { name ~ actions? }
 
@@ -26,7 +26,7 @@ proc_apply    = { proc_link | proc_break | proc_continue | proc_case | proc_pass
 proc_link     = { "<>" ~ expression }
 proc_break    = { "()" }
 proc_continue = { "[]" ~ ";" ~ process }
-proc_case     = { "." ~ "case" ~ "{" ~ branches ~ "}" ~ (";" ~ process)? }
+proc_case     = { "{" ~ branches ~ "}" ~ (";" ~ process)? }
 proc_pass     = { "pass" }
 proc_action   = { action ~ (proc_apply | (";" ~ process)) }
 
