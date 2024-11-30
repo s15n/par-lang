@@ -17,10 +17,12 @@ expr_break = { "()" }
 expr_fork  = { "chan" ~ name ~ "{" ~ process ~ "}" }
 expr_case  = { "{" ~ expr_branches ~ "}" }
 
-reference    = { name ~ reference_actions ~ apply_case? }
+reference    = { name ~ reference_actions ~ (apply_close | apply_case)? }
 construction = { actions ~ expression }
 
 reference_actions = { actions? }
+
+apply_close = { "[]" ~ expression }
 
 apply_case           = { "{" ~ apply_branches ~ "}" }
 apply_branches       = { apply_branch* }

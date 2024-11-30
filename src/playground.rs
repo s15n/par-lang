@@ -20,6 +20,7 @@ pub struct Playground {
     environment: Result<Environment<Arc<Name>>, Option<RuntimeError<Arc<Name>, External>>>,
     hidden: BTreeSet<External>,
     show_parsed: bool,
+    editor_font_size: f32,
 }
 
 struct Parsed {
@@ -44,6 +45,7 @@ impl Playground {
             environment: Err(None),
             hidden: BTreeSet::new(),
             show_parsed: false,
+            editor_font_size: 16.0,
         })
     }
 }
@@ -62,10 +64,25 @@ impl eframe::App for Playground {
                     };
 
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        ui.checkbox(
-                            &mut self.show_parsed,
-                            egui::RichText::new("Show desugared").strong(),
-                        );
+                        ui.horizontal(|ui| {
+                            if ui.button(egui::RichText::new("-").monospace()).clicked() {
+                                self.editor_font_size = (self.editor_font_size - 1.0).max(8.0);
+                            }
+                            ui.label(
+                                egui::RichText::new(self.editor_font_size.to_string()).strong(),
+                            );
+                            if ui.button(egui::RichText::new("+").monospace()).clicked() {
+                                self.editor_font_size = (self.editor_font_size + 1.0).min(32.0);
+                            }
+
+                            ui.add_space(5.0);
+
+                            ui.checkbox(
+                                &mut self.show_parsed,
+                                egui::RichText::new("Show desugared").strong(),
+                            );
+                        });
+
                         ui.separator();
 
                         let theme = if ui.visuals().dark_mode {
@@ -77,7 +94,7 @@ impl eframe::App for Playground {
                             .id_source("code")
                             .with_syntax(par_syntax())
                             .with_rows(32)
-                            .with_fontsize(16.0)
+                            .with_fontsize(self.editor_font_size)
                             .with_theme(theme)
                             .with_numlines(true)
                             .show(ui, code_to_show);
@@ -104,7 +121,7 @@ impl Playground {
     fn show_interaction(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             ui.horizontal_top(|ui| {
-                ui.add_space(6.0);
+                ui.add_space(5.0);
 
                 if ui.button(egui::RichText::new("PARSE").strong()).clicked() {
                     self.parsed = parse_program(self.code.as_str()).map_err(Some).map(
@@ -349,7 +366,7 @@ fn fix_dark_theme(mut theme: ColorTheme) -> ColorTheme {
 }
 
 fn fix_light_theme(mut theme: ColorTheme) -> ColorTheme {
-    theme.bg = "#EFEFEF";
+    theme.bg = "#F9F9F9";
     theme.functions = theme.literals;
     theme
 }
@@ -366,7 +383,11 @@ fn blue() -> egui::Color32 {
     egui::Color32::from_hex("#118ab2").unwrap()
 }
 
-static DEFAULT_CODE: &str = r#"define play = ("Happy poppin'") loop(drained)
+static DEFAULT_CODE: &str = r#"define play_stack = ("Happy poppin'") loop(drained)
+
+define play_numbers = [m][n] print(mul(m)(n))
+
+// ---
 
 define loop = [stack] chan user {
   user {
@@ -399,5 +420,42 @@ define rgb = [value] value {
   red[]   => .red()
   green[] => .green()
   blue[]  => .blue()
+}
+
+// ---
+
+define zero = {
+  sub1 => .zero()
+}
+
+define add1 = [n] {
+  sub1 => .add1 n
+}
+
+define copy = [n] n.sub1 {
+  zero[] => (zero)(zero)()
+  add1 n => copy(n)[n1][n2][]
+    (add1(n1))(add1(n2))()
+}
+
+define clear = [n] n.sub1 {
+  zero[] => ()
+  add1 n => clear(n)
+}
+
+define print = [n] n.sub1 {
+  zero[] => .zero()
+  add1 n => .add1 print(n)
+}
+
+define add = [m][n] m.sub1 {
+  zero[] => n
+  add1 m => add1(add(m)(n))
+}
+
+define mul = [m][n] m.sub1 {
+  zero[] => clear(n)[] zero
+  add1 m => copy(n)[n1][n2][]
+    add(n1)(mul(m)(n2))
 }
 "#;
