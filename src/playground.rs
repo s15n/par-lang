@@ -385,7 +385,7 @@ fn blue() -> egui::Color32 {
 
 static DEFAULT_CODE: &str = r#"define play_stack = ("Happy poppin'") loop(drained)
 
-define play_numbers = [m][n] print(mul(m)(n))
+define play_numbers = [m][n] mul(m)(n)
 
 // ---
 
@@ -424,36 +424,31 @@ define rgb = [value] value {
 
 // ---
 
-define zero = {
-  sub1 => .zero()
-}
+define zero = .zero()
+define add1 = [n] .add1 n
 
-define add1 = [n] {
-  sub1 => .add1 n
-}
-
-define copy = [n] n.sub1 {
+define copy = [n] n {
   zero[] => (zero)(zero)()
   add1 n => copy(n)[n1][n2][]
     (add1(n1))(add1(n2))()
 }
 
-define clear = [n] n.sub1 {
+define clear = [n] n {
   zero[] => ()
   add1 n => clear(n)
 }
 
-define print = [n] n.sub1 {
+define print = [n] n {
   zero[] => .zero()
   add1 n => .add1 print(n)
 }
 
-define add = [m][n] m.sub1 {
+define add = [m][n] m {
   zero[] => n
   add1 m => add1(add(m)(n))
 }
 
-define mul = [m][n] m.sub1 {
+define mul = [m][n] m {
   zero[] => clear(n)[] zero
   add1 m => copy(n)[n1][n2][]
     add(n1)(mul(m)(n2))
