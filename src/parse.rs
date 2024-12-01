@@ -136,8 +136,7 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Expression<Arc<Na
             let mut pairs = pair.into_inner();
             let name = Arc::<Name>::new(pairs.next().unwrap().into());
 
-            let ref_actions = pairs.next().unwrap();
-            assert_eq!(ref_actions.as_rule(), Rule::reference_actions);
+            let actions = pairs.next().unwrap().into_inner().next();
 
             let result = Arc::new(Name {
                 string: "_result".to_string(),
@@ -208,6 +207,8 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Expression<Arc<Na
 
                 Some(_) => unreachable!(),
 
+                None if actions.is_none() => return Ok(Arc::new(Expression::Ref(name))),
+
                 None => Arc::new(Process::Link(
                     result.clone(),
                     Arc::new(Expression::Ref(object.clone())),
@@ -220,7 +221,7 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Expression<Arc<Na
                 Arc::new(Process::Let(
                     object.clone(),
                     Arc::new(Expression::Ref(name)),
-                    match ref_actions.into_inner().next() {
+                    match actions {
                         Some(pair) => {
                             assert_eq!(pair.as_rule(), Rule::actions);
                             parse_actions(&mut pair.into_inner(), object.clone(), after)?
