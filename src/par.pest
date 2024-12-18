@@ -35,17 +35,19 @@ apply_branch_bind    = { name }
 expr_branches = { expr_branch* }
 expr_branch   = { name ~ "=>" ~ expression }
 
-process  = { proc_let | proc_link | command }
-proc_let = { "let" ~ name ~ "=" ~ expression ~ ";" ~ process }
+process   = { proc_let | proc_pass | command }
+proc_let  = { "let" ~ name ~ "=" ~ expression ~ ";" ~ process }
+proc_pass = { "pass" }
 
-command     = { name ~ proc_apply }
-proc_apply  = { proc_link | proc_break | proc_close | proc_case | proc_pass | proc_action }
-proc_link   = { "<>" ~ expression }
-proc_break  = { "()" }
-proc_close  = { "[]" ~ ";" ~ process }
-proc_case   = { "{" ~ proc_branches ~ "}" ~ (";" ~ process)? }
-proc_pass   = { "pass" }
-proc_action = { action ~ (proc_apply | (";" ~ process)) }
+command      = { name ~ proc_apply }
+proc_apply   = { proc_link | proc_loop | proc_break | proc_close | proc_iterate | proc_case | proc_action }
+proc_link    = { "<>" ~ expression }
+proc_loop    = { "loop" }
+proc_break   = { "()" }
+proc_close   = { "[]" ~ ";" ~ process }
+proc_case    = { "{" ~ proc_branches ~ "}" ~ (";" ~ process)? }
+proc_iterate = { "iterate" ~ "{" ~ proc_branches ~ "}" ~ (";" ~ process)? }
+proc_action  = { action ~ (proc_apply | (";" ~ process)) }
 
 proc_branches       = { proc_branch* }
 proc_branch         = { proc_branch_head ~ "=>" ~ "{" ~ process ~ "}" }

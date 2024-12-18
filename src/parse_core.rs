@@ -7,7 +7,7 @@ use pest::{
 };
 use pest_derive::Parser;
 
-use crate::base::{Capture, Command, Context, Expression, Process};
+use crate::base::{Capture, CaseMode, Command, Context, Expression, Process};
 
 #[derive(Clone, Debug)]
 pub struct Name {
@@ -166,7 +166,10 @@ fn parse_process(
                 let process = parse_process(&mut pairs, pass.clone())?;
                 branches.push((branch, process));
             }
-            Ok(Arc::new(Process::Do(subject, Command::Case(branches))))
+            Ok(Arc::new(Process::Do(
+                subject,
+                Command::Case(CaseMode::Single, branches),
+            )))
         }
         Rule::p_pass => match pass {
             Some(process) => Ok(process),

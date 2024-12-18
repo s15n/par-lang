@@ -2,7 +2,7 @@
 
 use std::{cell::RefCell, sync::Arc};
 
-use crate::base::{Capture, Command, Expression, Process};
+use crate::base::{Capture, CaseMode, Command, Expression, Process};
 
 pub fn ref_<I>(name: I) -> Expression<I> {
     Expression::Ref(name)
@@ -44,6 +44,7 @@ pub fn case_<I>(id: I, branches: impl IntoIterator<Item = (I, Process<I>)>) -> P
     Process::Do(
         id,
         Command::Case(
+            CaseMode::Single,
             branches
                 .into_iter()
                 .map(|(branch, then)| (branch, Arc::new(then)))

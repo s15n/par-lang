@@ -7,7 +7,7 @@ use pest::{
 };
 use pest_derive::Parser;
 
-use crate::base::{Capture, Command, Context, Expression, Process};
+use crate::base::{Capture, CaseMode, Command, Context, Expression, Process};
 
 #[derive(Clone, Debug)]
 pub struct Name {
@@ -128,7 +128,10 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Expression<Arc<Na
             Ok(Arc::new(Expression::Fork(
                 RefCell::default(),
                 construct.clone(),
-                Arc::new(Process::Do(construct, Command::Case(branches))),
+                Arc::new(Process::Do(
+                    construct,
+                    Command::Case(CaseMode::Single, branches),
+                )),
             )))
         }
 
@@ -202,7 +205,10 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Arc<Expression<Arc<Na
                         branches.push((branch, process));
                     }
 
-                    Arc::new(Process::Do(object.clone(), Command::Case(branches)))
+                    Arc::new(Process::Do(
+                        object.clone(),
+                        Command::Case(CaseMode::Single, branches),
+                    ))
                 }
 
                 Some(_) => unreachable!(),
@@ -302,6 +308,7 @@ fn parse_process(
 ) -> Result<Arc<Process<Arc<Name>>>, ParseError> {
     let pair = pairs.next().unwrap().into_inner().next().unwrap();
     let rule = pair.as_rule();
+    let span = pair.as_span();
     let mut pairs = pair.into_inner();
 
     match rule {
@@ -311,6 +318,17 @@ fn parse_process(
             let proc = parse_process(&mut pairs, pass)?;
             Ok(Arc::new(Process::Let(name, expr, proc)))
         }
+
+        Rule::proc_pass => match pass {
+            Some(process) => Ok(process),
+            None => Err(pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::ParsingError {
+                    positives: vec![Rule::process],
+                    negatives: vec![],
+                },
+                span,
+            ))?,
+        },
 
         Rule::command => {
             let subject = parse_name(&mut pairs)?;
@@ -327,7 +345,6 @@ fn parse_proc_apply(
     pass: Option<Arc<Process<Arc<Name>>>>,
 ) -> Result<Arc<Process<Arc<Name>>>, ParseError> {
     let pair = pairs.next().unwrap().into_inner().next().unwrap();
-    let span = pair.as_span();
     let rule = pair.as_rule();
     let mut pairs = pair.into_inner();
 
@@ -339,12 +356,14 @@ fn parse_proc_apply(
 
         Rule::proc_break => Ok(Arc::new(Process::Do(subject, Command::Break))),
 
+        Rule::proc_loop => Ok(Arc::new(Process::Do(subject, Command::Loop))),
+
         Rule::proc_close => {
             let then = parse_process(&mut pairs, pass)?;
             Ok(Arc::new(Process::Do(subject, Command::Continue(then))))
         }
 
-        Rule::proc_case => {
+        Rule::proc_case | Rule::proc_iterate => {
             let pair = pairs.next().unwrap();
             assert_eq!(pair.as_rule(), Rule::proc_branches);
 
@@ -375,19 +394,18 @@ fn parse_proc_apply(
                 branches.push((branch, process));
             }
 
-            Ok(Arc::new(Process::Do(subject, Command::Case(branches))))
+            Ok(Arc::new(Process::Do(
+                subject,
+                Command::Case(
+                    if rule == Rule::proc_iterate {
+                        CaseMode::Iterate
+                    } else {
+                        CaseMode::Single
+                    },
+                    branches,
+                ),
+            )))
         }
-
-        Rule::proc_pass => match pass {
-            Some(process) => Ok(process),
-            None => Err(pest::error::Error::new_from_span(
-                pest::error::ErrorVariant::ParsingError {
-                    positives: vec![Rule::process],
-                    negatives: vec![],
-                },
-                span,
-            ))?,
-        },
 
         Rule::proc_action => {
             let pair = pairs.next().unwrap();

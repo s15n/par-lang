@@ -67,7 +67,7 @@ impl<I: Clone + Ord> Environment<I> {
                         Command::Receive(_, _) => {
                             requests.insert(external.clone(), Request::Receive);
                         }
-                        Command::Case(branches) => {
+                        Command::Case(_, branches) => {
                             requests.insert(
                                 external.clone(),
                                 Request::Case(
