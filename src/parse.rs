@@ -356,7 +356,10 @@ fn parse_proc_apply(
 
         Rule::proc_break => Ok(Arc::new(Process::Do(subject, Command::Break))),
 
-        Rule::proc_loop => Ok(Arc::new(Process::Do(subject, Command::Loop))),
+        Rule::proc_loop => {
+            let label = pairs.next().map(|pair| Arc::new(pair.into()));
+            Ok(Arc::new(Process::Do(subject, Command::Loop(label))))
+        }
 
         Rule::proc_close => {
             let then = parse_process(&mut pairs, pass)?;
@@ -364,7 +367,16 @@ fn parse_proc_apply(
         }
 
         Rule::proc_case | Rule::proc_iterate => {
-            let pair = pairs.next().unwrap();
+            let mut pair = pairs.next().unwrap();
+
+            let label = if pair.as_rule() == Rule::label {
+                let label = Some(Arc::new(pair.into()));
+                pair = pairs.next().unwrap();
+                label
+            } else {
+                None
+            };
+
             assert_eq!(pair.as_rule(), Rule::proc_branches);
 
             let mut pass = pass;
@@ -398,7 +410,7 @@ fn parse_proc_apply(
                 subject,
                 Command::Case(
                     if rule == Rule::proc_iterate {
-                        CaseMode::Iterate
+                        CaseMode::Iterate(label)
                     } else {
                         CaseMode::Single
                     },

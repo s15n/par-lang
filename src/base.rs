@@ -15,7 +15,7 @@ pub enum RuntimeError<I, X> {
     CannotContinueFrom(Value<I, X>),
     CannotSendTo(Value<I, X>),
     CannotReceiveFrom(Value<I, X>),
-    CannotLoop,
+    CannotLoop(Option<I>),
 
     MissingCase(Value<I, X>, I),
     CannotSelectFrom(Value<I, X>, Vec<I>),
@@ -97,7 +97,7 @@ impl<I: Clone + Ord> Process<I> {
                 free.insert(name.clone());
                 free
             }
-            Self::Do(name, Command::Loop) => BTreeSet::from([name.clone()]),
+            Self::Do(name, Command::Loop(_)) => BTreeSet::from([name.clone()]),
         }
     }
 }
@@ -109,14 +109,14 @@ pub enum Command<I> {
     Send(Arc<Expression<I>>, Arc<Process<I>>),
     Receive(I, Arc<Process<I>>),
     Select(I, Arc<Process<I>>),
-    Case(CaseMode, Vec<(I, Arc<Process<I>>)>),
-    Loop,
+    Case(CaseMode<I>, Vec<(I, Arc<Process<I>>)>),
+    Loop(Option<I>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CaseMode {
+pub enum CaseMode<I> {
     Single,
-    Iterate,
+    Iterate(Option<I>),
 }
 
 impl<I: Clone> Command<I> {
@@ -135,7 +135,7 @@ impl<I: Clone> Command<I> {
                     .cloned()
                     .collect(),
             ),
-            Self::Loop => RuntimeError::CannotLoop,
+            Self::Loop(label) => RuntimeError::CannotLoop(label.clone()),
         }
     }
 }
@@ -264,7 +264,7 @@ pub enum ValueState<I, X> {
 pub struct Context<I, X> {
     pub statics: BTreeMap<I, Arc<Expression<I>>>,
     pub variables: BTreeMap<I, Value<I, X>>,
-    pub iteration: Option<(I, Arc<Process<I>>)>,
+    pub iteration: BTreeMap<Option<I>, (I, Arc<Process<I>>)>,
     pub state: ContextState<I, X>,
 }
 
@@ -288,7 +288,7 @@ impl<I, X> Context<I, X> {
         Self {
             statics: BTreeMap::new(),
             variables: BTreeMap::new(),
-            iteration: None,
+            iteration: BTreeMap::new(),
             state: ContextState::new(),
         }
     }
@@ -354,7 +354,7 @@ impl<I: Clone + Ord, X: Clone + Ord> Context<I, X> {
                 Context {
                     statics: self.statics.clone(),
                     variables: BTreeMap::new(),
-                    iteration: None,
+                    iteration: BTreeMap::new(),
                     state: ContextState::new(),
                 },
                 Arc::clone(definition),
@@ -513,9 +513,9 @@ pub fn step<I: Clone + Ord, X: Clone + Ord>(
         Process::Do(name, command) => {
             let target = context.get(name)?;
 
-            if let Command::Loop = command {
-                let Some((variable, process)) = context.iteration.clone() else {
-                    return Err(RuntimeError::CannotLoop);
+            if let Command::Loop(label) = command {
+                let Some((variable, process)) = context.iteration.get(label).cloned() else {
+                    return Err(RuntimeError::CannotLoop(label.clone()));
                 };
                 context.set(&variable, target)?;
                 return Ok((Running::some(context, process), None));
@@ -574,9 +574,11 @@ pub fn step<I: Clone + Ord, X: Clone + Ord>(
                             for (branch, then) in branches {
                                 if &selected == branch {
                                     context.set(name, Value::External(ext))?;
-                                    if mode == &CaseMode::Iterate {
-                                        context.iteration =
-                                            Some((name.clone(), Arc::clone(&process)));
+                                    if let CaseMode::Iterate(label) = mode {
+                                        context.iteration.insert(
+                                            label.clone(),
+                                            (name.clone(), Arc::clone(&process)),
+                                        );
                                     }
                                     return Ok((Running::some(context, Arc::clone(then)), None));
                                 }
@@ -598,7 +600,7 @@ pub fn step<I: Clone + Ord, X: Clone + Ord>(
                         }
                     },
 
-                    Command::Loop => unreachable!(),
+                    Command::Loop(_) => unreachable!(),
                 };
             }
 
@@ -660,14 +662,20 @@ pub fn step<I: Clone + Ord, X: Clone + Ord>(
                 ) => {
                     for (branch, then) in branches {
                         if selected == branch {
-                            if mode == &CaseMode::Iterate {
-                                handle_context.iteration = Some((
-                                    channel.clone(),
-                                    Arc::new(Process::Do(
+                            if let CaseMode::Iterate(label) = mode {
+                                handle_context.iteration.insert(
+                                    label.clone(),
+                                    (
                                         channel.clone(),
-                                        Command::Case(CaseMode::Iterate, branches.clone()),
-                                    )),
-                                ));
+                                        Arc::new(Process::Do(
+                                            channel.clone(),
+                                            Command::Case(
+                                                CaseMode::Iterate(label.clone()),
+                                                branches.clone(),
+                                            ),
+                                        )),
+                                    ),
+                                );
                             }
                             select_context.set(
                                 name,
@@ -732,8 +740,11 @@ impl<I: std::fmt::Display> std::fmt::Display for Process<I> {
             }
             Self::Do(name, Command::Case(mode, branches)) => {
                 write!(f, "{} ", name)?;
-                if mode == &CaseMode::Iterate {
+                if let CaseMode::Iterate(label) = mode {
                     write!(f, "iterate ")?;
+                    if let Some(label) = label {
+                        write!(f, "{} ", label)?;
+                    }
                 }
                 write!(f, "{{ ")?;
                 for (branch, process) in branches {
@@ -741,7 +752,13 @@ impl<I: std::fmt::Display> std::fmt::Display for Process<I> {
                 }
                 write!(f, "}}")
             }
-            Self::Do(name, Command::Loop) => write!(f, "{} loop", name),
+            Self::Do(name, Command::Loop(label)) => {
+                write!(f, "{} loop", name)?;
+                if let Some(label) = label {
+                    write!(f, " {}", label)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -794,7 +811,7 @@ impl<I: std::fmt::Display, X: std::fmt::Display> std::fmt::Display for RuntimeEr
                 }
                 write!(f, "] in\n--> {}", value)
             }
-            Self::CannotLoop => write!(f, "cannot loop"),
+            Self::CannotLoop(_) => write!(f, "cannot loop"),
             Self::ExternalEscaped(external) => write!(f, "external {} escaped", external),
         }
     }

@@ -3,6 +3,7 @@ COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
 name   = @{ (ASCII_ALPHA ~ ("_" | ASCII_ALPHANUMERIC)*) }
 string = @{ "\"" ~ (!("\"" | "\n" | "\r") ~ ANY)* ~ "\"" }
+label  = @{ "@" ~ name }
 
 program    = { SOI ~ definition* ~ EOI }
 definition = { "define" ~ name ~ "=" ~ expression }
@@ -42,11 +43,11 @@ proc_pass = { "pass" }
 command      = { name ~ proc_apply }
 proc_apply   = { proc_link | proc_loop | proc_break | proc_close | proc_iterate | proc_case | proc_action }
 proc_link    = { "<>" ~ expression }
-proc_loop    = { "loop" }
+proc_loop    = { "loop" ~ label? }
 proc_break   = { "()" }
 proc_close   = { "[]" ~ ";" ~ process }
 proc_case    = { "{" ~ proc_branches ~ "}" ~ (";" ~ process)? }
-proc_iterate = { "iterate" ~ "{" ~ proc_branches ~ "}" ~ (";" ~ process)? }
+proc_iterate = { "iterate" ~ label? ~ "{" ~ proc_branches ~ "}" ~ (";" ~ process)? }
 proc_action  = { action ~ (proc_apply | (";" ~ process)) }
 
 proc_branches       = { proc_branch* }
