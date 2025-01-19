@@ -126,8 +126,12 @@ where
         }
     }
 
+    pub fn get_variable(&mut self, loc: &Loc, name: &Name) -> Option<Value<Loc, Name>> {
+        self.variables.entry(name.clone()).or_default().pop()
+    }
+
     pub fn get(&mut self, loc: &Loc, name: &Name) -> Result<Value<Loc, Name>, Error<Loc, Name>> {
-        match self.variables.entry(name.clone()).or_default().pop() {
+        match self.get_variable(loc, name) {
             Some(value) => Ok(value),
             None => match self.globals.get(name) {
                 Some(expression) => self.evaluate(&Arc::clone(expression)),
@@ -146,9 +150,9 @@ where
         target: &mut Self,
     ) -> Result<(), Error<Loc, Name>> {
         for (name, loc) in &cap.names {
-            let value = match self.get(loc, name) {
-                Ok(value) => value,
-                Err(error) => return target.throw([], error),
+            let value = match self.get_variable(loc, name) {
+                Some(value) => value,
+                None => continue,
             };
             target.put(name.clone(), value);
         }

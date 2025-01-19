@@ -1,3 +1,5 @@
+#![feature(iter_intersperse)]
+
 use eframe::egui;
 use playground::Playground;
 

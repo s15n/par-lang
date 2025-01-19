@@ -32,7 +32,6 @@ struct Interaction<Loc, Name> {
 
 #[derive(Clone, Debug)]
 pub enum Request<Loc, Name> {
-    Dynamic(Loc),
     Either(Loc, Arc<[Name]>),
 }
 

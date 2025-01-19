@@ -12,26 +12,34 @@ use crate::{
     language::{CompileError, Internal},
     parse::{parse_program, Loc, Name, ParseError},
     process::Expression,
-    runtime::{self, Context},
+    runtime::{self, Context, Operation},
     spawn::TokioSpawn,
 };
 
 pub struct Playground {
     code: String,
-    compiled: Option<Result<Compiled, Error>>,
-    interact: Option<Arc<Mutex<Handle<Loc, Internal<Name>>>>>,
+    compiled: Option<Compiled>,
+    interact: Option<Interact>,
     editor_font_size: f32,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Error {
     Parse(ParseError),
     Compile(CompileError<Loc>),
     Runtime(runtime::Error<Loc, Internal<Name>>),
 }
 
+#[derive(Clone)]
 struct Compiled {
-    globals: Arc<IndexMap<Internal<Name>, Arc<Expression<Loc, Internal<Name>>>>>,
+    code: Arc<str>,
+    globals: Result<Arc<IndexMap<Internal<Name>, Arc<Expression<Loc, Internal<Name>>>>>, Error>,
+}
+
+#[derive(Clone)]
+struct Interact {
+    code: Arc<str>,
+    handle: Arc<Mutex<Handle<Loc, Internal<Name>>>>,
 }
 
 impl Playground {
@@ -105,8 +113,9 @@ impl Playground {
                 ui.add_space(5.0);
 
                 if ui.button(egui::RichText::new("Compile").strong()).clicked() {
-                    self.compiled = Some(
-                        parse_program(self.code.as_str())
+                    self.compiled = Some(Compiled {
+                        code: Arc::from(self.code.as_str()),
+                        globals: parse_program(self.code.as_str())
                             .map_err(|error| Error::Parse(error))
                             .and_then(|definitions| {
                                 let compile_result = definitions
@@ -121,16 +130,18 @@ impl Playground {
                                     })
                                     .collect::<Result<_, CompileError<Loc>>>();
                                 match compile_result {
-                                    Ok(compiled) => Ok(Compiled {
-                                        globals: Arc::new(compiled),
-                                    }),
+                                    Ok(compiled) => Ok(Arc::new(compiled)),
                                     Err(error) => Err(Error::Compile(error)),
                                 }
                             }),
-                    );
+                    });
                 }
 
-                if let Some(Ok(Compiled { globals })) = &self.compiled {
+                if let Some(Compiled {
+                    code,
+                    globals: Ok(globals),
+                }) = &self.compiled
+                {
                     egui::menu::menu_custom_button(
                         ui,
                         egui::Button::new(
@@ -144,16 +155,22 @@ impl Playground {
                                 if let Internal::Original(name) = internal_name {
                                     if ui.button(&name.string).clicked() {
                                         if let Some(int) = self.interact.take() {
-                                            int.lock().expect("lock failed").cancel();
+                                            int.handle.lock().expect("lock failed").cancel();
                                         }
-                                        self.interact = Some(Handle::start_expression(
-                                            Arc::new({
-                                                let ctx = ui.ctx().clone();
-                                                move || ctx.request_repaint()
-                                            }),
-                                            Context::new(Arc::new(TokioSpawn), Arc::clone(globals)),
-                                            expression,
-                                        ));
+                                        self.interact = Some(Interact {
+                                            code: Arc::clone(&code),
+                                            handle: Handle::start_expression(
+                                                Arc::new({
+                                                    let ctx = ui.ctx().clone();
+                                                    move || ctx.request_repaint()
+                                                }),
+                                                Context::new(
+                                                    Arc::new(TokioSpawn),
+                                                    Arc::clone(globals),
+                                                ),
+                                                expression,
+                                            ),
+                                        });
                                         ui.close_menu();
                                     }
                                 }
@@ -167,28 +184,24 @@ impl Playground {
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
                 egui::ScrollArea::both().show(ui, |ui| {
-                    if let Some(Err(error)) = &self.compiled {
-                        ui.label(
-                            egui::RichText::new(format!("{:?}", error))
-                                .color(red())
-                                .code(),
-                        );
+                    if let Some(Compiled {
+                        code,
+                        globals: Err(error),
+                    }) = &self.compiled
+                    {
+                        ui.label(egui::RichText::new(error.display(code)).color(red()).code());
                     }
 
                     if let Some(int) = &self.interact {
-                        self.show_interact(ui, Arc::clone(int));
+                        self.show_interact(ui, int.clone());
                     }
                 });
             });
         });
     }
 
-    fn show_interact(
-        &mut self,
-        ui: &mut egui::Ui,
-        handle: Arc<Mutex<Handle<Loc, Internal<Name>>>>,
-    ) {
-        let locked_handle = handle.lock().expect("lock failed");
+    fn show_interact(&mut self, ui: &mut egui::Ui, int: Interact) {
+        let handle = int.handle.lock().expect("lock failed");
 
         egui::Frame::default()
             .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
@@ -199,10 +212,16 @@ impl Playground {
                     let mut to_the_side = Vec::new();
 
                     ui.vertical(|ui| {
-                        for event in locked_handle.events() {
+                        for event in handle.events() {
                             match event {
                                 Event::Send(_, argument) => {
-                                    self.show_interact(ui, Arc::clone(argument))
+                                    self.show_interact(
+                                        ui,
+                                        Interact {
+                                            code: Arc::clone(&int.code),
+                                            handle: Arc::clone(argument),
+                                        },
+                                    );
                                 }
 
                                 Event::Receive(_, parameter) => {
@@ -249,32 +268,35 @@ impl Playground {
                             }
                         }
 
-                        if let Some(result) = locked_handle.interaction() {
+                        if let Some(result) = handle.interaction() {
                             ui.horizontal(|ui| match result {
-                                Ok(Request::Dynamic(_)) => {
-                                    ui.label(egui::RichText::new("?").strong().code());
-                                }
                                 Ok(Request::Either(loc, choices)) => {
-                                    drop(locked_handle);
-                                    ui.menu_button(
-                                        egui::RichText::new("=>").strong().code(),
-                                        |ui| {
-                                            for choice in choices.iter() {
-                                                if ui.button(format!("{}", choice)).clicked() {
-                                                    Handle::choose(
-                                                        Arc::clone(&handle),
-                                                        loc.clone(),
-                                                        choice.clone(),
-                                                    );
-                                                    ui.close_menu();
-                                                }
+                                    ui.horizontal(|ui| {
+                                        drop(handle);
+                                        for choice in choices.iter() {
+                                            if ui
+                                                .button(
+                                                    egui::RichText::new(format!("{}", choice))
+                                                        .strong(),
+                                                )
+                                                .clicked()
+                                            {
+                                                Handle::choose(
+                                                    Arc::clone(&int.handle),
+                                                    loc.clone(),
+                                                    choice.clone(),
+                                                );
                                             }
-                                        },
-                                    );
+                                        }
+                                    });
                                 }
                                 Err(error) => {
                                     ui.label(
-                                        egui::RichText::new(format!("{:?}", error)).color(red()),
+                                        egui::RichText::new(
+                                            Error::Runtime(error).display(&int.code),
+                                        )
+                                        .color(red())
+                                        .code(),
                                     );
                                 }
                             });
@@ -282,10 +304,143 @@ impl Playground {
                     });
 
                     for side in to_the_side {
-                        self.show_interact(ui, side);
+                        self.show_interact(
+                            ui,
+                            Interact {
+                                code: Arc::clone(&int.code),
+                                handle: side,
+                            },
+                        );
                     }
                 });
             });
+    }
+}
+
+impl Error {
+    pub fn display(&self, code: &str) -> String {
+        match self {
+            Self::Parse(error) => {
+                format!(
+                    "{}\n\nSyntax error.",
+                    Self::display_loc(code, &error.location)
+                )
+            }
+
+            Self::Compile(CompileError::PassNotPossible(loc)) => {
+                format!("{}\n\nNothing to `pass` to.", Self::display_loc(code, loc),)
+            }
+
+            Self::Runtime(error) => Self::display_runtime_error(code, error),
+        }
+    }
+
+    fn display_runtime_error(code: &str, error: &runtime::Error<Loc, Internal<Name>>) -> String {
+        use runtime::Error::*;
+        match error {
+            NameNotDefined(loc, name) => {
+                format!(
+                    "{}\n\n`{}` is not defined.",
+                    Self::display_loc(code, loc),
+                    name
+                )
+            }
+            UnfulfilledObligations(loc, names) => {
+                format!(
+                    "{}\n\nCannot end process without handling {}.",
+                    Self::display_loc(code, loc),
+                    names
+                        .iter()
+                        .map(|name| format!("`{}`", name))
+                        .intersperse(", ".to_string())
+                        .collect::<String>()
+                )
+            }
+            IncompatibleOperations(op1, op2) => {
+                format!(
+                    "{}\n\n{}\n\nThese operations are incompatible.",
+                    Self::display_operation(code, op1),
+                    Self::display_operation(code, op2),
+                )
+            }
+            NoSuchLoopPoint(loc, _) => {
+                format!(
+                    "{}\n\nThere is no matching loop point in scope.",
+                    Self::display_loc(code, loc),
+                )
+            }
+            Multiple(error1, error2) => {
+                format!(
+                    "{}\n\n\n{}",
+                    Self::display_runtime_error(code, error1),
+                    Self::display_runtime_error(code, error2),
+                )
+            }
+        }
+    }
+
+    fn display_operation(code: &str, op: &Operation<Loc, Internal<Name>>) -> String {
+        match op {
+            Operation::Unknown(loc) => {
+                format!("{}\nUnknown operation.", Self::display_loc(code, loc))
+            }
+            Operation::Send(loc) => {
+                format!(
+                    "{}\nThis side sending a value.",
+                    Self::display_loc(code, loc),
+                )
+            }
+            Operation::Receive(loc) => {
+                format!(
+                    "{}\nThis side receiving a value.",
+                    Self::display_loc(code, loc),
+                )
+            }
+            Operation::Choose(loc, chosen) => {
+                format!(
+                    "{}\nThis side is choosing `{}`.",
+                    Self::display_loc(code, loc),
+                    chosen,
+                )
+            }
+            Operation::Either(loc, choices) => {
+                format!(
+                    "{}\nThis side is offering either of {}.",
+                    Self::display_loc(code, loc),
+                    choices
+                        .iter()
+                        .map(|name| format!("`{}`", name))
+                        .intersperse(", ".to_string())
+                        .collect::<String>(),
+                )
+            }
+            Operation::Break(loc) => {
+                format!("{}\nThis side is breaking.", Self::display_loc(code, loc))
+            }
+            Operation::Continue(loc) => {
+                format!("{}\nThis side is continuing.", Self::display_loc(code, loc),)
+            }
+        }
+    }
+
+    fn display_loc(code: &str, loc: &Loc) -> String {
+        match loc {
+            Loc::External => format!("<UI>"),
+            Loc::Code { line, column } => {
+                let line_of_code = match code.lines().nth(line - 1) {
+                    Some(loc) => loc,
+                    None => return format!("<invalid location {}:{}>", line, column),
+                };
+                let line_number = format!("{}| ", line);
+                format!(
+                    "{}{}\n{}{}^",
+                    line_number,
+                    line_of_code,
+                    " ".repeat(line_number.len()),
+                    " ".repeat(column - 1),
+                )
+            }
+        }
     }
 }
 
