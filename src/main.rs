@@ -1,15 +1,16 @@
 use eframe::egui;
 use playground::Playground;
 
-mod base;
 mod interact;
-mod notation;
+mod language;
 mod parse;
-mod parse_core;
 mod playground;
-mod print;
+mod process;
+mod runtime;
+mod spawn;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1000.0, 700.0]),
         ..Default::default()

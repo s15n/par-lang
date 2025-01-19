@@ -1,31 +1,37 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt::Write,
-    sync::Arc,
+    collections::BTreeSet,
+    sync::{Arc, Mutex},
 };
 
 use eframe::egui;
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
+use indexmap::IndexMap;
 
 use crate::{
-    base::{Context, Request, Response, RuntimeError},
-    interact::{Environment, Event, External},
-    parse::{parse_program, Name, ParseError},
-    print::{self, print_context},
+    interact::{Event, Handle, Request},
+    language::{CompileError, Internal},
+    parse::{parse_program, Loc, Name, ParseError},
+    process::Expression,
+    runtime::{self, Context},
+    spawn::TokioSpawn,
 };
 
 pub struct Playground {
     code: String,
-    parsed: Result<Parsed, Option<ParseError>>,
-    environment: Result<Environment<Arc<Name>>, Option<RuntimeError<Arc<Name>, External>>>,
-    hidden: BTreeSet<External>,
-    show_parsed: bool,
+    compiled: Option<Result<Compiled, Error>>,
+    interact: Option<Arc<Mutex<Handle<Loc, Internal<Name>>>>>,
     editor_font_size: f32,
 }
 
-struct Parsed {
-    context: Context<Arc<Name>, External>,
-    pretty: String,
+#[derive(Debug)]
+enum Error {
+    Parse(ParseError),
+    Compile(CompileError<Loc>),
+    Runtime(runtime::Error<Loc, Internal<Name>>),
+}
+
+struct Compiled {
+    globals: Arc<IndexMap<Internal<Name>, Arc<Expression<Loc, Internal<Name>>>>>,
 }
 
 impl Playground {
@@ -41,10 +47,8 @@ impl Playground {
         });
         Box::new(Self {
             code: DEFAULT_CODE.to_string(),
-            parsed: Err(None),
-            environment: Err(None),
-            hidden: BTreeSet::new(),
-            show_parsed: false,
+            compiled: None,
+            interact: None,
             editor_font_size: 16.0,
         })
     }
@@ -58,11 +62,6 @@ impl eframe::App for Playground {
                 .show_separator_line(true)
                 .default_width(16.0 * 32.0)
                 .show_inside(ui, |ui| {
-                    let code_to_show = match &mut self.parsed {
-                        Ok(Parsed { pretty, .. }) if self.show_parsed => pretty,
-                        _ => &mut self.code,
-                    };
-
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         ui.horizontal(|ui| {
                             if ui.button(egui::RichText::new("-").monospace()).clicked() {
@@ -72,21 +71,14 @@ impl eframe::App for Playground {
                                 egui::RichText::new(self.editor_font_size.to_string()).strong(),
                             );
                             if ui.button(egui::RichText::new("+").monospace()).clicked() {
-                                self.editor_font_size = (self.editor_font_size + 1.0).min(32.0);
+                                self.editor_font_size = (self.editor_font_size + 1.0).min(320.0);
                             }
-
-                            ui.add_space(5.0);
-
-                            ui.checkbox(
-                                &mut self.show_parsed,
-                                egui::RichText::new("Show desugared").strong(),
-                            );
                         });
 
                         ui.separator();
 
                         let theme = if ui.visuals().dark_mode {
-                            fix_dark_theme(ColorTheme::GRUVBOX_DARK)
+                            fix_dark_theme(ColorTheme::SONOKAI)
                         } else {
                             fix_light_theme(ColorTheme::GRUVBOX_LIGHT)
                         };
@@ -97,22 +89,11 @@ impl eframe::App for Playground {
                             .with_fontsize(self.editor_font_size)
                             .with_theme(theme)
                             .with_numlines(true)
-                            .show(ui, code_to_show);
+                            .show(ui, &mut self.code);
                     });
                 });
 
             self.show_interaction(ui);
-
-            egui::TopBottomPanel::bottom("introspection")
-                .resizable(true)
-                .show_separator_line(true)
-                .default_height(16.0 * 8.0)
-                .show_inside(ui, |ui| {
-                    egui::ScrollArea::both().show(ui, |ui| {
-                        self.show_introspection(ui);
-                        ui.allocate_space(ui.available_size());
-                    });
-                });
         });
     }
 }
@@ -123,39 +104,58 @@ impl Playground {
             ui.horizontal_top(|ui| {
                 ui.add_space(5.0);
 
-                if ui.button(egui::RichText::new("PARSE").strong()).clicked() {
-                    self.parsed = parse_program(self.code.as_str()).map_err(Some).map(
-                        |(context, definitions)| {
-                            let mut pretty = String::new();
-                            let mut buf = String::new();
-                            for (name, expression) in &definitions {
-                                buf.clear();
-                                write!(&mut buf, "{}", expression).unwrap();
-                                write!(&mut pretty, "define {} = ", name).unwrap();
-                                print::pretty(&mut pretty, &buf, 0).unwrap();
-                            }
-                            Parsed { context, pretty }
-                        },
-                    )
+                if ui.button(egui::RichText::new("Compile").strong()).clicked() {
+                    self.compiled = Some(
+                        parse_program(self.code.as_str())
+                            .map_err(|error| Error::Parse(error))
+                            .and_then(|definitions| {
+                                let compile_result = definitions
+                                    .into_iter()
+                                    .map(|(name, def)| {
+                                        def.compile().map(|compiled| {
+                                            (
+                                                Internal::Original(name.clone()),
+                                                Arc::new(compiled.fix_captures(&IndexMap::new()).0),
+                                            )
+                                        })
+                                    })
+                                    .collect::<Result<_, CompileError<Loc>>>();
+                                match compile_result {
+                                    Ok(compiled) => Ok(Compiled {
+                                        globals: Arc::new(compiled),
+                                    }),
+                                    Err(error) => Err(Error::Compile(error)),
+                                }
+                            }),
+                    );
                 }
 
-                if let Ok(Parsed { context, .. }) = &self.parsed {
+                if let Some(Ok(Compiled { globals })) = &self.compiled {
                     egui::menu::menu_custom_button(
                         ui,
                         egui::Button::new(
-                            egui::RichText::new("RUN")
+                            egui::RichText::new("Run")
                                 .strong()
                                 .color(egui::Color32::BLACK),
                         )
                         .fill(green().lerp_to_gamma(egui::Color32::WHITE, 0.3)),
                         |ui| {
-                            for name in context.statics.keys() {
-                                if ui.button(&name.string).clicked() {
-                                    self.environment =
-                                        Environment::new(context.clone(), name).map_err(Some);
-                                    self.hidden.clear();
-                                    run_to_suspension(&mut self.environment);
-                                    ui.close_menu();
+                            for (internal_name, expression) in globals.as_ref() {
+                                if let Internal::Original(name) = internal_name {
+                                    if ui.button(&name.string).clicked() {
+                                        if let Some(int) = self.interact.take() {
+                                            int.lock().expect("lock failed").cancel();
+                                        }
+                                        self.interact = Some(Handle::start_expression(
+                                            Arc::new({
+                                                let ctx = ui.ctx().clone();
+                                                move || ctx.request_repaint()
+                                            }),
+                                            Context::new(Arc::new(TokioSpawn), Arc::clone(globals)),
+                                            expression,
+                                        ));
+                                        ui.close_menu();
+                                    }
                                 }
                             }
                         },
@@ -167,182 +167,125 @@ impl Playground {
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
                 egui::ScrollArea::both().show(ui, |ui| {
-                    if let Err(Some(parse_error)) = &self.parsed {
+                    if let Some(Err(error)) = &self.compiled {
                         ui.label(
-                            egui::RichText::new(&parse_error.message)
+                            egui::RichText::new(format!("{:?}", error))
                                 .color(red())
                                 .code(),
                         );
                     }
 
-                    match &mut self.environment {
-                        Ok(environment) => {
-                            if show_external(
-                                ui,
-                                environment,
-                                &environment.get_requests(),
-                                environment.primary.clone(),
-                                &mut self.hidden,
-                            ) {
-                                run_to_suspension(&mut self.environment);
-                            }
-                        }
-                        Err(Some(runtime_error)) => {
-                            ui.label(
-                                egui::RichText::new(format!("{}", runtime_error))
-                                    .color(red())
-                                    .code(),
-                            );
-                        }
-                        Err(None) => {
-                            ui.vertical_centered(|ui| {
-                                ui.label("Interaction");
-                            });
-                        }
+                    if let Some(int) = &self.interact {
+                        self.show_interact(ui, Arc::clone(int));
                     }
                 });
             });
         });
     }
 
-    fn show_introspection(&mut self, ui: &mut egui::Ui) {
-        let Ok(environment) = &self.environment else {
-            ui.vertical_centered(|ui| {
-                ui.label("Introspection");
-            });
-            return;
-        };
+    fn show_interact(
+        &mut self,
+        ui: &mut egui::Ui,
+        handle: Arc<Mutex<Handle<Loc, Internal<Name>>>>,
+    ) {
+        let locked_handle = handle.lock().expect("lock failed");
 
-        ui.vertical(|ui| {
-            let mut buf = String::new();
-            for (i, running) in environment.runnings.iter().enumerate() {
-                if i > 0 {
-                    ui.separator();
-                }
+        egui::Frame::default()
+            .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
+            .inner_margin(egui::Margin::same(4.0))
+            .outer_margin(egui::Margin::same(2.0))
+            .show(ui, |ui| {
+                ui.horizontal_top(|ui| {
+                    let mut to_the_side = Vec::new();
 
-                buf.clear();
-                let _ = write!(&mut buf, "{}", running.process);
-                ui.label(egui::RichText::new(&buf).strong().code());
+                    ui.vertical(|ui| {
+                        for event in locked_handle.events() {
+                            match event {
+                                Event::Send(_, argument) => {
+                                    self.show_interact(ui, Arc::clone(argument))
+                                }
 
-                buf.clear();
-                let _ = print_context(&mut buf, &running.context, 0);
-                ui.label(egui::RichText::new(&buf).code());
-            }
-        });
-    }
-}
+                                Event::Receive(_, parameter) => {
+                                    to_the_side.push(Arc::clone(parameter))
+                                }
 
-fn show_external(
-    ui: &mut egui::Ui,
-    environment: &mut Environment<Arc<Name>>,
-    requests: &BTreeMap<External, Request<Arc<Name>>>,
-    external: External,
-    hidden: &mut BTreeSet<External>,
-) -> bool {
-    if hidden.contains(&external) {
-        return false;
-    }
+                                Event::Choose(_, chosen) => {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new("+").strong().code().color(blue()),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(format!("{}", chosen))
+                                                .strong()
+                                                .code(),
+                                        );
+                                    });
+                                }
 
-    let mut need_run = false;
+                                Event::Either(_, chosen) => {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(">").strong().code().color(green()),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(format!("{}", chosen))
+                                                .strong()
+                                                .code(),
+                                        );
+                                    });
+                                }
 
-    let history = environment
-        .histories
-        .get(&external)
-        .cloned()
-        .unwrap_or_else(|| Vec::new());
+                                Event::Break(_) => {
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new("break").italics().code());
+                                    });
+                                }
 
-    egui::Frame::default()
-        .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
-        .inner_margin(egui::Margin::same(4.0))
-        .outer_margin(egui::Margin::same(2.0))
-        .show(ui, |ui| {
-            ui.horizontal_top(|ui| {
-                let mut to_the_side = Vec::new();
-
-                ui.vertical(|ui| {
-                    for event in history {
-                        match event {
-                            Event::Break => {
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new("break").italics().code());
-                                    if ui.small_button("X").clicked() {
-                                        hidden.insert(external.clone());
-                                    }
-                                });
-                            }
-                            Event::Continue => {
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new("continue").italics().code());
-                                    if ui.small_button("X").clicked() {
-                                        hidden.insert(external.clone());
-                                    }
-                                });
-                            }
-                            Event::Send(child) => {
-                                need_run =
-                                    show_external(ui, environment, requests, child.clone(), hidden)
-                                        || need_run;
-                            }
-                            Event::Message(message) => {
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        egui::RichText::new("!").strong().code().color(blue()),
-                                    );
-                                    ui.label(egui::RichText::new(&message).strong());
-                                });
-                            }
-                            Event::Receive(child) => {
-                                to_the_side.push(child.clone());
-                            }
-                            Event::Select(selected) => {
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        egui::RichText::new("+").strong().code().color(blue()),
-                                    );
-                                    ui.label(egui::RichText::new(&selected.string).strong().code());
-                                });
-                            }
-                            Event::Case(selected) => {
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        egui::RichText::new("&").strong().code().color(green()),
-                                    );
-                                    ui.label(egui::RichText::new(&selected.string).strong().code());
-                                });
-                            }
-                        }
-                    }
-
-                    if let Some(Request::Case(branches)) = requests.get(&external) {
-                        ui.menu_button(egui::RichText::new("CASE").strong(), |ui| {
-                            for branch in branches {
-                                if ui.button(&branch.string).clicked() {
-                                    environment
-                                        .respond(external.clone(), Response::Case(branch.clone()));
-                                    need_run = true;
-                                    ui.close_menu();
+                                Event::Continue(_) => {
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new("continue").italics().code());
+                                    });
                                 }
                             }
-                        });
+                        }
+
+                        if let Some(result) = locked_handle.interaction() {
+                            ui.horizontal(|ui| match result {
+                                Ok(Request::Dynamic(_)) => {
+                                    ui.label(egui::RichText::new("?").strong().code());
+                                }
+                                Ok(Request::Either(loc, choices)) => {
+                                    drop(locked_handle);
+                                    ui.menu_button(
+                                        egui::RichText::new("=>").strong().code(),
+                                        |ui| {
+                                            for choice in choices.iter() {
+                                                if ui.button(format!("{}", choice)).clicked() {
+                                                    Handle::choose(
+                                                        Arc::clone(&handle),
+                                                        loc.clone(),
+                                                        choice.clone(),
+                                                    );
+                                                    ui.close_menu();
+                                                }
+                                            }
+                                        },
+                                    );
+                                }
+                                Err(error) => {
+                                    ui.label(
+                                        egui::RichText::new(format!("{:?}", error)).color(red()),
+                                    );
+                                }
+                            });
+                        }
+                    });
+
+                    for side in to_the_side {
+                        self.show_interact(ui, side);
                     }
                 });
-
-                for side in to_the_side {
-                    need_run = show_external(ui, environment, requests, side, hidden) || need_run;
-                }
-            })
-        });
-
-    need_run
-}
-
-fn run_to_suspension(
-    environment: &mut Result<Environment<Arc<Name>>, Option<RuntimeError<Arc<Name>, External>>>,
-) {
-    if let Ok(env) = environment {
-        if let Err(runtime_error) = env.run_to_suspension() {
-            *environment = Err(Some(runtime_error));
-        }
+            });
     }
 }
 
@@ -353,7 +296,9 @@ fn par_syntax() -> Syntax {
         comment: "//",
         comment_multiline: [r#"/*"#, r#"*/"#],
         hyperlinks: BTreeSet::from([]),
-        keywords: BTreeSet::from(["define", "chan", "let", "pass", "iterate", "loop"]),
+        keywords: BTreeSet::from([
+            "define", "chan", "let", "pass", "iterate", "loop", "in", "do",
+        ]),
         types: BTreeSet::from([]),
         special: BTreeSet::from(["<>"]),
     }
@@ -383,74 +328,4 @@ fn blue() -> egui::Color32 {
     egui::Color32::from_hex("#118ab2").unwrap()
 }
 
-static DEFAULT_CODE: &str = r#"define play_stack = ("Happy poppin'") loop(drained)
-
-define play_numbers = [m][n] mul(m)(n)
-
-// ---
-
-define loop = [stack] chan user {
-  user {
-    pop => {
-      stack.pop {
-        empty[] => { user.empty() }
-        item[value] => {
-          user.item(value) <> loop(stack)
-        }
-      }
-    }
-    push[value] => {
-      stack.push(rgb(value));
-      user <> loop(stack)
-    }
-  }
-}
-
-define drained = {
-  pop  => .empty()
-  push => stacked(drained)
-}
-
-define stacked = [under][top] {
-  pop  => .item(top) under
-  push => stacked(stacked(under)(top))
-}
-
-define rgb = [value] value {
-  red[]   => .red()
-  green[] => .green()
-  blue[]  => .blue()
-}
-
-// ---
-
-define zero = .zero()
-define add1 = [n] .add1 n
-
-define copy = [n] n {
-  zero[] => (zero)(zero)()
-  add1 n => copy(n)[n1][n2][]
-    (add1(n1))(add1(n2))()
-}
-
-define clear = [n] n {
-  zero[] => ()
-  add1 n => clear(n)
-}
-
-define print = [n] n {
-  zero[] => .zero()
-  add1 n => .add1 print(n)
-}
-
-define add = [m][n] m {
-  zero[] => n
-  add1 m => add1(add(m)(n))
-}
-
-define mul = [m][n] m {
-  zero[] => clear(n)[] zero
-  add1 m => copy(n)[n1][n2][]
-    add(n1)(mul(m)(n2))
-}
-"#;
+static DEFAULT_CODE: &str = include_str!("sample.par");

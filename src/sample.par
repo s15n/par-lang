@@ -1,0 +1,40 @@
+define listrgb =
+  .item(.red!)
+  .item(.green!)
+  .item(.blue!)
+  .empty!
+
+define rgb = [value] value {
+  red?   => .red!
+  green? => .green!
+  blue?  => .blue!
+}
+
+define copy = [list] chan result {
+  list iterate {
+    empty? => {
+      result.empty!
+    }
+    item[x] => {
+      result.item(x)
+      list loop
+    }
+  }
+}
+
+define zip = [list][seq] chan result {
+  list iterate {
+    empty? => {
+      seq.close?
+      result.empty!
+    }
+    item[x] => {
+      seq.next[y]
+      let y = rgb(y)
+      result.item((x)(y)!)
+      list loop
+    }
+  }
+}
+
+define play = zip(listrgb)

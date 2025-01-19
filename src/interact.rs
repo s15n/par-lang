@@ -1,179 +1,256 @@
-use std::collections::BTreeMap;
-
-use crate::base::{
-    run_to_suspension, Action, Command, Context, Process, Request, Response, Running, RuntimeError,
-    Value,
+use crate::{
+    process::Expression,
+    runtime::{self, Context, Message, Value},
+};
+use futures::{channel::oneshot, task::SpawnExt};
+use std::{
+    hash::Hash,
+    sync::{Arc, Mutex},
 };
 
-pub struct Environment<I> {
-    pub histories: BTreeMap<External, Vec<Event<I, External>>>,
-    pub responses: BTreeMap<External, Response<I, External>>,
-    pub runnings: Vec<Running<I, External>>,
-    pub primary: External,
-    next: External,
+pub struct Handle<Loc, Name> {
+    refresh: Arc<dyn Fn() + Send + Sync>,
+    events: Vec<Event<Loc, Name>>,
+    interaction: Option<Result<Interaction<Loc, Name>, runtime::Error<Loc, Name>>>,
+    cancelled: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct External {
-    id: u64,
+pub enum Event<Loc, Name> {
+    Send(Loc, Arc<Mutex<Handle<Loc, Name>>>),
+    Receive(Loc, Arc<Mutex<Handle<Loc, Name>>>),
+    Choose(Loc, Name),
+    Either(Loc, Name),
+    Break(Loc),
+    Continue(Loc),
+}
+
+struct Interaction<Loc, Name> {
+    context: Context<Loc, Name>,
+    value: Value<Loc, Name>,
+    request: Request<Loc, Name>,
 }
 
 #[derive(Clone, Debug)]
-pub enum Event<I, X> {
-    Break,
-    Continue,
-    Send(X),
-    Message(String),
-    Receive(X),
-    Select(I),
-    Case(I),
+pub enum Request<Loc, Name> {
+    Dynamic(Loc),
+    Either(Loc, Arc<[Name]>),
 }
 
-impl<I: Clone + Ord> Environment<I> {
-    pub fn new(
-        mut context: Context<I, External>,
-        program: &I,
-    ) -> Result<Self, RuntimeError<I, External>> {
-        let program = context.get(program)?;
-        let Value::Suspend(mut context, channel, process) = program else {
-            unreachable!();
-        };
-        let primary = External { id: 0 };
-        let next = External { id: 1 };
-        context.set(&channel, Value::External(primary.clone()))?;
-        Ok(Self {
-            histories: BTreeMap::new(),
-            responses: BTreeMap::new(),
-            runnings: Vec::from([Running { context, process }]),
-            primary,
-            next,
-        })
+impl<Loc, Name> Handle<Loc, Name>
+where
+    Loc: Default + Clone + Eq + Hash + Send + Sync + 'static,
+    Name: Clone + Eq + Hash + Send + Sync + 'static,
+{
+    pub fn events(&self) -> &[Event<Loc, Name>] {
+        &self.events
     }
 
-    fn generate(&mut self) -> External {
-        let next_id = self.next.id + 1;
-        std::mem::replace(&mut self.next, External { id: next_id })
+    pub fn interaction(&self) -> Option<Result<Request<Loc, Name>, runtime::Error<Loc, Name>>> {
+        match &self.interaction {
+            Some(Ok(int)) => Some(Ok(int.request.clone())),
+            Some(Err(error)) => Some(Err(error.clone())),
+            None => None,
+        }
     }
 
-    pub fn get_requests(&self) -> BTreeMap<External, Request<I>> {
-        let mut requests = BTreeMap::new();
-        for running in &self.runnings {
-            for (_, requesting) in &running.context.state.requesting {
-                requests.extend(requesting.iter().map(|(k, v)| (k.clone(), v.clone())));
-            }
-            if let Process::Do(subject, command) = &*running.process {
-                if let Some(Value::External(external)) = running.context.variables.get(subject) {
-                    match command {
-                        Command::Receive(_, _) => {
-                            requests.insert(external.clone(), Request::Receive);
+    pub fn choose(handle: Arc<Mutex<Self>>, loc: Loc, chosen: Name) {
+        if let Some(Ok(mut int)) = handle.lock().expect("lock failed").interaction.take() {
+            int.context
+                .spawner()
+                .spawn({
+                    let handle = Arc::clone(&handle);
+                    async move {
+                        match int
+                            .context
+                            .choose_in(Loc::default(), int.value, chosen.clone())
+                            .await
+                        {
+                            Ok(value) => {
+                                handle
+                                    .lock()
+                                    .expect("lock failed")
+                                    .add_event(Event::Either(loc, chosen));
+                                Self::run(handle, int.context, value).await
+                            }
+                            Err(error) => {
+                                let mut handle = handle.lock().expect("lock failed");
+                                handle.interaction = Some(Err(error));
+                                (handle.refresh)();
+                            }
                         }
-                        Command::Case(_, branches) => {
-                            requests.insert(
-                                external.clone(),
-                                Request::Case(
-                                    branches.iter().map(|(branch, _)| branch.clone()).collect(),
-                                ),
-                            );
-                        }
-                        _ => (),
                     }
-                }
-            }
+                })
+                .expect("spawn failed");
         }
-        requests
     }
 
-    pub fn respond(&mut self, external: External, response: Response<I, External>) {
-        match &response {
-            Response::Receive(Value::External(ext)) => {
-                self.histories
-                    .entry(external.clone())
-                    .or_default()
-                    .push(Event::Receive(ext.clone()));
-            }
-            Response::Case(selected) => {
-                self.histories
-                    .entry(external.clone())
-                    .or_default()
-                    .push(Event::Case(selected.clone()));
-            }
-            _ => (),
+    pub fn start_expression(
+        refresh: Arc<dyn Fn() + Send + Sync>,
+        context: Context<Loc, Name>,
+        expression: &Expression<Loc, Name>,
+    ) -> Arc<Mutex<Self>> {
+        let mut context = context;
+        match context.evaluate(expression) {
+            Ok(value) => Self::start(refresh, context, value),
+            Err(error) => Arc::new(Mutex::new(Self {
+                refresh,
+                events: Vec::new(),
+                interaction: Some(Err(error)),
+                cancelled: false,
+            })),
         }
-        self.responses.insert(external.clone(), response);
     }
 
-    pub fn run_to_suspension(&mut self) -> Result<(), RuntimeError<I, External>> {
+    pub fn start(
+        refresh: Arc<dyn Fn() + Send + Sync>,
+        context: Context<Loc, Name>,
+        value: Value<Loc, Name>,
+    ) -> Arc<Mutex<Self>> {
+        let handle = Arc::new(Mutex::new(Self {
+            refresh,
+            events: Vec::new(),
+            interaction: None,
+            cancelled: false,
+        }));
+
+        context
+            .spawner()
+            .spawn(Self::run(Arc::clone(&handle), context, value))
+            .expect("spawn failed");
+
+        handle
+    }
+
+    async fn run(
+        handle: Arc<Mutex<Self>>,
+        mut context: Context<Loc, Name>,
+        mut value: Value<Loc, Name>,
+    ) {
         loop {
-            self.run_all()?;
+            match value {
+                Value::Receiver(rx) => {
+                    let message = rx.await.ok().expect("sender dropped");
+                    let mut handle = handle.lock().expect("lock failed");
 
-            let mut responded = false;
-            for (external, request) in self.get_requests() {
-                if matches!(request, Request::Receive) {
-                    let new_external = self.generate();
-                    self.respond(external, Response::Receive(Value::External(new_external)));
-                    responded = true;
+                    match message {
+                        Message::Swap(runtime::Request::Dynamic(loc), tx) => {
+                            value =
+                                Value::Receiver(context.swap(runtime::Request::Dynamic(loc), tx));
+                        }
+
+                        Message::Swap(runtime::Request::Receive(loc), tx) => {
+                            let (tx1, rx1) = oneshot::channel();
+                            let (tx2, rx2) = oneshot::channel();
+                            tx.send(Message::Send(Loc::default(), Value::Receiver(rx1), rx2))
+                                .ok()
+                                .expect("receiver dropped");
+
+                            let refresh = Arc::clone(&handle.refresh);
+                            handle.add_event(Event::Receive(
+                                loc,
+                                Handle::start(refresh, context.split(), Value::Sender(tx1)),
+                            ));
+
+                            value = Value::Sender(tx2);
+                        }
+
+                        Message::Swap(runtime::Request::Either(loc, choices), tx) => {
+                            handle.request_interaction(
+                                context,
+                                Value::Sender(tx),
+                                Request::Either(loc, choices),
+                            );
+                            break;
+                        }
+
+                        Message::Swap(runtime::Request::Continue(loc), tx) => {
+                            tx.send(Message::Break(Loc::default()))
+                                .ok()
+                                .expect("receiver dropped");
+                            handle.add_event(Event::Continue(loc));
+                            break;
+                        }
+
+                        Message::Send(loc, argument, rx) => {
+                            let refresh = Arc::clone(&handle.refresh);
+                            handle.add_event(Event::Send(
+                                loc,
+                                Handle::start(refresh, context.split(), argument),
+                            ));
+                            value = Value::Receiver(rx);
+                        }
+
+                        Message::Choose(loc, chosen, rx) => {
+                            handle.add_event(Event::Choose(loc, chosen));
+                            value = Value::Receiver(rx);
+                        }
+
+                        Message::Break(loc) => {
+                            handle.add_event(Event::Break(loc));
+                            break;
+                        }
+
+                        Message::Error(error) => {
+                            handle.interaction = Some(Err(error));
+                            (handle.refresh)();
+                            break;
+                        }
+                    }
                 }
-            }
-            if !responded {
-                return Ok(());
-            }
+
+                Value::Sender(tx) => {
+                    value = Value::Receiver(
+                        context.swap(runtime::Request::Dynamic(Loc::default()), tx),
+                    );
+                }
+            };
         }
     }
 
-    pub fn run_all(&mut self) -> Result<(), RuntimeError<I, External>> {
-        let mut pending = std::mem::replace(&mut self.runnings, Vec::new());
-        while let Some(running) = pending.pop() {
-            let (new_running, requests) = run_to_suspension(running, &mut self.responses)?;
-            self.runnings.extend(new_running.into_iter());
-            for (external, request) in requests {
-                match request {
-                    Action::Break => {
-                        self.histories
-                            .entry(external)
-                            .or_default()
-                            .push(Event::Break);
-                    }
-                    Action::Continue => {
-                        self.histories
-                            .entry(external)
-                            .or_default()
-                            .push(Event::Continue);
-                    }
-                    Action::Send(Value::Suspend(mut context, channel, process)) => {
-                        let new_external = self.generate();
-                        context.set(&channel, Value::External(new_external.clone()))?;
-                        pending.push(Running { context, process });
-                        self.histories
-                            .entry(external)
-                            .or_default()
-                            .push(Event::Send(new_external));
-                    }
-                    Action::Send(Value::External(escaped)) => {
-                        return Err(RuntimeError::ExternalEscaped(escaped))
-                    }
-                    Action::Send(Value::String(message)) => {
-                        self.histories
-                            .entry(external)
-                            .or_default()
-                            .push(Event::Message(message));
-                    }
-                    Action::Receive => (),
-                    Action::Select(selected) => {
-                        self.histories
-                            .entry(external)
-                            .or_default()
-                            .push(Event::Select(selected));
-                    }
-                    Action::Case(_) => (),
-                }
+    fn add_event(&mut self, event: Event<Loc, Name>) {
+        self.events.push(event);
+        (self.refresh)();
+    }
+
+    fn request_interaction(
+        &mut self,
+        mut context: Context<Loc, Name>,
+        value: Value<Loc, Name>,
+        request: Request<Loc, Name>,
+    ) {
+        if self.cancelled {
+            context
+                .spawner()
+                .spawn(async move {
+                    let _ = context.continue_from(Loc::default(), value).await;
+                })
+                .expect("spawn failed");
+            return;
+        }
+        self.interaction = Some(Ok(Interaction {
+            context,
+            value,
+            request,
+        }));
+        (self.refresh)();
+    }
+
+    pub fn cancel(&mut self) {
+        self.cancelled = true;
+        for event in self.events.drain(..) {
+            match event {
+                Event::Send(_, int) => int.lock().expect("lock failed").cancel(),
+                Event::Receive(_, int) => int.lock().expect("lock failed").cancel(),
+                _ => continue,
             }
         }
-        Ok(())
-    }
-}
-
-impl std::fmt::Display for External {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "#{{{}}}", self.id)
+        if let Some(Ok(mut int)) = self.interaction.take() {
+            int.context
+                .spawner()
+                .spawn(async move {
+                    let _ = int.context.continue_from(Loc::default(), int.value).await;
+                })
+                .expect("spawn failed");
+        }
     }
 }
