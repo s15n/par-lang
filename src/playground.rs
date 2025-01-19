@@ -322,13 +322,13 @@ impl Error {
         match self {
             Self::Parse(error) => {
                 format!(
-                    "{}\n\nSyntax error.",
+                    "{}\nSyntax error.",
                     Self::display_loc(code, &error.location)
                 )
             }
 
             Self::Compile(CompileError::PassNotPossible(loc)) => {
-                format!("{}\n\nNothing to `pass` to.", Self::display_loc(code, loc),)
+                format!("{}\nNothing to `pass` to.", Self::display_loc(code, loc),)
             }
 
             Self::Runtime(error) => Self::display_runtime_error(code, error),
@@ -340,14 +340,14 @@ impl Error {
         match error {
             NameNotDefined(loc, name) => {
                 format!(
-                    "{}\n\n`{}` is not defined.",
+                    "{}\n`{}` is not defined.",
                     Self::display_loc(code, loc),
                     name
                 )
             }
             UnfulfilledObligations(loc, names) => {
                 format!(
-                    "{}\n\nCannot end process without handling {}.",
+                    "{}\nCannot end process without handling {}.",
                     Self::display_loc(code, loc),
                     names
                         .iter()
@@ -365,7 +365,7 @@ impl Error {
             }
             NoSuchLoopPoint(loc, _) => {
                 format!(
-                    "{}\n\nThere is no matching loop point in scope.",
+                    "{}\nThere is no matching loop point in scope.",
                     Self::display_loc(code, loc),
                 )
             }
