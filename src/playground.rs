@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeSet,
+    fmt::Write,
     sync::{Arc, Mutex},
 };
 
@@ -21,6 +22,7 @@ pub struct Playground {
     compiled: Option<Compiled>,
     interact: Option<Interact>,
     editor_font_size: f32,
+    show_compiled: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -34,6 +36,7 @@ enum Error {
 struct Compiled {
     code: Arc<str>,
     globals: Result<Arc<IndexMap<Internal<Name>, Arc<Expression<Loc, Internal<Name>>>>>, Error>,
+    pretty: Option<String>,
 }
 
 #[derive(Clone)]
@@ -58,6 +61,7 @@ impl Playground {
             compiled: None,
             interact: None,
             editor_font_size: 16.0,
+            show_compiled: false,
         })
     }
 }
@@ -85,17 +89,12 @@ impl eframe::App for Playground {
 
                         ui.separator();
 
-                        let theme = if ui.visuals().dark_mode {
-                            fix_dark_theme(ColorTheme::SONOKAI)
-                        } else {
-                            fix_light_theme(ColorTheme::GRUVBOX_LIGHT)
-                        };
                         CodeEditor::default()
                             .id_source("code")
                             .with_syntax(par_syntax())
                             .with_rows(32)
                             .with_fontsize(self.editor_font_size)
-                            .with_theme(theme)
+                            .with_theme(self.get_theme(ui))
                             .with_numlines(true)
                             .show(ui, &mut self.code);
                     });
@@ -107,41 +106,73 @@ impl eframe::App for Playground {
 }
 
 impl Playground {
+    fn get_theme(&self, ui: &egui::Ui) -> ColorTheme {
+        if ui.visuals().dark_mode {
+            fix_dark_theme(ColorTheme::GRUVBOX_DARK)
+        } else {
+            fix_light_theme(ColorTheme::GRUVBOX_LIGHT)
+        }
+    }
+
     fn show_interaction(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             ui.horizontal_top(|ui| {
                 ui.add_space(5.0);
 
                 if ui.button(egui::RichText::new("Compile").strong()).clicked() {
+                    let globals = parse_program(self.code.as_str())
+                        .map_err(|error| Error::Parse(error))
+                        .and_then(|definitions| {
+                            let compile_result = definitions
+                                .into_iter()
+                                .map(|(name, def)| {
+                                    def.compile().map(|compiled| {
+                                        (
+                                            Internal::Original(name.clone()),
+                                            Arc::new(compiled.fix_captures(&IndexMap::new()).0),
+                                        )
+                                    })
+                                })
+                                .collect::<Result<_, CompileError<Loc>>>();
+                            match compile_result {
+                                Ok(compiled) => Ok(Arc::<IndexMap<_, _>>::new(compiled)),
+                                Err(error) => Err(Error::Compile(error)),
+                            }
+                        });
+
+                    let pretty = globals.as_ref().ok().map(|globals| {
+                        globals
+                            .iter()
+                            .map(|(name, def)| {
+                                let mut buf = String::new();
+                                write!(&mut buf, "define {} = ", name).expect("write failed");
+                                def.pretty(&mut buf, 0).expect("write failed");
+                                write!(&mut buf, "\n\n").expect("write failed");
+                                buf
+                            })
+                            .collect()
+                    });
+
                     self.compiled = Some(Compiled {
                         code: Arc::from(self.code.as_str()),
-                        globals: parse_program(self.code.as_str())
-                            .map_err(|error| Error::Parse(error))
-                            .and_then(|definitions| {
-                                let compile_result = definitions
-                                    .into_iter()
-                                    .map(|(name, def)| {
-                                        def.compile().map(|compiled| {
-                                            (
-                                                Internal::Original(name.clone()),
-                                                Arc::new(compiled.fix_captures(&IndexMap::new()).0),
-                                            )
-                                        })
-                                    })
-                                    .collect::<Result<_, CompileError<Loc>>>();
-                                match compile_result {
-                                    Ok(compiled) => Ok(Arc::new(compiled)),
-                                    Err(error) => Err(Error::Compile(error)),
-                                }
-                            }),
+                        globals,
+                        pretty,
                     });
                 }
 
                 if let Some(Compiled {
                     code,
                     globals: Ok(globals),
+                    pretty,
                 }) = &self.compiled
                 {
+                    if pretty.is_some() {
+                        ui.checkbox(
+                            &mut self.show_compiled,
+                            egui::RichText::new("Show compiled"),
+                        );
+                    }
+
                     egui::menu::menu_custom_button(
                         ui,
                         egui::Button::new(
@@ -187,9 +218,28 @@ impl Playground {
                     if let Some(Compiled {
                         code,
                         globals: Err(error),
+                        ..
                     }) = &self.compiled
                     {
                         ui.label(egui::RichText::new(error.display(code)).color(red()).code());
+                    }
+
+                    let theme = self.get_theme(ui);
+                    if let Some(Compiled {
+                        pretty: Some(pretty),
+                        ..
+                    }) = &mut self.compiled
+                    {
+                        if self.show_compiled {
+                            CodeEditor::default()
+                                .id_source("compiled")
+                                .with_syntax(par_syntax())
+                                .with_rows(32)
+                                .with_fontsize(self.editor_font_size)
+                                .with_theme(theme)
+                                .with_numlines(true)
+                                .show(ui, pretty);
+                        }
                     }
 
                     if let Some(int) = &self.interact {
@@ -452,7 +502,7 @@ fn par_syntax() -> Syntax {
         comment_multiline: [r#"/*"#, r#"*/"#],
         hyperlinks: BTreeSet::from([]),
         keywords: BTreeSet::from([
-            "define", "chan", "let", "pass", "iterate", "loop", "in", "do",
+            "define", "chan", "let", "pass", "iterate", "loop", "in", "do", "select", "sync",
         ]),
         types: BTreeSet::from([]),
         special: BTreeSet::from(["<>"]),
