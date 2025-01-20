@@ -1,5 +1,9 @@
 use indexmap::IndexMap;
-use std::{hash::Hash, sync::Arc};
+use std::{
+    fmt::{self, Display, Write},
+    hash::Hash,
+    sync::Arc,
+};
 
 #[derive(Debug)]
 pub enum Process<Loc, Name> {
@@ -180,4 +184,116 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Expression<Loc, Name> {
             }
         }
     }
+}
+
+impl<Loc, Name: Display> Process<Loc, Name> {
+    pub fn pretty(&self, f: &mut impl Write, indent: usize) -> fmt::Result {
+        match self {
+            Self::Let(_, name, expression, process) => {
+                indentation(f, indent)?;
+                write!(f, "let {} = ", name)?;
+                expression.pretty(f, indent)?;
+                process.pretty(f, indent)
+            }
+
+            Self::Do(_, subject, command) => {
+                indentation(f, indent)?;
+                write!(f, "{}", subject)?;
+
+                match command {
+                    Command::Link(expression) => {
+                        write!(f, " <> ")?;
+                        expression.pretty(f, indent)
+                    }
+
+                    Command::Send(argument, process) => {
+                        write!(f, "(")?;
+                        argument.pretty(f, indent)?;
+                        write!(f, ")")?;
+                        process.pretty(f, indent)
+                    }
+
+                    Command::Receive(parameter, process) => {
+                        write!(f, "[{}]", parameter)?;
+                        process.pretty(f, indent)
+                    }
+
+                    Command::Choose(chosen, process) => {
+                        write!(f, ".{}", chosen)?;
+                        process.pretty(f, indent)
+                    }
+
+                    Command::Either(choices, branches) => {
+                        write!(f, " {{")?;
+                        for (choice, process) in choices.iter().zip(branches.iter()) {
+                            indentation(f, indent + 1)?;
+                            write!(f, "{} => {{", choice)?;
+                            process.pretty(f, indent + 2)?;
+                            indentation(f, indent + 1)?;
+                            write!(f, "}}")?;
+                        }
+                        indentation(f, indent)?;
+                        write!(f, "}}")
+                    }
+
+                    Command::Break => {
+                        write!(f, "!")
+                    }
+
+                    Command::Continue(process) => {
+                        write!(f, "?")?;
+                        process.pretty(f, indent)
+                    }
+
+                    Command::Iterate(label, process) => {
+                        write!(f, " iterate")?;
+                        if let Some(label) = label {
+                            write!(f, " {}", label)?;
+                        }
+                        process.pretty(f, indent)
+                    }
+
+                    Command::Loop(label) => {
+                        write!(f, " loop")?;
+                        if let Some(label) = label {
+                            write!(f, " {}", label)?;
+                        }
+                        Ok(())
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<Loc, Name: Display> Expression<Loc, Name> {
+    pub fn pretty(&self, f: &mut impl Write, indent: usize) -> fmt::Result {
+        match self {
+            Self::Reference(_, name) => {
+                write!(f, "{}", name)
+            }
+
+            Self::Fork(_, captures, channel, process) => {
+                write!(f, "chan {} |", channel)?;
+                for (i, cap) in captures.names.keys().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", cap)?;
+                }
+                write!(f, "| {{")?;
+                process.pretty(f, indent + 1)?;
+                indentation(f, indent)?;
+                write!(f, "}}")
+            }
+        }
+    }
+}
+
+fn indentation(f: &mut impl Write, indent: usize) -> fmt::Result {
+    write!(f, "\n")?;
+    for _ in 0..indent {
+        write!(f, "  ")?;
+    }
+    Ok(())
 }
