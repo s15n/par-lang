@@ -266,7 +266,7 @@ where
                             current_process = Arc::clone(process);
                         }
 
-                        Command::Iterate(point, process) => {
+                        Command::Begin(point, process) => {
                             self.loop_points
                                 .insert(point.clone(), (object_name.clone(), Arc::clone(process)));
                             self.put(object_name.clone(), object);

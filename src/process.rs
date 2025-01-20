@@ -20,7 +20,7 @@ pub enum Command<Loc, Name> {
     Either(Arc<[Name]>, Box<[Arc<Process<Loc, Name>>]>),
     Break,
     Continue(Arc<Process<Loc, Name>>),
-    Iterate(Option<Name>, Arc<Process<Loc, Name>>),
+    Begin(Option<Name>, Arc<Process<Loc, Name>>),
     Loop(Option<Name>),
 }
 
@@ -144,12 +144,12 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
                 let (process, caps) = process.fix_captures(loop_points);
                 (Self::Continue(Arc::new(process)), caps)
             }
-            Self::Iterate(label, process) => {
+            Self::Begin(label, process) => {
                 let (_, caps) = process.fix_captures(loop_points);
                 let mut loop_points = loop_points.clone();
                 loop_points.insert(label.clone(), caps);
                 let (process, caps) = process.fix_captures(&loop_points);
-                (Self::Iterate(label.clone(), Arc::new(process)), caps)
+                (Self::Begin(label.clone(), Arc::new(process)), caps)
             }
             Self::Loop(label) => (
                 Self::Loop(label.clone()),
@@ -245,8 +245,8 @@ impl<Loc, Name: Display> Process<Loc, Name> {
                         process.pretty(f, indent)
                     }
 
-                    Command::Iterate(label, process) => {
-                        write!(f, " iterate")?;
+                    Command::Begin(label, process) => {
+                        write!(f, " begin")?;
                         if let Some(label) = label {
                             write!(f, " {}", label)?;
                         }

@@ -69,7 +69,7 @@ pub enum Command<Loc, Name> {
     ),
     Break(Loc),
     Continue(Loc, Box<Process<Loc, Name>>),
-    Iterate(Loc, Option<Name>, Box<Self>),
+    Begin(Loc, Option<Name>, Box<Self>),
     Loop(Loc, Option<Name>),
 }
 
@@ -445,12 +445,12 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
                 ))
             }
 
-            Self::Iterate(loc, label, command) => {
+            Self::Begin(loc, label, command) => {
                 let process = command.compile(object_name, pass)?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
                     object_internal,
-                    process::Command::Iterate(label.clone().map(Internal::Original), process),
+                    process::Command::Begin(label.clone().map(Internal::Original), process),
                 ))
             }
 

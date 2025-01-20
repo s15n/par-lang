@@ -357,11 +357,11 @@ fn parse_command(pairs: &mut Pairs<'_, Rule>) -> Result<Command<Loc, Name>, Pars
             Ok(Command::Continue(loc, Box::new(process)))
         }
 
-        Rule::cmd_iterate => {
+        Rule::cmd_begin => {
             let mut pairs = pair.into_inner();
             let label = parse_loop_label(&mut pairs)?;
             let command = parse_command(&mut pairs)?;
-            Ok(Command::Iterate(loc, label, Box::new(command)))
+            Ok(Command::Begin(loc, label, Box::new(command)))
         }
 
         Rule::cmd_loop => {

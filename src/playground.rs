@@ -502,7 +502,7 @@ fn par_syntax() -> Syntax {
         comment_multiline: [r#"/*"#, r#"*/"#],
         hyperlinks: BTreeSet::from([]),
         keywords: BTreeSet::from([
-            "define", "chan", "let", "pass", "iterate", "loop", "in", "do", "select", "sync",
+            "define", "chan", "let", "pass", "begin", "loop", "in", "do", "select", "sync",
         ]),
         types: BTreeSet::from([]),
         special: BTreeSet::from(["<>"]),

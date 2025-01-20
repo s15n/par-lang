@@ -11,7 +11,7 @@ define rgb = [value] value {
 }
 
 define copy = [list] chan result {
-  list iterate {
+  list begin {
     empty? => {
       result.empty!
     }
@@ -23,7 +23,7 @@ define copy = [list] chan result {
 }
 
 define zip = [list][seq] chan result {
-  list iterate {
+  list begin {
     empty? => {
       seq.close?
       result.empty!

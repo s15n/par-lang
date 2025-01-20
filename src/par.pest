@@ -38,7 +38,7 @@ proc_let  = { "let" ~ name ~ "=" ~ expression ~ process }
 proc_pass = { "pass" }
 
 command      = { name ~ cmd }
-cmd          = { cmd_link | cmd_send | cmd_receive | cmd_choose | cmd_either | cmd_break | cmd_continue | cmd_iterate | cmd_loop | cmd_then }
+cmd          = { cmd_link | cmd_send | cmd_receive | cmd_choose | cmd_either | cmd_break | cmd_continue | cmd_begin | cmd_loop | cmd_then }
 cmd_link     = { "<>" ~ expression }
 cmd_send     = { "(" ~ expression ~ ")" ~ cmd }
 cmd_receive  = { "[" ~ name ~ "]" ~ cmd }
@@ -46,7 +46,7 @@ cmd_choose   = { "." ~ name ~ cmd }
 cmd_either   = { "{" ~ cmd_branches ~ "}" ~ process? }
 cmd_break    = { "!" }
 cmd_continue = { "?" ~ process }
-cmd_iterate  = { "iterate" ~ loop_label ~ cmd }
+cmd_begin    = { "begin" ~ loop_label ~ cmd }
 cmd_loop     = { "loop" ~ loop_label }
 cmd_then     = { process }
 
