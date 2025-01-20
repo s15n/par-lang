@@ -32,6 +32,7 @@ struct Interaction<Loc, Name> {
 
 #[derive(Clone, Debug)]
 pub enum Request<Loc, Name> {
+    Dynamic(Loc),
     Either(Loc, Arc<[Name]>),
 }
 
@@ -125,7 +126,12 @@ where
         mut context: Context<Loc, Name>,
         mut value: Value<Loc, Name>,
     ) {
+        let mut consecutive_dynamic: usize = 0;
+
         loop {
+            let previous_consecutive = consecutive_dynamic;
+            consecutive_dynamic = 0;
+
             match value {
                 Value::Receiver(rx) => {
                     let message = rx.await.ok().expect("sender dropped");
@@ -133,8 +139,17 @@ where
 
                     match message {
                         Message::Swap(runtime::Request::Dynamic(loc), tx) => {
+                            if previous_consecutive > 3 {
+                                handle.request_interaction(
+                                    context,
+                                    Value::Sender(tx),
+                                    Request::Dynamic(loc),
+                                );
+                                break;
+                            }
                             value =
                                 Value::Receiver(context.swap(runtime::Request::Dynamic(loc), tx));
+                            consecutive_dynamic = previous_consecutive + 1;
                         }
 
                         Message::Swap(runtime::Request::Receive(loc), tx) => {

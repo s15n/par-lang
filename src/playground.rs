@@ -129,7 +129,12 @@ impl Playground {
                                     def.compile().map(|compiled| {
                                         (
                                             Internal::Original(name.clone()),
-                                            Arc::new(compiled.optimize().fix_captures(&IndexMap::new()).0),
+                                            Arc::new(
+                                                compiled
+                                                    .optimize()
+                                                    .fix_captures(&IndexMap::new())
+                                                    .0,
+                                            ),
                                         )
                                     })
                                 })
@@ -320,6 +325,17 @@ impl Playground {
 
                         if let Some(result) = handle.interaction() {
                             ui.horizontal(|ui| match result {
+                                Ok(Request::Dynamic(_)) => {
+                                    ui.horizontal(|ui| {
+                                        drop(handle);
+                                        ui.label(
+                                            egui::RichText::new("<UI>")
+                                                .strong()
+                                                .code()
+                                                .color(red()),
+                                        );
+                                    });
+                                }
                                 Ok(Request::Either(loc, choices)) => {
                                     ui.horizontal(|ui| {
                                         drop(handle);
