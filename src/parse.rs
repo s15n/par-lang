@@ -101,6 +101,19 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Expression<Loc, Name>
     let loc = Loc::from(&pair);
 
     match pair.as_rule() {
+        Rule::expr_let => {
+            let mut pairs = pair.into_inner();
+            let (_, name) = parse_name(&mut pairs)?;
+            let expression = parse_expression(&mut pairs)?;
+            let body = parse_expression(&mut pairs)?;
+            Ok(Expression::Let(
+                loc,
+                name,
+                Box::new(expression),
+                Box::new(body),
+            ))
+        }
+
         Rule::expr_fork => {
             let mut pairs = pair.into_inner();
             let (_, name) = parse_name(&mut pairs)?;

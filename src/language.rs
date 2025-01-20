@@ -6,6 +6,7 @@ use crate::process::{self, Captures};
 
 #[derive(Clone, Debug)]
 pub enum Expression<Loc, Name> {
+    Let(Loc, Name, Box<Self>, Box<Self>),
     Fork(Loc, Name, Box<Process<Loc, Name>>),
     Construction(Loc, Construct<Loc, Name>),
     Application(Loc, Name, Apply<Loc, Name>),
@@ -126,6 +127,26 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Expression<Loc, Name> {
         &self,
     ) -> Result<Arc<process::Expression<Loc, Internal<Name>>>, CompileError<Loc>> {
         Ok(match self {
+            Self::Let(loc, name, expression, body) => {
+                let expression = expression.compile()?;
+                let body = body.compile()?;
+                Arc::new(process::Expression::Fork(
+                    loc.clone(),
+                    Captures::new(),
+                    Internal::Result(None),
+                    Arc::new(process::Process::Let(
+                        loc.clone(),
+                        Internal::Original(name.clone()),
+                        expression,
+                        Arc::new(process::Process::Do(
+                            loc.clone(),
+                            Internal::Result(None),
+                            process::Command::Link(body),
+                        )),
+                    )),
+                ))
+            }
+
             Self::Fork(loc, channel, process) => Arc::new(process::Expression::Fork(
                 loc.clone(),
                 Captures::new(),

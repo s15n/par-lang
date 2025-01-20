@@ -6,7 +6,8 @@ name = @{ (ASCII_ALPHA ~ ("_" | ASCII_ALPHANUMERIC)*) }
 program    = { SOI ~ definition* ~ EOI }
 definition = { "define" ~ name ~ "=" ~ expression }
 
-expression = { expr_fork | application | construction }
+expression = { expr_let | expr_fork | application | construction }
+expr_let   = { "let" ~ name ~ "=" ~ expression ~ "in" ~ expression }
 expr_fork  = { "chan" ~ name ~ "{" ~ process ~ "}" }
 
 construction = { cons_begin | cons_loop | cons_then | cons_send | cons_receive | cons_choose | cons_either | cons_break }
