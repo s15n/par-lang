@@ -122,7 +122,7 @@ where
             spawner: Arc::clone(&self.spawner),
             globals: Arc::clone(&self.globals),
             variables: IndexMap::new(),
-            loop_points: IndexMap::new(),
+            loop_points: self.loop_points.clone(),
         }
     }
 
