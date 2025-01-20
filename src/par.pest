@@ -8,13 +8,13 @@ name = @{ !keyword ~ (ASCII_ALPHA ~ ("_" | ASCII_ALPHANUMERIC)*) }
 program    = { SOI ~ definition* ~ EOI }
 definition = { "define" ~ name ~ "=" ~ expression }
 
-expression = { expr_let | expr_do | expr_fork | application | construction }
+expression = { expr_let | expr_do | expr_fork | application | construction | ("{" ~ expression ~ "}") }
 expr_let   = { "let" ~ name ~ "=" ~ expression ~ "in" ~ expression }
 expr_do    = { "do" ~ "{" ~ process ~ "}" ~ "in" ~ expression }
 expr_fork  = { "chan" ~ name ~ "{" ~ process ~ "}" }
 
 construction = { cons_begin | cons_loop | cons_then | cons_send | cons_receive | cons_choose | cons_either | cons_break }
-cons_then    = { expr_fork | expr_let | expr_do | application }
+cons_then    = { expr_fork | expr_let | expr_do | application | ("{" ~ expression ~ "}") }
 cons_send    = { "(" ~ expression ~ ")" ~ construction }
 cons_receive = { "[" ~ name ~ "]" ~ construction }
 cons_choose  = { "." ~ name ~ construction }
