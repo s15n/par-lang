@@ -1,7 +1,9 @@
 WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
 COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
-name = @{ (ASCII_ALPHA ~ ("_" | ASCII_ALPHANUMERIC)*) }
+keyword = { "define" | "chan" | "let" | "pass" | "begin" | "loop" | "in" }
+
+name = @{ !keyword ~ (ASCII_ALPHA ~ ("_" | ASCII_ALPHANUMERIC)*) }
 
 program    = { SOI ~ definition* ~ EOI }
 definition = { "define" ~ name ~ "=" ~ expression }
