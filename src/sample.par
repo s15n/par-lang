@@ -23,27 +23,21 @@ define rgb = [value] value {
 define zip = [list][seq] list begin {
   empty? => do {
     seq.close?
-  } in .empty!
+  } before .empty!
 
   item[x] xs => do {
     seq.next[y]
-    let y = rgb(y)
-  } in .item((x)(y)!) xs loop
+  } before .item((x)(y)!) xs loop
 }
 
-define zip_old = [list][seq] chan result {
-  list begin {
-    empty? => {
-      seq.close?
-      result.empty!
-    }
-    item[x] => {
-      seq.next[y]
-      let y = rgb(y)
-      result.item((x)(y)!)
-      list loop
-    }
-  }
-}
+define zip2 = [seq1][seq2] begin {
+  close => do {
+    seq1.close?
+    seq2.close?
+  } before !
 
-define play = zip(listrgb)
+  next => do {
+    seq1.next[x]
+    seq2.next[y]
+  } before ((x)(y)!) loop
+}
