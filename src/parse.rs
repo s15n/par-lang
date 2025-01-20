@@ -58,7 +58,6 @@ impl Display for Name {
 
 #[derive(Clone, Debug)]
 pub struct ParseError {
-    pub message: String,
     pub location: Loc,
 }
 
@@ -67,7 +66,6 @@ pub fn parse_program(source: &str) -> Result<IndexMap<Name, Expression<Loc, Name
         Ok(mut pairs) => pairs.next().unwrap().into_inner(),
         Err(error) => {
             return Err(ParseError {
-                message: error.to_string(),
                 location: match error.line_col {
                     LineColLocation::Pos((line, column))
                     | LineColLocation::Span((line, column), _) => Loc::Code { line, column },
