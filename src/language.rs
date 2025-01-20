@@ -19,6 +19,8 @@ pub enum Construct<Loc, Name> {
     Choose(Loc, Name, Box<Self>),
     Either(Loc, ConstructBranches<Loc, Name>),
     Break(Loc),
+    Begin(Loc, Option<Name>, Box<Self>),
+    Loop(Loc, Option<Name>),
 }
 
 #[derive(Clone, Debug)]
@@ -36,6 +38,8 @@ pub enum Apply<Loc, Name> {
     Send(Loc, Box<Expression<Loc, Name>>, Box<Self>),
     Choose(Loc, Name, Box<Self>),
     Either(Loc, ApplyBranches<Loc, Name>),
+    Begin(Loc, Option<Name>, Box<Self>),
+    Loop(Loc, Option<Name>),
 }
 
 #[derive(Clone, Debug)]
@@ -86,16 +90,26 @@ pub enum CommandBranch<Loc, Name> {
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Internal<Name> {
     Original(Name),
-    Result,
-    Object,
+    Result(Option<Name>),
+    Object(Option<Name>),
 }
 
 impl<Name: Display> Display for Internal<Name> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Original(name) => write!(f, "{}", name),
-            Self::Result => write!(f, "#result"),
-            Self::Object => write!(f, "#object"),
+            Self::Result(name) => {
+                if let Some(name) = name {
+                    write!(f, "{}", name)?;
+                }
+                write!(f, "#result")
+            }
+            Self::Object(name) => {
+                if let Some(name) = name {
+                    write!(f, "{}", name)?;
+                }
+                write!(f, "#object")
+            }
         }
     }
 }
@@ -124,7 +138,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Expression<Loc, Name> {
                 Arc::new(process::Expression::Fork(
                     loc.clone(),
                     Captures::new(),
-                    Internal::Result,
+                    Internal::Result(None),
                     process,
                 ))
             }
@@ -138,10 +152,10 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Expression<Loc, Name> {
                 Arc::new(process::Expression::Fork(
                     loc.clone(),
                     Captures::new(),
-                    Internal::Result,
+                    Internal::Result(None),
                     Arc::new(process::Process::Let(
                         loc.clone(),
-                        Internal::Object,
+                        Internal::Object(None),
                         Arc::new(process::Expression::Reference(
                             loc.clone(),
                             Internal::Original(name.clone()),
@@ -161,7 +175,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Construct<Loc, Name> {
                 let expression = expression.compile()?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
-                    Internal::Result,
+                    Internal::Result(None),
                     process::Command::Link(expression),
                 ))
             }
@@ -171,7 +185,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Construct<Loc, Name> {
                 let process = construct.compile()?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
-                    Internal::Result,
+                    Internal::Result(None),
                     process::Command::Send(argument, process),
                 ))
             }
@@ -180,7 +194,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Construct<Loc, Name> {
                 let process = construct.compile()?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
-                    Internal::Result,
+                    Internal::Result(None),
                     process::Command::Receive(Internal::Original(parameter.clone()), process),
                 ))
             }
@@ -189,7 +203,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Construct<Loc, Name> {
                 let process = construct.compile()?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
-                    Internal::Result,
+                    Internal::Result(None),
                     process::Command::Choose(Internal::Original(chosen.clone()), process),
                 ))
             }
@@ -205,15 +219,30 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Construct<Loc, Name> {
                 let processes = Box::from(processes);
                 Arc::new(process::Process::Do(
                     loc.clone(),
-                    Internal::Result,
+                    Internal::Result(None),
                     process::Command::Either(branches, processes),
                 ))
             }
 
             Self::Break(loc) => Arc::new(process::Process::Do(
                 loc.clone(),
-                Internal::Result,
+                Internal::Result(None),
                 process::Command::Break,
+            )),
+
+            Self::Begin(loc, label, construct) => {
+                let process = construct.compile()?;
+                Arc::new(process::Process::Do(
+                    loc.clone(),
+                    Internal::Result(None),
+                    process::Command::Begin(Some(Internal::Result(label.clone())), process),
+                ))
+            }
+
+            Self::Loop(loc, label) => Arc::new(process::Process::Do(
+                loc.clone(),
+                Internal::Result(None),
+                process::Command::Loop(Some(Internal::Result(label.clone()))),
             )),
         })
     }
@@ -226,7 +255,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> ConstructBranch<Loc, Name> {
                 let expression = expression.compile()?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
-                    Internal::Result,
+                    Internal::Result(None),
                     process::Command::Link(expression),
                 ))
             }
@@ -235,7 +264,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> ConstructBranch<Loc, Name> {
                 let process = branch.compile()?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
-                    Internal::Result,
+                    Internal::Result(None),
                     process::Command::Receive(Internal::Original(parameter.clone()), process),
                 ))
             }
@@ -248,10 +277,10 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Apply<Loc, Name> {
         Ok(match self {
             Self::Noop(loc) => Arc::new(process::Process::Do(
                 loc.clone(),
-                Internal::Result,
+                Internal::Result(None),
                 process::Command::Link(Arc::new(process::Expression::Reference(
                     loc.clone(),
-                    Internal::Object,
+                    Internal::Object(None),
                 ))),
             )),
 
@@ -260,7 +289,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Apply<Loc, Name> {
                 let process = apply.compile()?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
-                    Internal::Object,
+                    Internal::Object(None),
                     process::Command::Send(expression, process),
                 ))
             }
@@ -269,7 +298,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Apply<Loc, Name> {
                 let process = apply.compile()?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
-                    Internal::Object,
+                    Internal::Object(None),
                     process::Command::Choose(Internal::Original(chosen.clone()), process),
                 ))
             }
@@ -285,10 +314,25 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Apply<Loc, Name> {
                 let processes = Box::from(processes);
                 Arc::new(process::Process::Do(
                     loc.clone(),
-                    Internal::Object,
+                    Internal::Object(None),
                     process::Command::Either(branches, processes),
                 ))
             }
+
+            Self::Begin(loc, label, apply) => {
+                let process = apply.compile()?;
+                Arc::new(process::Process::Do(
+                    loc.clone(),
+                    Internal::Object(None),
+                    process::Command::Begin(Some(Internal::Object(label.clone())), process),
+                ))
+            }
+
+            Self::Loop(loc, label) => Arc::new(process::Process::Do(
+                loc.clone(),
+                Internal::Object(None),
+                process::Command::Loop(Some(Internal::Object(label.clone()))),
+            )),
         })
     }
 }
@@ -303,11 +347,11 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> ApplyBranch<Loc, Name> {
                     Internal::Original(name.clone()),
                     Arc::new(process::Expression::Reference(
                         loc.clone(),
-                        Internal::Object,
+                        Internal::Object(None),
                     )),
                     Arc::new(process::Process::Do(
                         loc.clone(),
-                        Internal::Result,
+                        Internal::Result(None),
                         process::Command::Link(expression),
                     )),
                 ))
@@ -317,7 +361,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> ApplyBranch<Loc, Name> {
                 let process = branch.compile()?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
-                    Internal::Object,
+                    Internal::Object(None),
                     process::Command::Receive(Internal::Original(parameter.clone()), process),
                 ))
             }
@@ -326,10 +370,10 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> ApplyBranch<Loc, Name> {
                 let expression = expression.compile()?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
-                    Internal::Object,
+                    Internal::Object(None),
                     process::Command::Continue(Arc::new(process::Process::Do(
                         loc.clone(),
-                        Internal::Result,
+                        Internal::Result(None),
                         process::Command::Link(expression),
                     ))),
                 ))

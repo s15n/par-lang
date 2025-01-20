@@ -173,6 +173,19 @@ fn parse_construct(pairs: &mut Pairs<'_, Rule>) -> Result<Construct<Loc, Name>, 
 
         Rule::cons_break => Ok(Construct::Break(loc)),
 
+        Rule::cons_begin => {
+            let mut pairs = pair.into_inner();
+            let label = parse_loop_label(&mut pairs)?;
+            let construct = parse_construct(&mut pairs)?;
+            Ok(Construct::Begin(loc, label, Box::new(construct)))
+        }
+
+        Rule::cons_loop => {
+            let mut pairs = pair.into_inner();
+            let label = parse_loop_label(&mut pairs)?;
+            Ok(Construct::Loop(loc, label))
+        }
+
         _ => unreachable!(),
     }
 }
@@ -231,6 +244,19 @@ fn parse_apply(pairs: &mut Pairs<'_, Rule>) -> Result<Apply<Loc, Name>, ParseErr
                 branches.insert(name, branch);
             }
             Ok(Apply::Either(loc, ApplyBranches(branches)))
+        }
+
+        Rule::apply_begin => {
+            let mut pairs = pair.into_inner();
+            let label = parse_loop_label(&mut pairs)?;
+            let then = parse_apply(&mut pairs)?;
+            Ok(Apply::Begin(loc, label, Box::new(then)))
+        }
+
+        Rule::apply_loop => {
+            let mut pairs = pair.into_inner();
+            let label = parse_loop_label(&mut pairs)?;
+            Ok(Apply::Loop(loc, label))
         }
 
         _ => unreachable!(),

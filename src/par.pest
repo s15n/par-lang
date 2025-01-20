@@ -9,24 +9,28 @@ definition = { "define" ~ name ~ "=" ~ expression }
 expression = { expr_fork | application | construction }
 expr_fork  = { "chan" ~ name ~ "{" ~ process ~ "}" }
 
-construction = { cons_then | cons_send | cons_receive | cons_choose | cons_either | cons_break }
+construction = { cons_begin | cons_loop | cons_then | cons_send | cons_receive | cons_choose | cons_either | cons_break }
 cons_then    = { expr_fork | application }
 cons_send    = { "(" ~ expression ~ ")" ~ construction }
 cons_receive = { "[" ~ name ~ "]" ~ construction }
 cons_choose  = { "." ~ name ~ construction }
 cons_either  = { "{" ~ (name ~ cons_branch)* ~ "}" }
 cons_break   = { "!" }
+cons_begin   = { "begin" ~ loop_label ~ construction }
+cons_loop    = { "loop" ~ loop_label }
 
 cons_branch         = { cons_branch_then | cons_branch_receive }
 cons_branch_then    = { "=>" ~ expression }
 cons_branch_receive = { "[" ~ name ~ "]" ~ cons_branch }
 
 application  = { name ~ apply }
-apply        = { apply_send | apply_choose | apply_either | apply_noop }
+apply        = { apply_begin | apply_loop | apply_send | apply_choose | apply_either | apply_noop }
 apply_noop   = { "" }
 apply_send   = { "(" ~ expression ~ ")" ~ apply }
 apply_choose = { "." ~ name ~ apply }
 apply_either = { "{" ~ (name ~ apply_branch)* ~ "}" }
+apply_begin  = { "begin" ~ loop_label ~ apply }
+apply_loop   = { "loop" ~ loop_label }
 
 apply_branch          = { apply_branch_then | apply_branch_receive | apply_branch_continue }
 apply_branch_then     = { name ~ "=>" ~ expression }

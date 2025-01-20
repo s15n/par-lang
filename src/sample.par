@@ -22,6 +22,11 @@ define copy = [list] chan result {
   }
 }
 
+define copy2 = [list] list begin {
+  empty?     => .empty!
+  item[x] xs => .item(x) xs loop
+}
+
 define zip = [list][seq] chan result {
   list begin {
     empty? => {
