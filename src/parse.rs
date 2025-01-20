@@ -114,6 +114,13 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Expression<Loc, Name>
             ))
         }
 
+        Rule::expr_do => {
+            let mut pairs = pair.into_inner();
+            let process = parse_process(&mut pairs)?;
+            let expression = parse_expression(&mut pairs)?;
+            Ok(Expression::Do(loc, Box::new(process), Box::new(expression)))
+        }
+
         Rule::expr_fork => {
             let mut pairs = pair.into_inner();
             let (_, name) = parse_name(&mut pairs)?;
@@ -331,6 +338,8 @@ fn parse_process(pairs: &mut Pairs<'_, Rule>) -> Result<Process<Loc, Name>, Pars
             let command = parse_command(&mut pairs)?;
             Ok(Process::Command(object_name, command))
         }
+
+        Rule::proc_noop => Ok(Process::Noop(loc)),
 
         _ => unreachable!(),
     }

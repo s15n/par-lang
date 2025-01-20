@@ -378,7 +378,18 @@ impl Error {
             }
 
             Self::Compile(CompileError::PassNotPossible(loc)) => {
-                format!("{}\nNothing to `pass` to.", Self::display_loc(code, loc),)
+                format!("{}\nNothing to `pass` to.", Self::display_loc(code, loc))
+            }
+
+            Self::Compile(CompileError::MustEndProcess(loc)) => {
+                format!("{}\nThis process must end.", Self::display_loc(code, loc))
+            }
+
+            Self::Compile(CompileError::CannotEndInDoExpression(loc)) => {
+                format!(
+                    "{}\nCannot end process in `do` expression.",
+                    Self::display_loc(code, loc)
+                )
             }
 
             Self::Runtime(error) => Self::display_runtime_error(code, error),
@@ -397,7 +408,7 @@ impl Error {
             }
             UnfulfilledObligations(loc, names) => {
                 format!(
-                    "{}\nCannot end process without handling {}.",
+                    "{}\nCannot end this process without handling {}.",
                     Self::display_loc(code, loc),
                     names
                         .iter()
@@ -436,13 +447,13 @@ impl Error {
             }
             Operation::Send(loc) => {
                 format!(
-                    "{}\nThis side sending a value.",
+                    "{}\nThis side is sending a value.",
                     Self::display_loc(code, loc),
                 )
             }
             Operation::Receive(loc) => {
                 format!(
-                    "{}\nThis side receiving a value.",
+                    "{}\nThis side is receiving a value.",
                     Self::display_loc(code, loc),
                 )
             }
@@ -501,9 +512,7 @@ fn par_syntax() -> Syntax {
         comment: "//",
         comment_multiline: [r#"/*"#, r#"*/"#],
         hyperlinks: BTreeSet::from([]),
-        keywords: BTreeSet::from([
-            "define", "chan", "let", "pass", "begin", "loop", "in",
-        ]),
+        keywords: BTreeSet::from(["define", "chan", "let", "do", "in", "pass", "begin", "loop"]),
         types: BTreeSet::from([]),
         special: BTreeSet::from(["<>"]),
     }

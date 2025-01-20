@@ -4,6 +4,8 @@ define listrgb =
   .item(.blue!)
   .empty!
 
+define give_back = [ch] do { ch[x] } in ch(x)
+
 define rgb = [value] value {
   red?   => .red!
   green? => .green!
@@ -27,7 +29,18 @@ define copy2 = [list] list begin {
   item[x] xs => .item(x) xs loop
 }
 
-define zip = [list][seq] chan result {
+define zip = [list][seq] list begin {
+  empty? => do {
+    seq.close?
+  } in .empty!
+
+  item[x] xs => do {
+    seq.next[y]
+    let y = rgb(y)
+  } in .item((x)(y)!) xs loop
+}
+
+define zip_old = [list][seq] chan result {
   list begin {
     empty? => {
       seq.close?

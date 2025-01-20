@@ -7,6 +7,7 @@ use crate::process::{self, Captures};
 #[derive(Clone, Debug)]
 pub enum Expression<Loc, Name> {
     Let(Loc, Name, Box<Self>, Box<Self>),
+    Do(Loc, Box<Process<Loc, Name>>, Box<Self>),
     Fork(Loc, Name, Box<Process<Loc, Name>>),
     Construction(Loc, Construct<Loc, Name>),
     Application(Loc, Name, Apply<Loc, Name>),
@@ -58,6 +59,7 @@ pub enum Process<Loc, Name> {
     Let(Loc, Name, Box<Expression<Loc, Name>>, Box<Self>),
     Command(Name, Command<Loc, Name>),
     Pass(Loc),
+    Noop(Loc),
 }
 
 #[derive(Clone, Debug)]
@@ -118,9 +120,12 @@ impl<Name: Display> Display for Internal<Name> {
 #[derive(Clone, Debug)]
 pub enum CompileError<Loc> {
     PassNotPossible(Loc),
+    MustEndProcess(Loc),
+    CannotEndInDoExpression(Loc),
 }
 
 type Pass<Loc, Name> = Option<Arc<process::Process<Loc, Internal<Name>>>>;
+type DoResult<Loc, Name> = Option<Arc<process::Expression<Loc, Internal<Name>>>>;
 
 impl<Loc: Clone, Name: Clone + Hash + Eq> Expression<Loc, Name> {
     pub fn compile(
@@ -147,11 +152,22 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Expression<Loc, Name> {
                 ))
             }
 
+            Self::Do(loc, process, expression) => {
+                let expression = expression.compile()?;
+                let body = process.compile(None, Some(expression))?;
+                Arc::new(process::Expression::Fork(
+                    loc.clone(),
+                    Captures::new(),
+                    Internal::Result(None),
+                    body,
+                ))
+            }
+
             Self::Fork(loc, channel, process) => Arc::new(process::Expression::Fork(
                 loc.clone(),
                 Captures::new(),
                 Internal::Original(channel.clone()),
-                process.compile(None)?,
+                process.compile(None, None)?,
             )),
 
             Self::Construction(loc, construct) => {
@@ -407,20 +423,30 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Process<Loc, Name> {
     pub fn compile(
         &self,
         pass: Pass<Loc, Name>,
+        do_result: DoResult<Loc, Name>,
     ) -> Result<Arc<process::Process<Loc, Internal<Name>>>, CompileError<Loc>> {
         Ok(match self {
             Self::Let(loc, name, expression, process) => Arc::new(process::Process::Let(
                 loc.clone(),
                 Internal::Original(name.clone()),
                 expression.compile()?,
-                process.compile(pass)?,
+                process.compile(pass, do_result)?,
             )),
 
-            Self::Command(name, command) => command.compile(name, pass)?,
+            Self::Command(name, command) => command.compile(name, pass, do_result)?,
 
             Self::Pass(loc) => match pass {
                 Some(process) => process,
                 None => Err(CompileError::PassNotPossible(loc.clone()))?,
+            },
+
+            Self::Noop(loc) => match do_result {
+                Some(expression) => Arc::new(process::Process::Do(
+                    loc.clone(),
+                    Internal::Result(None),
+                    process::Command::Link(expression),
+                )),
+                None => Err(CompileError::MustEndProcess(loc.clone()))?,
             },
         })
     }
@@ -431,13 +457,17 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
         &self,
         object_name: &Name,
         pass: Pass<Loc, Name>,
+        do_result: DoResult<Loc, Name>,
     ) -> Result<Arc<process::Process<Loc, Internal<Name>>>, CompileError<Loc>> {
         let object_internal = Internal::Original(object_name.clone());
 
         Ok(match self {
-            Self::Then(process) => process.compile(pass)?,
+            Self::Then(process) => process.compile(pass, do_result)?,
 
             Self::Link(loc, expression) => {
+                if do_result.is_some() {
+                    return Err(CompileError::CannotEndInDoExpression(loc.clone()));
+                }
                 let expression = expression.compile()?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
@@ -448,7 +478,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
 
             Self::Send(loc, argument, command) => {
                 let argument = argument.compile()?;
-                let process = command.compile(object_name, pass)?;
+                let process = command.compile(object_name, pass, do_result)?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
                     object_internal,
@@ -457,7 +487,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
             }
 
             Self::Receive(loc, parameter, command) => {
-                let process = command.compile(object_name, pass)?;
+                let process = command.compile(object_name, pass, do_result)?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
                     object_internal,
@@ -466,7 +496,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
             }
 
             Self::Choose(loc, chosen, command) => {
-                let process = command.compile(object_name, pass)?;
+                let process = command.compile(object_name, pass, do_result)?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
                     object_internal,
@@ -476,7 +506,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
 
             Self::Either(loc, CommandBranches(process_branches), optional_process) => {
                 let pass = match optional_process {
-                    Some(process) => Some(process.compile(pass)?),
+                    Some(process) => Some(process.compile(pass, do_result.clone())?),
                     None => pass,
                 };
 
@@ -484,7 +514,11 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
                 let mut processes = Vec::new();
                 for (branch_name, process_branch) in process_branches {
                     branches.push(Internal::Original(branch_name.clone()));
-                    processes.push(process_branch.compile(object_name, pass.clone())?);
+                    processes.push(process_branch.compile(
+                        object_name,
+                        pass.clone(),
+                        do_result.clone(),
+                    )?);
                 }
                 let branches = Arc::from(branches);
                 let processes = Box::from(processes);
@@ -495,14 +529,19 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
                 ))
             }
 
-            Self::Break(loc) => Arc::new(process::Process::Do(
-                loc.clone(),
-                object_internal,
-                process::Command::Break,
-            )),
+            Self::Break(loc) => {
+                if do_result.is_some() {
+                    return Err(CompileError::CannotEndInDoExpression(loc.clone()));
+                }
+                Arc::new(process::Process::Do(
+                    loc.clone(),
+                    object_internal,
+                    process::Command::Break,
+                ))
+            }
 
             Self::Continue(loc, process) => {
-                let process = process.compile(pass)?;
+                let process = process.compile(pass, do_result)?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
                     object_internal,
@@ -511,7 +550,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
             }
 
             Self::Begin(loc, label, command) => {
-                let process = command.compile(object_name, pass)?;
+                let process = command.compile(object_name, pass, do_result)?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
                     object_internal,
@@ -533,14 +572,15 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> CommandBranch<Loc, Name> {
         &self,
         object_name: &Name,
         pass: Pass<Loc, Name>,
+        do_result: DoResult<Loc, Name>,
     ) -> Result<Arc<process::Process<Loc, Internal<Name>>>, CompileError<Loc>> {
         let object_internal = Internal::Original(object_name.clone());
 
         Ok(match self {
-            Self::Then(process) => process.compile(pass)?,
+            Self::Then(process) => process.compile(pass, do_result)?,
 
             Self::Receive(loc, parameter, branch) => {
-                let process = branch.compile(object_name, pass)?;
+                let process = branch.compile(object_name, pass, do_result)?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
                     object_internal,
@@ -549,7 +589,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> CommandBranch<Loc, Name> {
             }
 
             Self::Continue(loc, process) => {
-                let process = process.compile(pass)?;
+                let process = process.compile(pass, do_result)?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
                     object_internal,
