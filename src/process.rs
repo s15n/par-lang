@@ -1,17 +1,19 @@
+use futures::channel;
 use indexmap::IndexMap;
 use std::{
     fmt::{self, Display, Write},
     hash::Hash,
+    os::unix::process,
     sync::Arc,
 };
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Process<Loc, Name> {
     Let(Loc, Name, Arc<Expression<Loc, Name>>, Arc<Self>),
     Do(Loc, Name, Command<Loc, Name>),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Command<Loc, Name> {
     Link(Arc<Expression<Loc, Name>>),
     Send(Arc<Expression<Loc, Name>>, Arc<Process<Loc, Name>>),
@@ -24,7 +26,7 @@ pub enum Command<Loc, Name> {
     Loop(Option<Name>),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Expression<Loc, Name> {
     Reference(Loc, Name),
     Fork(Loc, Captures<Loc, Name>, Name, Arc<Process<Loc, Name>>),
@@ -97,6 +99,86 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Process<Loc, Name> {
                 caps.add(name.clone(), loc.clone());
                 (Self::Do(loc.clone(), name.clone(), command), caps)
             }
+        }
+    }
+
+    pub fn optimize(&self) -> Self {
+        match self {
+            Self::Let(loc, name, expression, process) => {
+                let expression = expression.optimize();
+                let process = process.optimize();
+                Self::Let(
+                    loc.clone(),
+                    name.clone(),
+                    Arc::new(expression),
+                    Arc::new(process),
+                )
+            }
+            Self::Do(loc, name, command) => match command {
+                Command::Link(expression) => match expression.optimize() {
+                    Expression::Fork(_, _, channel, process) if name == &channel => {
+                        process.as_ref().clone()
+                    }
+                    expression => Self::Do(
+                        loc.clone(),
+                        name.clone(),
+                        Command::Link(Arc::new(expression)),
+                    ),
+                },
+                Command::Send(argument, process) => {
+                    let argument = argument.optimize();
+                    let process = process.optimize();
+                    Self::Do(
+                        loc.clone(),
+                        name.clone(),
+                        Command::Send(Arc::new(argument), Arc::new(process)),
+                    )
+                }
+                Command::Receive(parameter, process) => {
+                    let process = process.optimize();
+                    Self::Do(
+                        loc.clone(),
+                        name.clone(),
+                        Command::Receive(parameter.clone(), Arc::new(process)),
+                    )
+                }
+                Command::Choose(chosen, process) => {
+                    let process = process.optimize();
+                    Self::Do(
+                        loc.clone(),
+                        name.clone(),
+                        Command::Choose(chosen.clone(), Arc::new(process)),
+                    )
+                }
+                Command::Either(branches, processes) => {
+                    let processes = processes.iter().map(|p| Arc::new(p.optimize())).collect();
+                    Self::Do(
+                        loc.clone(),
+                        name.clone(),
+                        Command::Either(Arc::clone(branches), processes),
+                    )
+                }
+                Command::Break => Self::Do(loc.clone(), name.clone(), Command::Break),
+                Command::Continue(process) => {
+                    let process = process.optimize();
+                    Self::Do(
+                        loc.clone(),
+                        name.clone(),
+                        Command::Continue(Arc::new(process)),
+                    )
+                }
+                Command::Begin(label, process) => {
+                    let process = process.optimize();
+                    Self::Do(
+                        loc.clone(),
+                        name.clone(),
+                        Command::Begin(label.clone(), Arc::new(process)),
+                    )
+                }
+                Command::Loop(label) => {
+                    Self::Do(loc.clone(), name.clone(), Command::Loop(label.clone()))
+                }
+            },
         }
     }
 }
@@ -180,6 +262,21 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Expression<Loc, Name> {
                         Arc::new(process),
                     ),
                     caps,
+                )
+            }
+        }
+    }
+
+    pub fn optimize(&self) -> Self {
+        match self {
+            Self::Reference(loc, name) => Self::Reference(loc.clone(), name.clone()),
+            Self::Fork(loc, captures, channel, process) => {
+                let process = process.optimize();
+                Self::Fork(
+                    loc.clone(),
+                    captures.clone(),
+                    channel.clone(),
+                    Arc::new(process),
                 )
             }
         }

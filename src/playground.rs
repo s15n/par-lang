@@ -129,7 +129,7 @@ impl Playground {
                                     def.compile().map(|compiled| {
                                         (
                                             Internal::Original(name.clone()),
-                                            Arc::new(compiled.fix_captures(&IndexMap::new()).0),
+                                            Arc::new(compiled.optimize().fix_captures(&IndexMap::new()).0),
                                         )
                                     })
                                 })
