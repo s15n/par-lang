@@ -1,7 +1,7 @@
 WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
 COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
-keyword = { "define" | "chan" | "let" | "in" | "do" | "before" | "pass" | "begin" | "loop" }
+keyword = { "define" | "chan" | "let" | "do" | "in" | "pass" | "begin" | "loop" }
 
 name = @{ !keyword ~ (ASCII_ALPHA ~ ("_" | ASCII_ALPHANUMERIC)*) }
 
@@ -10,7 +10,7 @@ definition = { "define" ~ name ~ "=" ~ expression }
 
 expression = { expr_let | expr_do | expr_fork | application | construction | ("{" ~ expression ~ "}") }
 expr_let   = { "let" ~ name ~ "=" ~ expression ~ "in" ~ expression }
-expr_do    = { "do" ~ "{" ~ process ~ "}" ~ "before" ~ expression }
+expr_do    = { "do" ~ "{" ~ process ~ "}" ~ "in" ~ expression }
 expr_fork  = { "chan" ~ name ~ "{" ~ process ~ "}" }
 
 construction = { cons_begin | cons_loop | cons_then | cons_send | cons_receive | cons_choose | cons_either | cons_break }
