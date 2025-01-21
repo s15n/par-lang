@@ -1,12 +1,4 @@
-define concat = [left][right] left begin {
-  empty?     => right
-  item[x] xs => .item(x) xs loop
-}
-
-define flatten = [tree] tree begin {
-  leaf x      => .item(x).empty!
-  node[l][r]? => concat(l loop)(r loop)
-}
+define play = zip(listrgb)
 
 define listrgb =
   .item(.red!)
@@ -27,6 +19,7 @@ define zip = [list][seq] list begin {
 
   item[x] xs => do {
     seq.next[y]
+    let y = rgb(y)
   } in .item((x)(y)!) xs loop
 }
 
@@ -42,4 +35,12 @@ define zip2 = [seq1][seq2] begin {
   } in ((x)(y)!) loop
 }
 
-define play = zip(listrgb)
+define concat = [left][right] left begin {
+  empty?     => right
+  item[x] xs => .item(x) xs loop
+}
+
+define flatten = [tree] tree begin {
+  leaf x      => .item(x).empty!
+  node[l][r]? => concat(l loop)(r loop)
+}
