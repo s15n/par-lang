@@ -34,12 +34,12 @@ define zip2 = [seq1][seq2] begin {
   close => do {
     seq1.close?
     seq2.close?
-  } before !
+  } in !
 
   next => do {
     seq1.next[x]
     seq2.next[y]
-  } before ((x)(y)!) loop
+  } in ((x)(y)!) loop
 }
 
 define play = zip(listrgb)
