@@ -41,7 +41,7 @@ Despite the language being dynamically typed at the moment, the above properties
 _no unreachable processes_, they also hold statically. **A type system with linear types is on the horizon,**
 but I want to fully figure out the semantics first.
 
-The main idea of Par is that **all values are channels.** Processes are intangible, they only exist by
+**All values in Par are channels.** Processes are intangible, they only exist by
 executing, and operating on tangible objects: channels. How can it possibly all be channels?
 
 - **A list?** That's a channel sending all its items in order, then signaling the end.
