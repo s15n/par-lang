@@ -1,4 +1,4 @@
-# Toy process language with an interactive playground for exploring concurrency
+# An experimental concurrent language with an interactive playground
 
 ![Screenshot](screenshot.png)
 
@@ -41,7 +41,15 @@ Despite the language being dynamically typed at the moment, the above properties
 _no unreachable processes_, they also hold statically. **A type system with linear types is on the horizon,**
 but I want to fully figure out the semantics first.
 
-Some features important for a real-world language are still missing:
+The main idea of Par is that **all values are channels.** Processes are intangible, they only exist by
+executing, and operating on tangible objects: channels. How can it possibly all be channels?
+
+- **A list?** That's a channel sending all its items in order, then signaling the end.
+- **A function?** A channel that receives the function argument, then becomes the result.
+- **An infinite stream?** Also a channel! This one will be waiting to receive a signal to either
+  produce the next item, or to close.
+
+Some features important for a real-world language are still **missing:**
 
 - Primitive types, like **strings and numbers.** However, Par is expressive enough to enable custom
   representations of numbers, booleans, lists, streams, and so on. Just like λ-calculus, but with channels
@@ -49,7 +57,7 @@ Some features important for a real-world language are still missing:
 - **Replicable values.** But, once again, replication can be implemented manually, for now.
 - **Non-determinism.** This can't be implemented manually, but I alredy have a mechanism thought out.
 
-One non-essential feature that will almost certainly make it into the language later is **reactive values.**
-Those update automatically based on their dependencies changing.
+One non-essential feature that I really hope will make it into the language later is **reactive values.**
+It's those that update automatically based on their dependencies changing.
 
 TODO
