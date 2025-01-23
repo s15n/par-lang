@@ -140,9 +140,7 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Expression<Loc, Name>
             Ok(Expression::Application(loc, object_name, apply))
         }
 
-        Rule::expression => {
-            parse_expression(&mut Pairs::single(pair))
-        }
+        Rule::expression => parse_expression(&mut Pairs::single(pair)),
 
         _ => unreachable!(),
     }
