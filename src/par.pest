@@ -3,7 +3,7 @@ COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
 keyword = { "define" | "chan" | "let" | "do" | "in" | "pass" | "begin" | "loop" }
 
-name = @{ !keyword ~ (ASCII_ALPHA ~ ("_" | ASCII_ALPHANUMERIC)*) }
+name = @{ !(keyword ~ !("_" | ASCII_ALPHANUMERIC)) ~ (ASCII_ALPHA ~ ("_" | ASCII_ALPHANUMERIC)*) }
 
 program    = { SOI ~ definition* ~ EOI }
 definition = { "define" ~ name ~ "=" ~ expression }
