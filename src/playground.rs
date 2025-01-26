@@ -337,7 +337,7 @@ impl Playground {
                                     });
                                 }
                                 Ok(Request::Either(loc, choices)) => {
-                                    ui.horizontal(|ui| {
+                                    ui.vertical(|ui| {
                                         drop(handle);
                                         for choice in choices.iter() {
                                             if ui
