@@ -93,14 +93,14 @@ Now, press `Run` to open a list of compiled definitions; any one can be run and 
 
 Running `rgb` prompts a choice of three colors.
 
-![Run rgb 1](screenshots/run_rgb_1.png | width=300)
+<img src="screenshots/run_rgb_1.png" alt="Run rgb 1" width="300px">
 
 After choosing the desired color, it's copied from right to left.
 
-![Run rgb 2](screenshots/run_rgb_2.png | width=300)
+<img src="screenshots/run_rgb_2.png" alt="Run rgb 2" width="300px">
 
 Running `stream_of_rgbs` prompts a choice of `close` or `next`. Every `next` triggers a prompt of a new color.
 Notice that you're allowed to request new prompts before the previous ones are resolved. This is a small show
 of Par's concurrency in action.
 
-![Run stream_of_rgbs](screenshots/run_stream_of_rgbs.png | width=300)
+<img src="screenshots/run_stream_of_rgbs.png" alt="Run stream_of_rgbs" width="300px">
