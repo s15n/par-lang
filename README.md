@@ -245,6 +245,6 @@ Run it and see!
 Cannot end this process without handling `child`.
 ```
 
-**Channels cannot be dropped.** A channel may only be closed in coordination by both of its sides. With a type system
-in place, all of this will be checked at compile-time. Right now, failing to coordinate here only results in
+**Channels must not be dropped.** A channel may only be closed in coordination by both of its sides. With a type
+system in place, all of this will be checked at compile-time. Right now, failing to coordinate here only results in
 runtime errors.
