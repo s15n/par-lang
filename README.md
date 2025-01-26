@@ -124,8 +124,10 @@ but less convenient for many situations. Still, it's needed in others. It's impo
 **first understand the process syntax,** because most of the expression syntax can be considered a
 _syntax sugar_ on top of the process syntax.
 
+### Channel spawning
+
 Before we delve into it, there is **one piece of expression syntax we will need.** After all, definitions need an
-expression after the `=` sign. The construct is **channel spawning**, and it is a necessary piece of syntax;
+expression after the `=` sign. The construct is channel spawning, and it is a necessary piece of syntax;
 not a syntactic sugar. It goes like this:
 
 ```
