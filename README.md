@@ -248,3 +248,115 @@ Cannot end this process without handling `child`.
 **Channels must not be dropped.** A channel may only be closed in coordination by both of its sides. With a type
 system in place, all of this will be checked at compile-time. Right now, failing to coordinate here only results in
 runtime errors.
+
+### Signaling
+
+To direct the **control-flow** of processes, we send **signals** across channels. To send a signal, use `.`:
+
+```
+channel.signal
+```
+
+The name of a signal can be anything: `.close`, `.next`, `.ok`, `.item`, `.empty`, and so on, are all examples of
+signal names we'll see in this guide.
+
+To receive one of several signals from a channel, use curly braces after the channel's name:
+
+```
+channel {
+  signal1 => {
+    // do something after `signal1` received
+  }
+  signal2 => {
+    // do something after `signal2` received
+  }
+  signal3 => {
+    // do something after `signal3` received
+  }
+}
+```
+
+After sending or receiving a signal, the original channel is **again available** for further communication.
+
+Sending a signal on a channel handled by the UI prints the signal in the UI.
+
+```
+define program = chan user {
+  user.hello
+  user.world
+  user!
+}
+```
+
+<img src="screenshots/hello_world.png" alt="Hello, world!" width="300px">
+
+Awaiting a signal on a channel handled by the UI let's the user choose among the options via buttons.
+
+```
+define program = chan user {
+  user {
+    first => {
+      user.wrong
+      user!
+    }
+    second => {
+      user.correct
+      user!
+    }
+    third => {
+      user.wrong
+      user!
+    }
+  }
+}
+```
+
+<img src="screenshots/first_second_third.png" alt="Hello, world!" width="300px">
+
+After clicking a button:
+
+<img src="screenshots/chose_second.png" alt="Hello, world!" width="300px">
+
+#### Pass
+
+If multiple branches need to continue the same way, use `pass` to resume execution after the curly braces.
+This is especially useful when doing multiple choices in a row.
+
+```
+define program = chan user {
+  user.guess_which
+  user {
+    first =>  { pass }
+    second => { user.correct! }
+    third =>  { pass }
+  }
+  user.try_again
+  user {
+    first  => { pass }
+    second => { user.correct! }
+    third  => { pass }
+  }
+  user.wrong!
+}
+```
+
+### Combining operations
+
+I took the liberty to combine operations in the last snippet before explaining because otherwise it would be
+unbearably long.
+
+Multiple operations on the same channel, one after another, can be combined into a single statement. For example,
+instead of typing:
+
+```
+user.correct
+user!
+```
+
+We can just do:
+
+```
+user.correct!
+```
+
+Any sequence of operations can be combined this way in the process syntax.
