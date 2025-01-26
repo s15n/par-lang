@@ -186,7 +186,7 @@ Variable names can be reassigned, but only after the original channel was either
 
 ### Closing channels
 
-To maintain that processes stay connected, and no process goes forgotten, closing a channel is different for
+To keep processes connected, and make sure no process goes forgotten, closing a channel is different for
 each of its sides. One side uses `!`, while the other one must match it with `?`.
 
 - `channel!` **closes** the channel, and **ends the process** at the same time.
@@ -194,8 +194,8 @@ each of its sides. One side uses `!`, while the other one must match it with `?`
 
 In other words, **`!` must be the last statement** of a process, while **`?` cannot be the last statement.**
 
-I know this may appear as a very strange restriction. But it's important for maintaing the guarantees outlined
-in the beginning. Also, you'll get used it. It actually does end up making a lot of sense.
+> 📝 I know this may appear as a very strange restriction. But it's important for maintaing the guarantees outlined
+> in the beginning. Also, you'll get used it. It actually does end up making a lot of sense.
 
 Type this:
 
@@ -220,5 +220,31 @@ define program = chan user {
 }
 ```
 
-The behavior towards UI stays the same, but inside, we spawn a process, end it while closing its channel
-via `parent!`, wait on the other side using `child?`, and only then close the `user` channel.
+The behavior towards the UI stays the same, but inside, we spawn a process, end it while closing its channel
+via `parent!`, wait on the other side using `child?`, and only then we close the `user` channel.
+
+### Linearity of channels
+
+What would happen if we didn't close the `child` channel from the parent side?
+
+```
+define program = chan user {
+  let child = chan parent {
+    parent!
+  }
+  //child?
+  user!
+}
+```
+
+Run it and see!
+
+```
+6|   user!
+         ^
+Cannot end this process without handling `child`.
+```
+
+**Channels cannot be dropped.** A channel may only be closed in coordination by both of its sides. With a type system
+in place, all of this will be checked at compile-time. Right now, failing to coordinate here only results in
+runtime errors.
