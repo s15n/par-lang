@@ -29,7 +29,7 @@ The value of basing the language on linear logic is that it provides a powerful 
 
 First off, let's list some **general properties of Par:**
 
-- Code executes in **isolated processes.**
+- Code executes in **independent processes.**
 - Processes **communicate** with each other **via channels.**
 - Every channel has **two end-points, in two different processes.**
 - **Two processes share at most one channel.**
@@ -104,3 +104,62 @@ Notice that you're allowed to request new prompts before the previous ones are r
 of Par's concurrency in action.
 
 <img src="screenshots/run_stream_of_rgbs.png" alt="Run stream_of_rgbs" width="300px">
+
+## Program structure
+
+Code in playground consists of a list of definitions. Any of them can be run and interacted with. Each definition
+has the form:
+
+```
+define <name> = <expression>
+```
+
+There are currently no capabilities for external I/O; all interaction occurs within the playground, via its
+automatic user interface.
+
+## Process syntax
+
+Par code has two main syntactic categories: **expressions** and **processes**. The process syntax is more general,
+but less convenient for many situations. Still, it's needed in others. It's important we
+**first understand the process syntax,** because most of the expression syntax can be considered a
+_syntax sugar_ on top of the process syntax.
+
+Before we delve into it, there is **one piece of expression syntax we will need.** After all, definitions need an
+expression after the `=` sign. The construct is **channel spawning**, and it is a necessary piece of syntax;
+not a syntactic sugar. It goes like this:
+
+```
+chan <name> { <process> }
+```
+
+This together with the process syntax is all we really need for writing Par programs. In fact, that's what the
+compiled code comes down to. However, the expression syntax we'll cover afterwards, is a big factor in making Par
+code a pleasure to write and read.
+
+Type this code:
+
+```
+define program = chan user {
+  // nothing yet
+}
+```
+
+**Here's what it means:**
+
+- The expression `chan user { ... }` **evaluates to a channel,** which we assign to `program`.
+- At the same time, the **process** inside the curly braces **is started.**
+- Inside it, the **other side of the channel** returned from the expression is made available under the name `user`.
+
+If you press `Compile`, you'll get an error:
+
+```
+3| }
+   ^
+This process must end.
+```
+
+Ending a process is explicit in Par. A process that doesn't end is syntactically invalid ― there is no need to
+worry about accidentally not doing it.
+
+### Closing channels
+
