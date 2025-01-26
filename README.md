@@ -326,9 +326,9 @@ This is especially useful when doing multiple choices in a row.
 define program = chan user {
   user.guess_which
   user {
-    first =>  { pass }
+    first  => { pass }
     second => { user.correct! }
-    third =>  { pass }
+    third  => { pass }
   }
   user.try_again
   user {
