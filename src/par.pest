@@ -53,11 +53,13 @@ cmd_link     = { "<>" ~ expression }
 cmd_send     = { "(" ~ expression ~ ")" ~ cmd }
 cmd_receive  = { "[" ~ name ~ "]" ~ cmd }
 cmd_choose   = { "." ~ name ~ cmd }
-cmd_either   = { "{" ~ cmd_branches ~ "}" ~ (!proc_noop ~ process)? }
+cmd_either   = { "{" ~ cmd_branches ~ "}" ~ pass_process? }
 cmd_break    = { "!" }
 cmd_continue = { "?" ~ process }
 cmd_begin    = { "begin" ~ loop_label ~ cmd }
 cmd_loop     = { "loop" ~ loop_label }
+
+pass_process = { proc_let | proc_pass | command }
 
 cmd_branches        = { (name ~ cmd_branch)* }
 cmd_branch          = { cmd_branch_then | cmd_branch_receive | cmd_branch_continue }
