@@ -453,4 +453,63 @@ define program = chan user {
 
 <img src="screenshots/send_booleans.png" alt="Run rgb 1" width="300px">
 
-A value sent to the UI creates a separate box in the UI where the value is shown or interacted with.
+A value **sent to the UI** creates a separate box in the UI where the value is shown or interacted with.
+
+To **receive a value** from a channel, use **square brackets** with a name of a **new variable** where
+the received value will be assigned.
+
+```
+define program = chan user {
+  let child = chan parent {
+    parent(true)
+    parent(false)!
+  }
+
+  child[value1]  // creates a new variable `value1`
+  child[value2]  // and another variable, `value2`
+  child?
+
+  user(value1)(value2)!
+}
+```
+
+**Receiving a value from the UI** prompts the UI to create a new box, but unlike with values sent to the UI,
+this box will be in a new column.
+
+```
+define program = chan user {
+  user[value]
+
+  value {
+    true => {
+      user.truth
+      pass
+    }
+    false => {
+      user.lies
+      pass
+    }
+  }
+
+  value?
+  user!
+}
+```
+
+<img src="screenshots/receive_true_false.png" alt="Run rgb 1" width="300px">
+
+<img src="screenshots/chose_lies.png" alt="Run rgb 1" width="300px">
+
+> 📝 It's important to understand the difference between sending and receiving when it comes to interaction.
+> A good example is communicating with the UI. If you send a value to the UI, the entire process tree hidden
+> behind that channel will no longer be accessible to the program. That's because there is at most one channel
+> between any two processes, and by sending that channel, this connection was severed.
+>
+> Thus, send values that you consider output, those you won't be touching anymore.
+>
+> If you want to be juggling multiple channels, and make them interact with each other, those channels have to
+> be received (or otherwise brought) into the process that wants to juggle them. The UI is willing to send you
+> any number of channels, for your program to then juggle and make them interact among each other.
+
+#### Implementing functions
+
