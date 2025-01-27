@@ -260,7 +260,8 @@ channel.signal
 The name of a signal can be anything: `.close`, `.next`, `.ok`, `.item`, `.empty`, and so on, are all examples of
 signal names we'll see in this guide.
 
-To receive one of several signals from a channel, use curly braces after the channel's name:
+To receive one of several signals from a channel, use curly braces after the channel's name. Inside the curly
+braces, put a branch of the form `signal => { <process> }` for each possible signal:
 
 ```
 channel {
@@ -317,6 +318,10 @@ After clicking a button:
 
 <img src="screenshots/chose_second.png" alt="Hello, world!" width="300px">
 
+> 📝 Sending a signal intentionally looks like method invocation from other languages. While the two concepts
+> are different, they often serve similar purposes. Aside from that, signals also serve the role of sum types:
+> those with multiple alternative forms.
+
 #### Pass
 
 If multiple branches need to continue the same way, use `pass` to resume execution after the curly braces.
@@ -342,7 +347,7 @@ define program = chan user {
 
 ### Combining operations
 
-I took the liberty to combine operations in the last snippet before explaining because otherwise it would be
+I took the liberty to combine operations in the last snippet before explaining it, because otherwise it would be
 unbearably long.
 
 Multiple operations on the same channel, one after another, can be combined into a single statement. For example,
@@ -359,4 +364,28 @@ We can just do:
 user.correct!
 ```
 
-Any sequence of operations can be combined this way in the process syntax.
+Any sequence of operations can be combined this way in the process syntax. The only limitation is that the
+choice operation (receiving a signal) can only be the last operation in a sequence. That's because the control-flow
+continues inside its branches.
+
+The previous snipped can be made even shorter!
+
+```
+define program = chan user {
+  user.guess_which {
+    first  => { pass }
+    second => { user.correct! }
+    third  => { pass }
+  }
+  user.try_again {
+    first  => { pass }
+    second => { user.correct! }
+    third  => { pass }
+  }
+  user.wrong!
+}
+```
+
+> 📝 Combining operations in a single statement makes it read like a single, more complex operation. Thanks to the
+> succinctness (very little typing) of the basic operations, the compound ones are uncluttered, allowing their
+> own meaning to shine forth.
