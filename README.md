@@ -256,10 +256,10 @@ a newly spawned process, but then can't be acessed from outside anymore. Try thi
 define program = chan user {
   let child1 = chan parent { parent! }
   let child2 = chan parent {
-    child1? // captured `child1` here
+    child1?  // captured `child1` here
     parent!
   }
-  child1? // comment this line to avoid crash
+  child1?  // comment this line to avoid crash
   child2?
   user!
 }
@@ -268,7 +268,7 @@ define program = chan user {
 Running it gives this error:
 
 ```
-7|   child1? // comment this line to avoid crash
+7|   child1?  // comment this line to avoid crash
            ^
 `child1` is not defined.
 ```
