@@ -637,7 +637,7 @@ In this situation, the process Y can decide to **link** the channels A- and B+. 
 The process Y disappears, together with its channels A- and B+, and the processes X and Z are now in direct
 communication with one another. Anything X does on A+ is now reflected on B- and vice versa.
 
-Using linking, we can finally make use of the definitions of `true` and `false` when definiting `not`. The
+Using linking, we can finally use the definitions of `true` and `false` when definiting `not`. The
 linking operator is `<>`:
 
 ```
@@ -653,5 +653,5 @@ define not = chan caller {
 }
 ```
 
-**Linking must be the last statement** of a process, just as is it the case with `!`.
+**Linking must be the last statement** in a process, just as is it the case with `!`.
 
