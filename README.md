@@ -473,8 +473,7 @@ define program = chan user {
 }
 ```
 
-**Receiving a value from the UI** prompts the UI to create a new box, but unlike with values sent to the UI,
-this box will be in a new column.
+Values can be received from the UI as well. The UI will gladly send channels your way upon request.
 
 ```
 define program = chan user {
@@ -499,6 +498,9 @@ define program = chan user {
 <img src="screenshots/receive_true_false.png" alt="Run rgb 1" width="300px">
 
 <img src="screenshots/chose_lies.png" alt="Run rgb 1" width="300px">
+
+**Receiving a value from the UI** prompts the UI to create a new box, but unlike with values sent to the UI,
+this box will be in a new column.
 
 > 📝 It's important to understand the difference between sending and receiving when it comes to interaction.
 > A good example is communicating with the UI. If you send a value to the UI, the entire process tree hidden
