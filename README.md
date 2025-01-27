@@ -598,3 +598,42 @@ be manually recreating them on the `caller` channel every time.
 To solve that, we need _linking_.
 
 ### Linking
+
+We can link two channels, which makes their communication **forwarded to one another** in both directions.
+A visual may help:
+
+```
+<Process X>   <Process Y>   <Process Z>
+    A+ <------> A-   B+ <------> B-
+```
+
+Suppose there are three processes: X, Y, and Z. X and Y share two ends of the same channel (A+ and A-), and
+Y and Z share two ends of another channel (B+ and B-).
+
+In this situation, the process Y can decide to **link** the channels A- and B+. What we get is this:
+
+```
+<Process X>                 <Process Z>
+    A+ <-----------------------> B-
+```
+
+The process Y disappears, together with its channels A- and B+, and the processes X and Z are now in direct
+communication with one another. Anything X does on A+ is now reflected on B- and vice versa.
+
+Using linking, we can finally make use of the definitions of `true` and `false` when definiting `not`. The
+linking operator is `<>`:
+
+```
+define true  = chan result { result.true! }
+define false = chan result { result.false! }
+
+define not = chan caller {
+  caller[bool]
+  bool {
+    true?  => { caller <> false }
+    false? => { caller <> true }
+  }
+}
+```
+
+Just like closing a channel with `!`, **linking must be the last statement** of a process.
