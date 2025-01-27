@@ -350,7 +350,7 @@ define program = chan user {
 I took the liberty to combine operations in the last snippet before explaining it, because otherwise it would be
 unbearably long.
 
-Multiple operations on the same channel, one after another, can be combined into a single statement. For example,
+Multiple operations on the same channel can be combined into a single statement. For example,
 instead of typing:
 
 ```
@@ -389,3 +389,6 @@ define program = chan user {
 > 📝 Combining operations in a single statement makes it read like a single, more complex operation. Thanks to the
 > succinctness (very little typing) of the basic operations, the compound ones are uncluttered, allowing their
 > own meaning to shine forth.
+
+### Exchanging values
+
