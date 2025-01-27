@@ -597,6 +597,23 @@ be manually recreating them on the `caller` channel every time.
 
 To solve that, we need _linking_.
 
+> 🚨 By the way, the function calling part can be done much more concisely using the expression syntax.
+> The lengthy
+>
+> ```
+>   let negation = not
+>   negation(true)
+>   user(negation)!
+> ```
+>
+> can, in fact, be replaced by a simple
+>
+> ```
+>   user(not(true))!
+> ```
+>
+> Stay for the expression syntax to learn why.
+
 ### Linking
 
 We can link two channels, which makes their communication **forwarded to one another** in both directions.
@@ -636,4 +653,5 @@ define not = chan caller {
 }
 ```
 
-Just like closing a channel with `!`, **linking must be the last statement** of a process.
+**Linking must be the last statement** of a process, just as is it the case with `!`.
+
