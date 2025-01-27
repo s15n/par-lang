@@ -283,7 +283,7 @@ To direct the **control-flow** of processes, we send **signals** across channels
 channel.signal
 ```
 
-The name of a signal can be anything: `.close`, `.next`, `.ok`, `.item`, `.empty`, and so on, are all examples of
+The name of a signal can be anything: `.close`, `.next`, `.red`, `.item`, `.empty`, and so on, are all examples of
 signal names we'll see in this guide.
 
 To receive one of several signals from a channel, use curly braces after the channel's name. Inside the curly
@@ -394,7 +394,7 @@ Any sequence of operations can be combined this way in the process syntax. The o
 choice operation (receiving a signal) can only be the last operation in a sequence. That's because the control-flow
 continues inside its branches.
 
-The previous snipped can be made even shorter!
+The previous snippet can be made even shorter!
 
 ```
 define program = chan user {
@@ -418,3 +418,39 @@ define program = chan user {
 
 ### Exchanging values
 
+Channels can be viewed as **single-use values.** For example, booleans can be implemented as channels sending one
+of the signals `.true` or `.false`, and immediately closing afterwards.
+
+```
+define true = chan result {
+  result.true!
+}
+
+define false = chan result {
+  result.false!
+}
+```
+
+Whole channels, thus values, can be sent and received along other channels.
+
+To **send a value** over a channel, use **round parentheses:**
+
+```
+define program = chan user {
+  user(true)!
+}
+```
+
+**Definitions can be used multiple times;** each use creates a new instance of the defined value.
+
+```
+define program = chan user {
+  user(true)
+  user(false)
+  user(true)(false)!
+}
+```
+
+<img src="screenshots/send_booleans.png" alt="Run rgb 1" width="300px">
+
+A value sent to the UI creates a separate box in the UI where the value is shown or interacted with.
