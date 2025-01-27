@@ -503,6 +503,9 @@ define program = chan user {
 this box will be in a new column.
 
 > 📝 It's important to understand the difference between sending and receiving when it comes to interaction.
+> Since any channel sent or received or be used for any kind of communication, the difference may not
+> initially be obvious.
+>
 > A good example is communicating with the UI. If you send a value to the UI, the entire process tree hidden
 > behind that channel will no longer be accessible to the program. That's because there is at most one channel
 > between any two processes, and by sending that channel, this connection was severed.
@@ -513,5 +516,85 @@ this box will be in a new column.
 > be received (or otherwise brought) into the process that wants to juggle them. The UI is willing to send you
 > any number of channels, for your program to then juggle and make them interact among each other.
 
-#### Implementing functions
+### Combining operations on branches
 
+Operations of **receiving a value** (`[...]`) and **waiting for a channel to close** (`?`) can be appended
+directly after a signal name on a branch. They will be applied to the same channel that we received the signal
+from.
+
+```
+channel {
+  signal => {
+    channel[value]
+    channel?
+    ...
+  }
+}
+```
+
+This verbose code can be rewritten more consisely:
+
+```
+channel {
+  signal[value]? => {
+    ...
+  }
+}
+```
+
+These two operations often come right after receiving a signal, so this shortcut can be handy. If it looks
+somewhat like pattern matching from other languages, that's because it does, and is used in similar situations.
+However, it's not full pattern matching, the patterns can't nest. For now, at least.
+
+### Implementing functions
+
+Of course, functions will be made from channels, but what is the right way? The obvious idea is probably:
+send a value to it, receive an answer. For example, the boolean negation could be implemented in this method
+like this:
+
+```
+define not = chan caller {
+  caller[bool]
+  bool {
+    true?  => { caller(false)! }
+    false? => { caller(true)! }
+  }
+}
+```
+
+And used like this:
+
+```
+define program = chan user {
+  let function = not
+  function(true)[result]?
+  user(result)!
+}
+```
+
+But that's wasting a good channel. The **idiomatic approach** is different: after receiving its argument, the
+channel should **become the result**. Here's how that looks for the `not` function:
+
+```
+define not = chan caller {
+  caller[bool]
+  bool {
+    true?  => { caller.false! }
+    false? => { caller.true! }
+  }
+}
+
+define program = chan user {
+  let negation = not
+  negation(true)  // `negation` becomes `false` after this
+  user(negation)!
+}
+```
+
+But there's an objection! In the definition of `not`, we don't make use of the previous definitions of
+`true` and `false` for returning. What if we were dealing with more complex values? We wouldn't want to
+be manually recreating them on the `caller` channel every time.
+
+To solve that, we need _linking_.
+
+### Linking
