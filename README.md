@@ -249,6 +249,32 @@ Cannot end this process without handling `child`.
 system in place, all of this will be checked at compile-time. Right now, failing to coordinate here only results in
 runtime errors.
 
+Additionally, **each channel end-point must be in exactly one process.** A channel can be **moved** (captured) into
+a newly spawned process, but then can't be acessed from outside anymore. Try this code:
+
+```
+define program = chan user {
+  let child1 = chan parent { parent! }
+  let child2 = chan parent {
+    child1? // captured `child1` here
+    parent!
+  }
+  child1? // comment this line to avoid crash
+  child2?
+  user!
+}
+```
+
+Running it gives this error:
+
+```
+7|   child1? // comment this line to avoid crash
+           ^
+`child1` is not defined.
+```
+
+That's because `child1` was previously moved into another process.
+
 ### Signaling
 
 To direct the **control-flow** of processes, we send **signals** across channels. To send a signal, use `.`:
