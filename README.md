@@ -681,13 +681,13 @@ define not = chan caller {
 ### Recursion, the usual way
 
 Par has an own powerful construct for doing recursion called `begin`/`loop`, which we cover in the next
-section. It doesn't require explicit self-reference, but recursion by self-reference is supported (for now,
+section. It doesn't require explicit self-reference, but **recursion by self-reference** is supported (for now,
 at least), and it's best we cover it first.
 
 Suppose we want to negate a list of booleans. The first question is, how do we make a list?
 
-A list will be a channel that either sends a signal `.item` followed by sending the actual item, or sends
-a signal `.empty` and ends. Here's an example list of booleans:
+A list will be a channel that either will keep sending either a signal `.item` followed by sending the actual
+item, or sends a signal `.empty` and ends. Here's an example list of booleans:
 
 ```
 define list_of_booleans = chan consumer {
@@ -721,7 +721,7 @@ define negate_list = chan caller {
 }
 ```
 
-We're using the expression syntax for function call. However, we could've written the last lines equivalently
+We're using the expression syntax for function calls. However, we could've written the last lines equivalently
 as:
 
 ```
@@ -757,7 +757,7 @@ For the non-empty case, we immediately receive an item on the branch. Then we se
 output.
 
 Finally, we compute the negation of the rest of the list, sending the original `list` variable
-(which is now one item shorter) to a recursive call. Since we want the rest of the output go to the
+(which is now one item shorter) to a recursive call. Since we want the rest of the output to go to the
 original `caller`, we link this new tail with it.
 
 **Three things to note:**
@@ -779,3 +779,6 @@ define try_negate_list = negate_list(list_of_booleans)
 ```
 
 ![Try negate list](screenshots/try_negate_list.png)
+
+### Recursion, a better way
+
