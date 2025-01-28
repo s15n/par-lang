@@ -338,11 +338,11 @@ define program = chan user {
 }
 ```
 
-<img src="screenshots/first_second_third.png" alt="Hello, world!" width="300px">
+<img src="screenshots/first_second_third.png" alt="First, second, third" width="300px">
 
 After clicking a button:
 
-<img src="screenshots/chose_second.png" alt="Hello, world!" width="300px">
+<img src="screenshots/chose_second.png" alt="Choose second" width="300px">
 
 > 📝 Sending a signal intentionally looks like method invocation from other languages. While the two concepts
 > are different, they often serve similar purposes. Aside from that, signals also serve the role of sum types:
@@ -451,7 +451,7 @@ define program = chan user {
 }
 ```
 
-<img src="screenshots/send_booleans.png" alt="Run rgb 1" width="300px">
+<img src="screenshots/send_booleans.png" alt="Send booleans" width="300px">
 
 A value **sent to the UI** creates a separate box in the UI where the value is shown or interacted with.
 
@@ -495,9 +495,9 @@ define program = chan user {
 }
 ```
 
-<img src="screenshots/receive_true_false.png" alt="Run rgb 1" width="300px">
+<img src="screenshots/receive_true_false.png" alt="Receive true/false" width="300px">
 
-<img src="screenshots/chose_lies.png" alt="Run rgb 1" width="300px">
+<img src="screenshots/chose_lies.png" alt="Chose lies" width="300px">
 
 **Receiving a value from the UI** prompts the UI to create a new box, but unlike with values sent to the UI,
 this box will be in a new column.
@@ -697,7 +697,8 @@ define list_of_booleans = chan consumer {
     .item(false)
     .item(true)
     .item(true)
-    .item(false)!
+    .item(false)
+    .empty!
 }
 ```
 
@@ -770,3 +771,11 @@ original `caller`, we link this new tail with it.
    and ends. Thus, the transformation will consume constant memory.
 3. On the consumer side, items will be available as soon as they are produced. Multiple list transformations
    can be stacked and proceed in parallel. This is, once again, a natural consequence of the concurrent semantics.
+
+The only thing left is to run it:
+
+```
+define try_negate_list = negate_list(list_of_booleans)
+```
+
+![Try negate list](screenshots/try_negate_list.png)
