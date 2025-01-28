@@ -616,7 +616,7 @@ To solve that, we need _linking_.
 
 ### Linking
 
-We can link two channels, which makes their communication **forwarded to one another** in both directions.
+We can link two channels, which **forwards their communication to one another,** in both directions.
 A visual may help:
 
 ```
@@ -654,4 +654,3 @@ define not = chan caller {
 ```
 
 **Linking must be the last statement** in a process, just as is it the case with `!`.
-
