@@ -633,7 +633,7 @@ let result = function(argument)
 And `function(argument)` can not only be assigned to a variable, but also used wherever an expression is
 expected, such as sending values, or definitions.
 
-> 📝 Note, that this only makes sense if the function channel becomes its result after sending the
+> 📝 Note, that this only makes sense if the function channel becomes its result after receiving the
 > argument. If the channel was to send the result back separately, we'd have to receive it using
 > `[...]`.
 
@@ -677,3 +677,96 @@ define not = chan caller {
 ```
 
 **Linking must be the last statement** in a process, just as is it the case with `!`.
+
+### Recursion, the usual way
+
+Par has an own powerful construct for doing recursion called `begin`/`loop`, which we cover in the next
+section. It doesn't require explicit self-reference, but recursion by self-reference is supported (for now,
+at least), and it's best we cover it first.
+
+Suppose we want to negate a list of booleans. The first question is, how do we make a list?
+
+A list will be a channel that either sends a signal `.item` followed by sending the actual item, or sends
+a signal `.empty` and ends. Here's an example list of booleans:
+
+```
+define list_of_booleans = chan consumer {
+  consumer
+    .item(true)
+    .item(false)
+    .item(false)
+    .item(true)
+    .item(true)
+    .item(false)!
+}
+```
+
+Now we want to write a function that will take any such list and return a list with each boolean negated.
+Since we want it to work on a list of any length, we'll need recursion.
+
+```
+define negate_list = chan caller {
+  caller[list]
+  list {
+    empty? => {
+      caller.empty!
+    }
+
+    item[bool] => {
+      caller.item(not(bool))
+      caller <> negate_list(list)
+    }
+  }
+}
+```
+
+We're using the expression syntax for function call. However, we could've written the last lines equivalently
+as:
+
+```
+      let rest = negate_list
+      rest(list)
+      caller <> rest
+```
+
+Let's break this down.
+
+```
+  caller[list]
+```
+
+After receiving the input list, the task is now to construct the output list on the `caller` channel.
+
+```
+    empty? => {
+      caller.empty!
+    }
+```
+
+If the original list is empty, we signal an empty list on the output too.
+
+```
+    item[bool] => {
+      caller.item(not(bool))
+      caller <> negate_list(list)
+    }
+```
+
+For the non-empty case, we immediately receive an item on the branch. Then we send it negated to the
+output.
+
+Finally, we compute the negation of the rest of the list, sending the original `list` variable
+(which is now one item shorter) to a recursive call. Since we want the rest of the output go to the
+original `caller`, we link this new tail with it.
+
+**Three things to note:**
+
+1. The way we construct lists is very similar to the generator/yield syntax from other languages. Par
+   doesn't need a special syntax for this purpose thanks to its expressive concurrent syntax and
+   semantics.
+2. "Tail-call optimization" naturally follows from the semantics. There is no call-stack in Par,
+   only processes and channels. After invoking the recursive call, the original process doesn't wait
+   for it to finish. It proceeds immediately to the next statement: linking. It links the two channels
+   and ends. Thus, the transformation will consume constant memory.
+3. On the consumer side, items will be available as soon as they are produced. Multiple list transformations
+   can be stacked and proceed in parallel. This is, once again, a natural consequence of the concurrent semantics.
