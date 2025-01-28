@@ -756,7 +756,7 @@ If the original list is empty, we signal an empty list on the output too.
 For the non-empty case, we immediately receive an item on the branch. Then we send it negated to the
 output.
 
-Finally, we compute the negation of the rest of the list, sending the original `list` variable
+Finally, we start computing the negation of the rest of the list, sending the original `list` variable
 (which is now one item shorter) to a recursive call. Since we want the rest of the output to go to the
 original `caller`, we link this new tail with it.
 
