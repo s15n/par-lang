@@ -542,9 +542,9 @@ channel {
 }
 ```
 
-These two operations often come right after receiving a signal, so this shortcut can be handy. If it looks
-somewhat like pattern matching from other languages, that's because it does, and is used in similar situations.
-However, it's not full pattern matching, the patterns can't nest. For now, at least.
+Some combination of these two operations often come right after receiving a signal, so this shortcut can be handy.
+If it looks somewhat like pattern matching from other languages, that's because it does, and is used in
+similar situations. However, it's not full pattern matching, the patterns can't nest. For now, at least.
 
 ### Implementing functions
 
@@ -597,22 +597,45 @@ be manually recreating them on the `caller` channel every time.
 
 To solve that, we need _linking_.
 
-> 🚨 By the way, the function calling part can be done much more concisely using the expression syntax.
-> The lengthy
->
-> ```
->   let negation = not
->   negation(true)
->   user(negation)!
-> ```
->
-> can, in fact, be replaced by a simple
->
-> ```
->   user(not(true))!
-> ```
->
-> Stay for the expression syntax to learn why.
+#### Early sugar treat: function calling in expression syntax
+
+It's not expression syntax time yet, but let's be honest, three lines to call a function is a lot.
+
+```
+  let negation = not
+  negation(true)
+  user(negation)!
+```
+
+There is one piece of expression syntax that we'll thus learn early: sending in application position.
+Using it, the above can be rewritten as simply:
+
+```
+  user(not(true))!
+```
+
+Looks exactly like calling a function in other languages!
+
+In general, this verbose function calling in process syntax
+
+```
+let call = function
+call(argument)
+let result = call
+```
+
+can be rewritten to
+
+```
+let result = function(argument)
+```
+
+And `function(argument)` can not only be assigned to a variable, but also used wherever an expression is
+expected, such as sending values, or definitions.
+
+> 📝 Note, that this only makes sense if the function channel becomes its result after sending the
+> argument. If the channel was to send the result back separately, we'd have to receive it using
+> `[...]`.
 
 ### Linking
 
