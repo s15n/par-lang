@@ -280,7 +280,7 @@ That's because `child1` was previously moved into another process.
 To direct the **control-flow** of processes, we send **signals** across channels. To send a signal, use `.`:
 
 ```
-channel.signal
+<channel>.<signal>
 ```
 
 The name of a signal can be anything: `.close`, `.next`, `.red`, `.item`, `.empty`, and so on, are all examples of
@@ -290,15 +290,15 @@ To receive one of several signals from a channel, use curly braces after the cha
 braces, put a branch of the form `signal => { <process> }` for each possible signal:
 
 ```
-channel {
-  signal1 => {
-    // do something after `signal1` received
+<channel> {
+  <signal1> => {
+    // do something after `<signal1>` received
   }
-  signal2 => {
-    // do something after `signal2` received
+  <signal2> => {
+    // do something after `<signal2>` received
   }
-  signal3 => {
-    // do something after `signal3` received
+  <signal3> => {
+    // do something after `<signal3>` received
   }
 }
 ```
@@ -882,3 +882,47 @@ in the list, sending the `caller` back up the `return` channels, all the way. Ev
 Here it's important to understand that `loop` captures the original `caller` variable, moving it into this
 new process. That's why we re-assign `caller` after getting it back. The other variable used in the loop body,
 `return`, is created anew every time.
+
+## Expression syntax
+
+Everything Par does can be expressed with the process syntax. Some things couldn't even be expressed without it.
+But, in a lot of cases, it's verbose.
+
+For example, do we really need to specify this `consumer` channel just to make a list?
+
+```
+define list_of_booleans = chan consumer {
+  consumer
+    .item(true)
+    .item(false)
+    .item(false)
+    .item(true)
+    .item(true)
+    .item(false)
+    .empty!
+}
+```
+
+Couldn't we just write this instead? The intent is clear.
+
+```
+define list_of_booleans =
+  .item(true)
+  .item(false)
+  .item(false)
+  .item(true)
+  .item(true)
+  .item(false)
+  .empty!
+```
+
+In fact, **we can write exactly that!**
+
+There are two main categories of expressions: **constructions** and **applications**. Now that we fully covered
+the process syntax, I think the expressions are best explain by giving their equivalents in process syntax,
+together with some illuminating examples.
+
+### Applications
+
+The point of applications is to _apply_ an operation to an existing value. We've already seen one such example:
+calling a function.
