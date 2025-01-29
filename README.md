@@ -837,7 +837,7 @@ Conceptually, _the driver_ should be the value you're looping on, that's **getti
 > There are two main reasons for doing it this way:
 >
 > 1. It enables consistent `begin`/`loop` in expression syntax, where the driver may be anonymous.
-> 2. It opens doors to checking for totality (no infinite loops). All that type system needs to check is
+> 2. It opens doors to checking for totality (no infinite loops). All that needs to checked is
 >    that the new driver in `loop` is a descendant of the original driver in `begin`.
 
 Notice, that the loop uses the channel `caller` from the enclosing process.
