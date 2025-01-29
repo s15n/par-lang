@@ -835,7 +835,7 @@ Just like `!`, and `<>`, **`loop` must be the last statement** in a process.
 > There are two main reasons for doing it this way:
 >
 > 1. It enables consistent `begin`/`loop` in expression syntax, where the driver may be anonymous.
-> 2. It opens doors checking for totality (no infinite loops). All type system needs to check is
+> 2. It opens doors to checking for totality (no infinite loops). All that type system needs to check is
 >    that the new driver in `loop` is a descendant of the original driver in `begin`.
 
 Notice, that the loop uses the channel `caller` from the enclosing process.
