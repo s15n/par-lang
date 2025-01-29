@@ -828,6 +828,8 @@ define negate_list = chan caller {
 
 Just like `!`, and `<>`, **`loop` must be the last statement** in a process.
 
+Conceptually, _the driver_ should be the value you're looping on, that's **getting shorter with each iteration.**
+
 > 📝 In the case of `negate_list`, the driver remains the same channel, so specifying it may seem redundant. But
 > in other cases, the name may be different. Later in the examples, there is a function for flattening binary
 > trees, which replaces the driver with a different channel, two times.
@@ -844,7 +846,7 @@ of those variables are still assigned (with possibly different values) before en
 
 **`loop` may be used from nested processes, too!** The following example may be a little mind-bending at first,
 but it's useful. It's one of many possible implementations of reversing a list. What makes it special is that
-it's, as far as I know, operationally impossible in usual functional programming.
+it demonstrates a nice traversal pattern usable for other data structures, too.
 
 ```
 define reverse = chan caller {
