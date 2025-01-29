@@ -782,3 +782,101 @@ define try_negate_list = negate_list(list_of_booleans)
 
 ### Recursion, a better way
 
+Par introduces a way to do recursion "in-line", **without an explicit self-reference.** This is very
+expressive: for example, passing anonymous recursive functions as arguments is simple. Also,
+helper functions for encapsulating a recursive loop, which are usually needed with recursion by
+self-reference, are not needed in Par.
+
+It's fascilitated by two keywords: **`begin` and `loop`.**
+
+```
+<channel> begin
+```
+
+**`begin` establishes a _loop point_.** The channel name it's applied to is bound as a _loop driver_. It's not
+modified in any way.
+
+Later, **`loop` goes back to the loop point.**
+
+```
+<channel> loop
+```
+
+When executing `loop`, two things happen:
+
+1. The channel `loop` is applied to becomes the new driver. All it means operationally is it's assigned to the
+   original driver name bound in `begin`.
+2. Control-flow jumps to the associated _loop point_.
+
+Let's make it clear by rewriting `negate_list`.
+
+```
+define negate_list = chan caller {
+  caller[list]
+  list begin {  // loop point established here
+    empty? => {
+      caller.empty!
+    }
+
+    item[bool] => {
+      caller.item(not(bool))
+      list loop  // go back to the loop point
+    }
+  }
+}
+```
+
+Just like `!`, and `<>`, **`loop` must be the last statement** in a process.
+
+> 📝 In the case of `negate_list`, the driver remains the same channel, so specifying it may seem redundant. But
+> in other cases, the name may be different. Later in the examples, there is a function for flattening binary
+> trees, which replaces the driver with a different channel, two times.
+>
+> There are two main reasons for doing it this way:
+>
+> 1. It enables consistent `begin`/`loop` in expression syntax, where the driver may be anonymous.
+> 2. It opens doors checking for totality (no infinite loops). All type system needs to check is
+>    that the new driver in `loop` is a descendant of the original driver in `begin`.
+
+Notice, that the loop uses the channel `caller` from the enclosing process.
+**Variables used between `begin` and `loop` persist across cycles.** All you need to make sure is that all
+of those variables are still assigned (with possibly different values) before entering `loop`.
+
+**`loop` may be used from nested processes, too!** The following example may be a little mind-bending at first,
+but it's useful. It's one of many possible implementations of reversing a list. What makes it special is that
+it's, as far as I know, operationally impossible in usual functional programming.
+
+```
+define reverse = chan caller {
+  caller[list]
+
+  let caller = chan return {
+    list begin {
+      empty? => {
+        return <> caller
+      }
+
+      item[value] => {
+        let caller = chan return { list loop }
+        caller.item(value)
+        return <> caller
+      }
+    }
+  }
+
+  caller.empty!
+}
+```
+
+This `reverse` sling-shots the `caller` channel all the way to the end of the list, creating a string of
+processes connected by the `return` channels. Then, from the end, it calls `.item(value)` for each item
+in the list, sending the `caller` back up the `return` channels, all the way. Eventually, the outer-most
+`return` is reached, and `.empty!` is sent on the channel.
+
+```
+        let caller = chan return { list loop }
+```
+
+Here it's important to understand that `loop` captures the original `caller` variable, moving it into this
+new process. That's why we re-assign `caller` after getting it back. The other variable used in the loop body,
+`return`, is created anew every time.
