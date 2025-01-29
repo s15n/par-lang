@@ -67,4 +67,4 @@ cmd_branch_then     = { "=>" ~ "{" ~ process ~ "}" }
 cmd_branch_receive  = { "[" ~ name ~ "]" ~ cmd_branch }
 cmd_branch_continue = { "?" ~ "=>" ~ "{" ~ process ~ "}" }
 
-loop_label = { name? }
+loop_label = { ("@" ~ name)? }
