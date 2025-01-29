@@ -844,6 +844,9 @@ Notice, that the loop uses the channel `caller` from the enclosing process.
 **Variables used between `begin` and `loop` persist across cycles.** All you need to make sure is that all
 of those variables are still assigned (with possibly different values) before entering `loop`.
 
+If you have **multiple nested `begin`/`loop`** and need to differentiate between them, labels are
+supported with `@`: `... begin @label`, and `... loop @label`.
+
 **`loop` may be used from nested processes, too!** The following example may be a little mind-bending at first,
 but it's useful. It's one of many possible implementations of reversing a list. What makes it special is that
 it demonstrates a nice traversal pattern usable for other data structures, too.
@@ -918,11 +921,54 @@ define list_of_booleans =
 
 In fact, **we can write exactly that!**
 
-There are two main categories of expressions: **constructions** and **applications**. Now that we fully covered
-the process syntax, I think the expressions are best explain by giving their equivalents in process syntax,
-together with some illuminating examples.
+There are two main categories of expressions: **constructions** and **applications**. Now that we've fully
+covered the process syntax, I think expressions are best explained by giving their equivalents in process syntax,
+together with some illuminating examples when needed.
 
 ### Applications
 
 The point of applications is to _apply_ an operation to an existing value. We've already seen one such example:
 calling a function.
+
+The general theme of applications goes as follows. An assignment of this form:
+
+```
+let result = <expression> <operation>
+```
+
+will replace these process syntax lines:
+
+```
+let object = <expression>
+object <operation>
+let result = object
+```
+
+Or more generally, this expression using an application:
+
+```
+<expression> <operation>
+```
+
+will replace this expression not using any application:
+
+```
+chan result {
+  let object = <expression>
+  object <operation>
+  result <> object
+}
+```
+
+There are **five operations** that can be applied:
+
+- Sending a signal
+- Sending a value
+- Receiving a signal
+- `begin` and `loop`
+
+Most notably, receiving a value cannot be used in an application. Other operations, like closing a channel
+don't make sense in an application.
+
+#### Applying signals and values
+
