@@ -870,7 +870,7 @@ define reverse = chan caller {
 }
 ```
 
-This `reverse` sling-shots the `caller` channel all the way to the end of the list, creating a string of
+This `reverse` sling-shots the `caller` channel all the way to the end of the list, creating a chain of
 processes connected by the `return` channels. Then, from the end, it calls `.item(value)` for each item
 in the list, sending the `caller` back up the `return` channels, all the way. Eventually, the outer-most
 `return` is reached, and `.empty!` is sent on the channel.
