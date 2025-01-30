@@ -977,8 +977,7 @@ chan result {
 
 ```
 let pair = (true) false
-pair[first]   // first  = true
-pair[second]  // second = false
+pair[first]   // first = true, pair = false
 ```
 
 ### Receiving values
