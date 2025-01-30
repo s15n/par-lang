@@ -428,8 +428,12 @@ impl Error {
                     Self::display_loc(code, loc),
                     names
                         .iter()
-                        .map(|name| format!("`{}`", name))
-                        .intersperse(", ".to_string())
+                        .enumerate()
+                        .map(|(i, name)| if i == 0 {
+                            format!("`{}`", name)
+                        } else {
+                            format!(", `{}`", name)
+                        })
                         .collect::<String>()
                 )
             }
@@ -486,8 +490,12 @@ impl Error {
                     Self::display_loc(code, loc),
                     choices
                         .iter()
-                        .map(|name| format!("`{}`", name))
-                        .intersperse(", ".to_string())
+                        .enumerate()
+                        .map(|(i, name)| if i == 0 {
+                            format!("`{}`", name)
+                        } else {
+                            format!(", `{}`", name)
+                        })
                         .collect::<String>(),
                 )
             }
