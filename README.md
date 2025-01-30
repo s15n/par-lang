@@ -121,8 +121,8 @@ automatic user interface.
 
 Par code has two main syntactic categories: **expressions** and **processes**. The process syntax is more general,
 but less convenient for many situations. Still, it's needed in others. It's important we
-**first understand the process syntax,** because most of the expression syntax can be considered a
-_syntax sugar_ on top of the process syntax.
+**first understand process syntax,** because most of expression syntax can be considered a
+_syntax sugar_ on top of process syntax.
 
 ### Channel spawning
 
@@ -134,8 +134,8 @@ not a syntactic sugar. It goes like this:
 chan <name> { <process> }
 ```
 
-This together with the process syntax is all we really need for writing Par programs. In fact, that's what the
-compiled code comes down to. However, the expression syntax we'll cover afterwards, is a big factor in making Par
+This together with process syntax is all we really need for writing Par programs. In fact, that's what the
+compiled code comes down to. However, expression syntax we'll cover afterwards, is a big factor in making Par
 code a pleasure to write and read.
 
 Type this code:
@@ -390,7 +390,7 @@ We can just do:
 user.correct!
 ```
 
-Any sequence of operations can be combined this way in the process syntax. The only limitation is that the
+Any sequence of operations can be combined this way in process syntax. The only limitation is that the
 choice operation (receiving a signal) can only be the last operation in a sequence. That's because the control-flow
 continues inside its branches.
 
@@ -721,7 +721,7 @@ define negate_list = chan caller {
 }
 ```
 
-We're using the expression syntax for function calls. However, we could've written the last lines equivalently
+We're using expression syntax for function calls. However, we could've written the last lines equivalently
 as:
 
 ```
@@ -888,7 +888,7 @@ new process. That's why we re-assign `caller` after getting it back. The other v
 
 ## Expression syntax
 
-Everything Par does can be expressed with the process syntax. Some things couldn't even be expressed without it.
+Everything Par does can be expressed with process syntax. Some things couldn't even be expressed without it.
 But, in a lot of cases, it's verbose.
 
 For example, do we really need to specify this `consumer` channel just to make a list?
@@ -921,54 +921,120 @@ define list_of_booleans =
 
 In fact, **we can write exactly that!**
 
-There are two main categories of expressions: **constructions** and **applications**. Now that we've fully
-covered the process syntax, I think expressions are best explained by giving their equivalents in process syntax,
-together with some illuminating examples when needed.
+There are two main categories of expressions: **applications** and **constructions**.
 
-### Applications
+- **Applications come after an expression,** and apply an operation to an existing value.
+- **Constructions come before an expression,** and generally prepend some operation to it.
 
-The point of applications is to _apply_ an operation to an existing value. We've already seen one such example:
-calling a function.
+Now that we've fully covered process syntax, I think expressions are best explained by giving their equivalents
+in process syntax, together with some illuminating examples.
 
-The general theme of applications goes as follows. An assignment of this form:
+### Sending values
 
-```
-let result = <expression> <operation>
-```
+#### Application
 
-will replace these process syntax lines:
+Sends `<expression2>` to `<expression1>` and evaluates to the result. Means **calling a function.**
 
 ```
-let object = <expression>
-object <operation>
-let result = object
+<expression1>(<expression2>)
 ```
 
-Or more generally, this expression using an application:
-
-```
-<expression> <operation>
-```
-
-will replace this expression not using any application:
+**In process syntax:**
 
 ```
 chan result {
-  let object = <expression>
-  object <operation>
+  let object = <expression1>
+  object(<expression2>)
   result <> object
 }
 ```
 
-There are **five operations** that can be applied:
+**Example:**
 
-- Sending a signal
-- Sending a value
-- Receiving a signal
-- `begin` and `loop`
+```
+let negation = not(true)  // negation = false
+```
 
-Most notably, receiving a value cannot be used in an application. Other operations, like closing a channel
-don't make sense in an application.
+#### Construction
 
-#### Applying signals and values
+Constructs a value that firsts sends `<expression1>`, then evaluates to `<expression2>`. Means
+**constructing a pair.**
 
+```
+(<expression1>) <expression2>
+```
+
+**In process syntax:**
+
+```
+chan result {
+  result(<expression1>)
+  result <> <expression2>
+}
+```
+
+**Example:**
+
+```
+let pair = (true) false
+pair[first]   // first  = true
+pair[second]  // second = false
+```
+
+### Sending signals
+
+#### Application
+
+Sends `<signal>` to `<expression>` and evaluates to the result. Somewhat similar to **invoking a method** on
+an object.
+
+```
+<expression>.<signal>
+```
+
+**In process syntax:**
+
+```
+chan result {
+  let object = <expression>
+  object.<signal>
+  result <> object
+}
+```
+
+**Example:**
+
+```
+let choice = chan chooser {
+  chooser {
+    left  => { chooser <> true }
+    right => { chooser <> false }
+  }
+}
+
+let answer = choice.left  // answer = true
+```
+
+#### Construction
+
+Constructs a value that first sends `<signal>`, then evaluates to `<expression>`. It means the same thing as
+**instantiating a sum/variant type.**
+
+```
+.<signal> <expression>
+```
+
+**In process syntax:**
+
+```
+chan result {
+  result.<signal>
+  result <> <expression>
+}
+```
+
+**Example:**
+
+```
+let optional = .some true
+```
