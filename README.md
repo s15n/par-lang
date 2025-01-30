@@ -957,7 +957,7 @@ let negation = not(true)  // negation = false
 
 #### Construction
 
-Constructs a value that firsts sends `<expression1>`, then evaluates to `<expression2>`. Means
+Creates a value that firsts sends `<expression1>`, then evaluates to `<expression2>`. Means
 **constructing a pair.**
 
 ```
@@ -979,6 +979,62 @@ chan result {
 let pair = (true) false
 pair[first]   // first  = true
 pair[second]  // second = false
+```
+
+### Receiving values
+
+There is no application for receiving values due to scoping ambiguities.
+
+#### Construction
+
+Creates a value that first receives into `<name>`, then evaluates to `<expression>` which uses the received
+value. Means **constructing a function.**
+
+```
+[<name>] <expression>
+```
+
+**In process syntax:**
+
+```
+chan result {
+  result[<name>]
+  result <> <expression>
+}
+```
+
+**Example:**
+
+```
+define identity = [value] value
+```
+
+### Closing with `!`
+
+There is no expression syntax for `?`. However, `?` can be used in branches (except in construction) in both
+process and expression syntax. Also, there is no application for `!`, as there is no meaningful result.
+
+#### Construction
+
+Creates a channel that immediately closes. Equivalent to constructing a **unit value,** such as an empty tuple.
+
+```
+!
+```
+
+**In process syntax:**
+
+```
+chan result {
+  result!
+}
+```
+
+**Example:**
+
+```
+let unit = !
+unit?  // goes out of scope
 ```
 
 ### Sending signals
@@ -1017,7 +1073,7 @@ let answer = choice.left  // answer = true
 
 #### Construction
 
-Constructs a value that first sends `<signal>`, then evaluates to `<expression>`. It means the same thing as
+Creates a value that first sends `<signal>`, then evaluates to `<expression>`. It means the same thing as
 **instantiating a sum/variant type.**
 
 ```
@@ -1036,5 +1092,11 @@ chan result {
 **Example:**
 
 ```
+let true = .true!
 let optional = .some true
+
+let list =
+  .item(true)   // sending `.item`, then sending `true`
+  .item(false)  // ...
+  .empty!       // sending `.empty`, then constructing `!`
 ```
