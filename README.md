@@ -1011,12 +1011,13 @@ define identity = [value] value
 
 ### Closing with `!`
 
-There is no expression syntax for `?`. However, `?` can be used in branches (except in construction) in both
-process and expression syntax. Also, there is no application for `!`, as there is no meaningful result.
+There is no expression syntax for `?`. However, `?` can be used in branches in both process and expression
+application syntax. Also, there is no application for `!`, as it has no meaningful result.
 
 #### Construction
 
-Creates a channel that immediately closes. Equivalent to constructing a **unit value,** such as an empty tuple.
+Creates a channel that immediately closes. Same as constructing a **unit value,** such as an empty tuple
+in other languages.
 
 ```
 !
@@ -1061,7 +1062,7 @@ chan result {
 **Example:**
 
 ```
-let choice = chan chooser {
+let choice = chan chooser {  // this will get better with expressions for receiving signals
   chooser {
     left  => { chooser <> true }
     right => { chooser <> false }
@@ -1097,6 +1098,8 @@ let optional = .some true
 
 let list =
   .item(true)   // sending `.item`, then sending `true`
-  .item(false)  // ...
+  .item(false)  // these are all constructions
   .empty!       // sending `.empty`, then constructing `!`
 ```
+
+### Receiving signals
