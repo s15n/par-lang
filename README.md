@@ -1424,7 +1424,7 @@ define tree_of_colors =
       (.empty!)!)!
 ```
 
-A function to flatten any binary tree into a list can be implemented using a traversal pattern similar
+A **function to flatten any binary tree into a list** can be implemented using a traversal pattern similar
 to the `reverse` function from way above, but this time, utilizing expression syntax wherever possible.
 
 ```
@@ -1486,7 +1486,7 @@ It's an object with two methods: `next` and `close`:
 - `next` produces a new item, and loops back to expecting `next` or `close`.
 - `close` deallocates the sequence, it must clean up its internal state.
 
-Let's make a function that zips two infinite sequences into an infinite sequence of pairs:
+Let's make a **function that zips two infinite sequences** into an infinite sequence of pairs:
 
 ```
 define zip_seqs = [seq1][seq2] begin {
