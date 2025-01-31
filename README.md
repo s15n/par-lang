@@ -44,6 +44,9 @@
       - [Construction](#construction-5)
     - [`let`/`in`](#letin)
     - [Commands in expressions with `do`/`in`](#commands-in-expressions-with-doin)
+  - [Examples in _Full Syntax_](#examples-in-full-syntax)
+    - [Flattening a tree](#flattening-a-tree)
+    - [Infinite sequences](#infinite-sequences)
 
 ## Setting up
 
@@ -1397,4 +1400,75 @@ do {
   numbers.next[x]
 } in .item(transform(x)) loop
 ```
+
+## Examples in _Full Syntax_
+
+### Flattening a tree
+
+Construct a binary tree of colors using construction expressions:
+
+```
+define tree_of_colors =
+  .node
+    (.node
+      (.empty!)
+      (.red!)
+      (.empty!)!)
+    (.green!)
+    (.node
+      (.node
+        (.empty!)
+        (.yellow!)
+        (.empty!)!)
+      (.blue!)
+      (.empty!)!)!
+```
+
+A function to flatten any binary tree into a list can be implemented using a traversal pattern similar
+to the `reverse` function from way above, but this time, utilizing expression syntax wherever possible.
+
+```
+define flatten = [tree] chan yield {
+  let yield = tree begin {
+    empty? => yield
+
+    node[left][value][right]? => do {
+      let yield = left loop
+      yield.item(value)
+    } in right loop
+  }
+
+  yield.empty!
+}
+```
+
+The `yield` channel is traversed along the binary tree, and used to send all values from nodes in the
+correct order.
+
+In process syntax, the same function could be written this way:
+
+```
+define flatten_process_syntax = chan caller {
+  caller[tree]
+
+  let caller = chan return {
+    tree begin {
+      empty? => {
+        return <> caller
+      }
+
+      node[left][value][right]? => {
+        let caller = chan return { left loop }
+        caller.item(value)
+        let caller = chan return { right loop }
+        return <> caller
+      }
+    }
+  }
+
+  caller.empty!
+}
+```
+
+### Infinite sequences
 
