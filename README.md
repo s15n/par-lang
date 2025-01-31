@@ -42,6 +42,8 @@
     - [`begin`/`loop`](#beginloop)
       - [Application](#application-3)
       - [Construction](#construction-5)
+    - [`let`/`in`](#letin)
+    - [Commands in expressions with `do`/`in`](#commands-in-expressions-with-doin)
 
 ## Setting up
 
@@ -1345,3 +1347,54 @@ define program = chan user {
   user(color1)(color2)!
 }
 ```
+
+### `let`/`in`
+
+Assigning a variable to be used in an expression can be done this way:
+
+```
+let <name> = <expression1> in <expression2>
+```
+
+This is the standard syntax found in multiple languages.
+
+**In process syntax:**
+
+```
+chan result {
+  let <name> = <expression1>
+  result <> <expression2>
+}
+```
+
+### Commands in expressions with `do`/`in`
+
+Sometimes we found ourselves in expression syntax, needing to do an operation not suported there directly,
+such as receiving a value from an existing channel. In such cases, we can temporarily switch to process syntax
+and **add some commands to be executed before evaluating to an expression.**
+
+```
+do {
+  <process without an end>
+} in <expression>
+```
+
+The commands inside the curly braces cannot end the process.
+
+**In process syntax:**
+
+```
+chan result {
+  <process without an end>
+  result <> <expression>
+}
+```
+
+**Example:**
+
+```
+do {
+  numbers.next[x]
+} in .item(transform(x)) loop
+```
+
