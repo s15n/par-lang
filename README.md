@@ -1472,3 +1472,35 @@ define flatten_process_syntax = chan caller {
 
 ### Infinite sequences
 
+We've already had an example of an infinite sequence:
+
+```
+define red_forever = begin {
+  next  => (.red!) loop
+  close => !
+}
+```
+
+It's an object with two methods: `next` and `close`:
+
+- `next` produces a new item, and loops back to expecting `next` or `close`.
+- `close` deallocates the sequence, it must clean up its internal state.
+
+Let's make a function that zips two infinite sequences into an infinite sequence of pairs:
+
+```
+define zip_seqs = [seq1][seq2] begin {
+  close => do {
+    seq1.close?
+    seq2.close?
+  } in !
+
+  next => do {
+    seq1.next[x]
+    seq2.next[y]
+  } in ((x)(y)!) loop
+}
+```
+
+Here we make a good use of `do`/`in`, because the resulting sequence needs to poll and close the
+two sequences its made from.
