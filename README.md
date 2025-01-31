@@ -929,6 +929,9 @@ There are two main categories of expressions: **applications** and **constructio
 Now that we've fully covered process syntax, I think expressions are best explained by giving their equivalents
 in process syntax, together with some illuminating examples.
 
+> 📝 When trying out expression syntax, I highly recommend checking the compiled code. The compiled code
+> is in bare-bones process syntax, which can be very revealing about the meaning of various expressions.
+
 ### Sending values
 
 #### Application
@@ -1102,3 +1105,202 @@ let list =
 ```
 
 ### Receiving signals
+
+#### Application
+
+Receives a signal from `<expression>`, matches the correct branch, and evaluates to the expression after
+`=>`. It serves the same purpose as **pattern matching / case expressions** in other languages.
+
+Branches have a slightly different syntax than in processes. Both `[...]` and `?` are allowed, but in case
+the branch doesn't end with a `?` (closing the original value), we need to specify a name to assign the
+remainder of the value to.
+
+Received values, as well as the potential remainder of the original value can then be used in the result
+expression.
+
+```
+<expression> {
+  <signal1> <name> => <expression1>
+
+  <signal2>? => <expression2>
+
+  <signal3>[<param>] <name> =>
+    <expression3>
+}
+```
+
+**In process syntax:**
+
+```
+chan result {
+  let object = <expression>
+  object {
+    <signal1> => {
+      let <name> = object
+      result <> <expression1>
+    }
+
+    <signal2>? => {
+      result <> <expression2>
+    }
+
+    <signal3>[<param>] => {
+      let <name> = object
+      result <> <expression2>
+    }
+  }
+}
+```
+
+**Example:**
+
+```
+define unwrap_or_false = [optional] optional {
+  some value => value
+  none?      => false
+}
+```
+
+#### Construction
+
+Creates an object that awaits one of several signals, then becomes the expression after a matched branch.
+This is a concept **not really found in other languages,** as far as I'm aware. It's similar to constructing
+an anonymous object in JavaScript, but unlike JavaScript, only one of the methods can be invoked.
+
+All branches can, and must, use the same set variables captured from outside at construction.
+
+Branches only support receiving values with `[...]`. Closing is not allowed in branches as the object still
+has to become the expression after `=>`.
+
+```
+{
+  <signal1> => <expression1>
+
+  <signal2>[<param>] => <expression2>
+}
+```
+
+**In process syntax:**
+
+```
+chan result {
+  result {
+    <signal1> => {
+      result <> <expression1>
+    }
+
+    <signal2>[<param1>] => {
+      result <> <expression2>
+    }
+  }
+}
+```
+
+**Example:**
+
+```
+let choice = {
+  left  => true
+  right => false
+}
+
+let answer = choice.right  // answer = false
+```
+
+### `begin`/`loop`
+
+#### Application
+
+**Starts a recursion on `<expression>`,** using it as its _driver_. This is a way to recursively analyze a value
+and compute a result without falling back to process syntax. Useful for constructing recursive functions in
+pure expression syntax.
+
+The schema below includes an additional `<application>`, which hints at more applications (such as receiving
+signals) following `begin`. It's not technically required (a bare `<expression> begin` is valid syntax), however,
+the corresponding `loop` will only be in scope inside these additional applications.
+
+```
+<expression1> begin <application>
+```
+
+A loop point created by application syntax can only be invoked by a `loop` in application syntax.
+
+```
+<expression2> loop
+```
+
+**In process syntax:**
+
+```
+chan result {
+  let object = <expression1>
+  object begin
+  result <> object <application>
+}
+```
+
+```
+chan result {
+  let object = <expression2>
+  object loop
+}
+```
+
+**Example:**
+
+```
+define negate_list = [list] list begin {
+  empty? => .empty!
+  item[bool] rest =>
+    .item(not(bool)) rest loop
+}
+```
+
+#### Construction
+
+Creates an object recursing on its consumer. This is useful for constructing **corecursive objects,** such as
+**infinite streams,** or any other objects that can be indefinitely manipulated from outside.
+
+> 📝 Yes, corecursion is just recursion from the other side.
+
+```
+begin <expression>
+```
+
+A loop point created by construction syntax can only be invoked by a `loop` in construction syntax.
+
+```
+loop
+```
+
+**In process syntax:**
+
+```
+chan result {
+  result begin
+  result <> <expression>
+}
+```
+
+```
+chan result {
+  result loop
+}
+```
+
+**Example:**
+
+```
+define red_forever = begin {
+  next  => (.red!) loop
+  close => !
+}
+
+define program = chan user {
+  let reds = red_forever
+  reds.next[color1]  // color1 = .red!
+  reds.next[color2]  // color2 = .red!
+  reds.close?
+  user(color1)(color2)!
+}
+```
