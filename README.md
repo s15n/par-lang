@@ -75,7 +75,7 @@ The value of basing the language on linear logic is that it provides a powerful 
 
 First off, let's list some **general properties of Par:**
 
-- Code executes in **independent processes.**
+- Code executes in **sequential processes.**
 - Processes **communicate** with each other **via channels.**
 - Every channel has **two end-points, in two different processes.**
 - **Two processes share at most one channel.**
