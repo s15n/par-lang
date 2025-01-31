@@ -2,6 +2,47 @@
 
 ![Screenshot](screenshots/playground.png)
 
+## Table of Contents
+
+- [An experimental concurrent language with an interactive playground](#an-experimental-concurrent-language-with-an-interactive-playground)
+  - [Table of Contents](#table-of-contents)
+  - [Setting up](#setting-up)
+- [The Par language guide](#the-par-language-guide)
+  - [Getting started](#getting-started)
+  - [Program structure](#program-structure)
+  - [Process syntax](#process-syntax)
+    - [Channel spawning](#channel-spawning)
+    - [Let statement](#let-statement)
+    - [Closing channels](#closing-channels)
+    - [Linearity of channels](#linearity-of-channels)
+    - [Signaling](#signaling)
+      - [Pass](#pass)
+    - [Combining operations](#combining-operations)
+    - [Exchanging values](#exchanging-values)
+    - [Combining operations on branches](#combining-operations-on-branches)
+    - [Implementing functions](#implementing-functions)
+      - [Early sugar treat: function calling in expression syntax](#early-sugar-treat-function-calling-in-expression-syntax)
+    - [Linking](#linking)
+    - [Recursion, the usual way](#recursion-the-usual-way)
+    - [Recursion, a better way](#recursion-a-better-way)
+  - [Expression syntax](#expression-syntax)
+    - [Sending values](#sending-values)
+      - [Application](#application)
+      - [Construction](#construction)
+    - [Receiving values](#receiving-values)
+      - [Construction](#construction-1)
+    - [Closing with `!`](#closing-with-)
+      - [Construction](#construction-2)
+    - [Sending signals](#sending-signals)
+      - [Application](#application-1)
+      - [Construction](#construction-3)
+    - [Receiving signals](#receiving-signals)
+      - [Application](#application-2)
+      - [Construction](#construction-4)
+    - [`begin`/`loop`](#beginloop)
+      - [Application](#application-3)
+      - [Construction](#construction-5)
+
 ## Setting up
 
 If you don't have Rust and Cargo installed, [do that first](https://doc.rust-lang.org/cargo/getting-started/installation.html). Then clone this repository and execute
