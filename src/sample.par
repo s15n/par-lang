@@ -1,5 +1,3 @@
-define play = zip(listrgb)
-
 define listrgb =
   .item(.red!)
   .item(.green!)
@@ -23,6 +21,8 @@ define zip = [list][seq] list begin {
   } in .item((x)(y)!) xs loop
 }
 
+define zip_rgbs = zip(listrgb)
+
 define zip2 = [seq1][seq2] begin {
   close => do {
     seq1.close?
@@ -40,7 +40,91 @@ define concat = [left][right] left begin {
   item[x] xs => .item(x) xs loop
 }
 
-define flatten = [tree] tree begin {
-  leaf x      => .item(x).empty!
-  node[l][r]? => concat(l loop)(r loop)
+
+define tree_of_colors =
+  .node
+    (.node
+      (.empty!)
+      (.red!)
+      (.empty!)!)
+    (.green!)
+    (.node
+      (.node
+        (.empty!)
+        (.yellow!)
+        (.empty!)!)
+      (.blue!)
+      (.empty!)!)!
+
+define flatten_process_syntax = chan caller {
+  caller[tree]
+
+  let caller = chan return {
+    tree begin {
+      empty? => {
+        return <> caller
+      }
+
+      node[left][value][right]? => {
+        let caller = chan return { left loop }
+        caller.item(value)
+        let caller = chan return { right loop }
+        return <> caller
+      }
+    }
+  }
+
+  caller.empty!
 }
+
+define flatten = [tree] chan yield {
+  let yield = tree begin {
+    empty? => yield
+
+    node[left][value][right]? => do {
+      let yield = left loop
+      yield.item(value)
+    } in right loop
+  }
+
+  yield.empty!
+}
+
+define flattened = flatten(tree_of_colors)
+
+
+define true  = chan result { result.true! }
+define false = chan result { result.false! }
+
+define list_of_booleans = chan consumer {
+  consumer
+    .item(true)
+    .item(false)
+    .item(false)
+    .item(true)
+    .item(true)
+    .item(false)
+    .empty!
+}
+
+define reverse = chan caller {
+  caller[list]
+
+  let caller = chan return {
+    list begin {
+      empty? => {
+        return <> caller
+      }
+
+      item[value] => {
+        let caller = chan return { list loop }
+        caller.item(value)
+        return <> caller
+      }
+    }
+  }
+
+  caller.empty!
+}
+
+define reverse_bools = reverse(list_of_booleans)
