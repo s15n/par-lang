@@ -1405,7 +1405,7 @@ do {
 
 ### Flattening a tree
 
-Construct a binary tree of colors using construction expressions:
+We can construct a binary tree of colors using construction expressions:
 
 ```
 define tree_of_colors =
