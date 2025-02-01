@@ -2,6 +2,20 @@
 
 ![Screenshot](screenshots/playground.png)
 
+**Heads-up:**
+
+- 🦀 If you like this **concurrent paradigm,** and want to use it **in a real programming language,** check out
+  my Rust crate with the same name: **[Par](https://github.com/faiface/par).** It's a full implementation
+  of **session types,** including non-deterministic handling of many clients.
+
+- 💬 Use the [Discussions](https://github.com/faiface/par-lang/discussions) as a forum to ask questions and
+  discuss ideas!
+
+- 🫶 If you'd like to support my effort to bring the power of linear logic to practical programming, you can do
+  it via [GitHub Sponsors](https://github.com/sponsors/faiface).
+
+- 🧑‍💻 For a possible collaboration, reach me via e-mail in my [GitHub profile](https://github.com/faiface).
+
 ## Table of Contents
 
 - [An experimental concurrent language with an interactive playground](#an-experimental-concurrent-language-with-an-interactive-playground)
@@ -47,6 +61,7 @@
   - [Examples in _Full Syntax_](#examples-in-full-syntax)
     - [Flattening a tree](#flattening-a-tree)
     - [Infinite sequences](#infinite-sequences)
+  - [](#)
 
 ## Setting up
 
@@ -1504,3 +1519,5 @@ define zip_seqs = [seq1][seq2] begin {
 
 Here we make a good use of `do`/`in`, because the resulting sequence needs to poll and close the
 two sequences its made from.
+
+## 
