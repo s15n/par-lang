@@ -1526,7 +1526,7 @@ Par is a direct implementation of [linear logic](https://en.wikipedia.org/wiki/L
 operation corresponds to a proof-rule in its sequent calculus formulation. A future
 type system will have direct correspondence with propositions in linear logic.
 
-The language builds on the process language called CP from Phil Wadler's beautiful paper
+The language builds on a process language called CP from Phil Wadler's beautiful paper
 ["Propositions as Sessions"](https://homepages.inf.ed.ac.uk/wadler/papers/propositions-as-sessions/propositions-as-sessions.pdf).
 
 While Phil didn't intend CP to be a foundation of any practical programming language (instead putting his
