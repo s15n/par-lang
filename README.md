@@ -61,7 +61,7 @@
   - [Examples in _Full Syntax_](#examples-in-full-syntax)
     - [Flattening a tree](#flattening-a-tree)
     - [Infinite sequences](#infinite-sequences)
-  - [](#)
+  - [Theoretical background](#theoretical-background)
 
 ## Setting up
 
@@ -1520,4 +1520,17 @@ define zip_seqs = [seq1][seq2] begin {
 Here we make a good use of `do`/`in`, because the resulting sequence needs to poll and close the
 two sequences its made from.
 
-## 
+## Theoretical background
+
+Par is a direct implementation of [linear logic](https://en.wikipedia.org/wiki/Linear_logic). Every
+operation corresponds to a proof-rule in its sequent calculus formulation. A future
+type system will have direct correspondence with propositions in linear logic.
+
+The language builds on the process language called CP from Phil Wadler's beautiful paper
+["Propositions as Sessions"](https://homepages.inf.ed.ac.uk/wadler/papers/propositions-as-sessions/propositions-as-sessions.pdf).
+
+While Phil didn't intend CP to be a foundation of any practical programming language (instead putting his
+hopes on GV, a functional language in the same paper), I saw a big potential there.
+
+My contribution is reworking the syntax to be expression-friendly, making it more visually paletable,
+and adding the whole expression syntax that makes it into a practical language.
