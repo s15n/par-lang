@@ -116,7 +116,7 @@ Some features important for a real-world language are still **missing:**
   representations of numbers, booleans, lists, streams, and so on. Just like λ-calculus, but with channels
   and expressive concurrency.
 - **Replicable values.** But, once again, replication can be implemented manually, for now.
-- **Non-determinism.** This can't be implemented manually, but I alredy have a mechanism thought out.
+- **Non-determinism.** This can't be implemented manually, but I already have a mechanism thought out.
 
 One non-essential feature that I really hope will make it into the language later is **reactive values.**
 It's those that update automatically based on their dependencies changing.
