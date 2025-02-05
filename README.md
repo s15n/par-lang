@@ -9,7 +9,7 @@
   of **session types,** including non-deterministic handling of many clients.
 
 - 💬 Use the [Discussions](https://github.com/faiface/par-lang/discussions) as a forum to ask questions and
-  discuss ideas!
+  discuss ideas! Or join our [Discord](https://discord.gg/pxR8g6VHVB).
 
 - 🫶 If you'd like to support my effort to bring the power of linear logic to practical programming, you can do
   it via [GitHub Sponsors](https://github.com/sponsors/faiface).
