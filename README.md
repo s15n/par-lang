@@ -378,7 +378,7 @@ define program = chan user {
 
 <img src="screenshots/hello_world.png" alt="Hello, world!" width="300px">
 
-Awaiting a signal on a channel handled by the UI let's the user choose among the options via buttons.
+Awaiting a signal on a channel handled by the UI lets the user choose among the options via buttons.
 
 ```
 define program = chan user {
