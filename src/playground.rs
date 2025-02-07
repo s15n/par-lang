@@ -274,13 +274,13 @@ impl Playground {
                                         ui,
                                         Interact {
                                             code: Arc::clone(&int.code),
-                                            handle: Arc::clone(argument),
+                                            handle: Arc::clone(&argument),
                                         },
                                     );
                                 }
 
                                 Event::Receive(_, parameter) => {
-                                    to_the_side.push(Arc::clone(parameter))
+                                    to_the_side.push(Arc::clone(&parameter))
                                 }
 
                                 Event::Choose(_, chosen) => {
