@@ -2,7 +2,7 @@ use std::{fmt::Display, hash::Hash, sync::Arc};
 
 use indexmap::IndexMap;
 
-use crate::process::{self, Captures};
+use super::process::{self, Captures};
 
 #[derive(Clone, Debug)]
 pub enum Expression<Loc, Name> {

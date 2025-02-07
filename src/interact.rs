@@ -1,6 +1,6 @@
 use crate::{
-    process::Expression,
-    runtime::{self, Context, Message, Value},
+    par::process::Expression,
+    par::runtime::{self, Context, Message, Value},
 };
 use futures::{channel::oneshot, task::SpawnExt};
 use std::{

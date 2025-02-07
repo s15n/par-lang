@@ -5,7 +5,7 @@ use futures::{
 use indexmap::IndexMap;
 use std::{hash::Hash, sync::Arc};
 
-use crate::process::{Captures, Command, Expression, Process};
+use super::process::{Captures, Command, Expression, Process};
 
 #[derive(Clone, Debug)]
 pub enum Error<Loc, Name> {

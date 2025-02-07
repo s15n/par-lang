@@ -10,10 +10,10 @@ use indexmap::IndexMap;
 
 use crate::{
     interact::{Event, Handle, Request},
-    language::{CompileError, Internal},
-    parse::{parse_program, Loc, Name, ParseError},
-    process::Expression,
-    runtime::{self, Context, Operation},
+    par::language::{CompileError, Internal},
+    par::parse::{parse_program, Loc, Name, ParseError},
+    par::process::Expression,
+    par::runtime::{self, Context, Operation},
     spawn::TokioSpawn,
 };
 

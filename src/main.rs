@@ -2,11 +2,8 @@ use eframe::egui;
 use playground::Playground;
 
 mod interact;
-mod language;
-mod parse;
+mod par;
 mod playground;
-mod process;
-mod runtime;
 mod spawn;
 
 #[tokio::main]

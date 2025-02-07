@@ -8,13 +8,13 @@ use pest::{
 };
 use pest_derive::Parser;
 
-use crate::language::{
+use super::language::{
     Apply, ApplyBranch, ApplyBranches, Command, CommandBranch, CommandBranches, Construct,
     ConstructBranch, ConstructBranches, Expression, Process,
 };
 
 #[derive(Parser)]
-#[grammar = "par.pest"]
+#[grammar = "par/syntax.pest"]
 pub struct Par;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
