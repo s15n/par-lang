@@ -257,7 +257,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Construct<Loc, Name> {
                 Arc::new(process::Process::Do(
                     loc.clone(),
                     Internal::Result(None),
-                    process::Command::Either(branches, processes),
+                    process::Command::Match(branches, processes),
                 ))
             }
 
@@ -352,7 +352,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Apply<Loc, Name> {
                 Arc::new(process::Process::Do(
                     loc.clone(),
                     Internal::Object(None),
-                    process::Command::Either(branches, processes),
+                    process::Command::Match(branches, processes),
                 ))
             }
 
@@ -525,7 +525,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
                 Arc::new(process::Process::Do(
                     loc.clone(),
                     object_internal,
-                    process::Command::Either(branches, processes),
+                    process::Command::Match(branches, processes),
                 ))
             }
 

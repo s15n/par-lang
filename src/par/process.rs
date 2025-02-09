@@ -17,7 +17,7 @@ pub enum Command<Loc, Name> {
     Send(Arc<Expression<Loc, Name>>, Arc<Process<Loc, Name>>),
     Receive(Name, Arc<Process<Loc, Name>>),
     Choose(Name, Arc<Process<Loc, Name>>),
-    Either(Arc<[Name]>, Box<[Arc<Process<Loc, Name>>]>),
+    Match(Arc<[Name]>, Box<[Arc<Process<Loc, Name>>]>),
     Break,
     Continue(Arc<Process<Loc, Name>>),
     Begin(Option<Name>, Arc<Process<Loc, Name>>),
@@ -148,12 +148,12 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Process<Loc, Name> {
                         Command::Choose(chosen.clone(), Arc::new(process)),
                     )
                 }
-                Command::Either(branches, processes) => {
+                Command::Match(branches, processes) => {
                     let processes = processes.iter().map(|p| Arc::new(p.optimize())).collect();
                     Self::Do(
                         loc.clone(),
                         name.clone(),
-                        Command::Either(Arc::clone(branches), processes),
+                        Command::Match(Arc::clone(branches), processes),
                     )
                 }
                 Command::Break => Self::Do(loc.clone(), name.clone(), Command::Break),
@@ -206,7 +206,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
                 let (process, caps) = process.fix_captures(loop_points);
                 (Self::Choose(chosen.clone(), Arc::new(process)), caps)
             }
-            Self::Either(branches, processes) => {
+            Self::Match(branches, processes) => {
                 let mut fixed_processes = Vec::new();
                 let mut caps = Captures::new();
                 for process in processes {
@@ -215,7 +215,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
                     caps.extend(caps1);
                 }
                 (
-                    Self::Either(branches.clone(), fixed_processes.into_boxed_slice()),
+                    Self::Match(branches.clone(), fixed_processes.into_boxed_slice()),
                     caps,
                 )
             }
@@ -318,7 +318,7 @@ impl<Loc, Name: Display> Process<Loc, Name> {
                         process.pretty(f, indent)
                     }
 
-                    Command::Either(choices, branches) => {
+                    Command::Match(choices, branches) => {
                         write!(f, " {{")?;
                         for (choice, process) in choices.iter().zip(branches.iter()) {
                             indentation(f, indent + 1)?;
