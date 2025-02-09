@@ -10,6 +10,7 @@ use super::process::{Captures, Command, Expression, Process};
 #[derive(Clone, Debug)]
 pub enum Error<Loc, Name> {
     NameNotDefined(Loc, Name),
+    ShadowedObligation(Loc, Name),
     UnfulfilledObligations(Loc, Vec<Name>),
     IncompatibleOperations(Operation<Loc, Name>, Operation<Loc, Name>),
     NoSuchLoopPoint(Loc, Option<Name>),
@@ -92,7 +93,7 @@ pub enum Value<Loc, Name> {
 pub struct Context<Loc, Name> {
     spawner: Arc<dyn Spawn + Send + Sync>,
     globals: Arc<IndexMap<Name, Arc<Expression<Loc, Name>>>>,
-    variables: IndexMap<Name, Vec<Value<Loc, Name>>>,
+    variables: IndexMap<Name, Value<Loc, Name>>,
     loop_points: IndexMap<Option<Name>, (Name, Arc<Process<Loc, Name>>)>,
 }
 
@@ -127,7 +128,7 @@ where
     }
 
     pub fn get_variable(&mut self, name: &Name) -> Option<Value<Loc, Name>> {
-        self.variables.entry(name.clone()).or_default().pop()
+        self.variables.shift_remove(name)
     }
 
     pub fn get(&mut self, loc: &Loc, name: &Name) -> Result<Value<Loc, Name>, Error<Loc, Name>> {
@@ -140,8 +141,17 @@ where
         }
     }
 
-    pub fn put(&mut self, name: Name, value: Value<Loc, Name>) {
-        self.variables.entry(name).or_default().push(value);
+    pub fn put(
+        &mut self,
+        loc: &Loc,
+        name: Name,
+        value: Value<Loc, Name>,
+    ) -> Result<(), Error<Loc, Name>> {
+        if let Some(value) = self.variables.shift_remove(&name) {
+            return self.throw([value], Error::ShadowedObligation(loc.clone(), name));
+        }
+        self.variables.insert(name, value);
+        Ok(())
     }
 
     pub fn capture(
@@ -149,20 +159,18 @@ where
         cap: &Captures<Loc, Name>,
         target: &mut Self,
     ) -> Result<(), Error<Loc, Name>> {
-        for (name, _) in &cap.names {
+        for (name, loc) in &cap.names {
             let value = match self.get_variable(name) {
                 Some(value) => value,
                 None => continue,
             };
-            target.put(name.clone(), value);
+            target.put(loc, name.clone(), value)?;
         }
         Ok(())
     }
 
     pub fn obligations(&self) -> impl Iterator<Item = &Name> {
-        self.variables
-            .iter()
-            .flat_map(|(name, instances)| instances.iter().map(move |_| name))
+        self.variables.iter().map(|(name, _)| name)
     }
 
     pub fn evaluate(
@@ -172,12 +180,12 @@ where
         match expression {
             Expression::Reference(loc, name) => self.get(loc, name),
 
-            Expression::Fork(_, cap, channel, process) => {
+            Expression::Fork(loc, cap, channel, process) => {
                 let mut context = self.split();
                 self.capture(cap, &mut context)?;
 
                 let (tx, rx) = oneshot::channel();
-                context.put(channel.clone(), Value::Sender(tx));
+                context.put(loc, channel.clone(), Value::Sender(tx))?;
 
                 let process = Arc::clone(process);
                 self.spawner
@@ -195,9 +203,9 @@ where
         let mut current_process = process;
         loop {
             match current_process.as_ref() {
-                Process::Let(_, name, expression, process) => {
+                Process::Let(loc, name, expression, process) => {
                     let value = self.evaluate(expression)?;
-                    self.put(name.clone(), value);
+                    self.put(loc, name.clone(), value)?;
                     current_process = Arc::clone(process);
                 }
 
@@ -219,25 +227,25 @@ where
                                 Err(error) => return self.throw([object], error),
                             };
                             let object = self.send_to(loc.clone(), object, argument).await?;
-                            self.put(object_name.clone(), object);
+                            self.put(loc, object_name.clone(), object)?;
                             current_process = Arc::clone(process);
                         }
 
                         Command::Receive(parameter, process) => {
                             let (argument, object) = self.receive_from(loc.clone(), object).await?;
-                            self.put(object_name.clone(), object);
-                            self.put(parameter.clone(), argument);
+                            self.put(loc, object_name.clone(), object)?;
+                            self.put(loc, parameter.clone(), argument)?;
                             current_process = Arc::clone(process);
                         }
 
                         Command::Choose(chosen, process) => {
                             let object =
                                 self.choose_in(loc.clone(), object, chosen.clone()).await?;
-                            self.put(object_name.clone(), object);
+                            self.put(loc, object_name.clone(), object)?;
                             current_process = Arc::clone(process);
                         }
 
-                        Command::Either(choices, processes) => {
+                        Command::Match(choices, processes) => {
                             let (loc1, chosen, object) = self
                                 .either_of(loc.clone(), object, Arc::clone(choices))
                                 .await?;
@@ -253,7 +261,7 @@ where
                                     )
                                 }
                             };
-                            self.put(object_name.clone(), object);
+                            self.put(loc, object_name.clone(), object)?;
                             current_process = Arc::clone(&processes[index]);
                         }
 
@@ -269,7 +277,7 @@ where
                         Command::Begin(point, process) => {
                             self.loop_points
                                 .insert(point.clone(), (object_name.clone(), Arc::clone(process)));
-                            self.put(object_name.clone(), object);
+                            self.put(loc, object_name.clone(), object)?;
                             current_process = Arc::clone(process);
                         }
 
@@ -282,7 +290,7 @@ where
                             };
                             let name = name.clone();
                             let process = Arc::clone(process);
-                            self.put(name, object);
+                            self.put(loc, name, object)?;
                             current_process = process;
                         }
                     }
@@ -542,7 +550,7 @@ where
         let mut pending = self
             .variables
             .drain(..)
-            .flat_map(|(_, value)| value)
+            .map(|(_, value)| value)
             .collect::<Vec<_>>();
         pending.extend(values);
 

@@ -422,9 +422,16 @@ impl Error {
                     name
                 )
             }
+            ShadowedObligation(loc, name) => {
+                format!(
+                    "{}\nCannot re-assign `{}` before handling it.",
+                    Self::display_loc(code, loc),
+                    name
+                )
+            }
             UnfulfilledObligations(loc, names) => {
                 format!(
-                    "{}\nCannot end this process without handling {}.",
+                    "{}\nCannot end this process before handling {}.",
                     Self::display_loc(code, loc),
                     names
                         .iter()
