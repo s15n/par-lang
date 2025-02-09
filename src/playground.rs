@@ -491,7 +491,7 @@ impl Error {
                     chosen,
                 )
             }
-            Operation::Either(loc, choices) => {
+            Operation::Match(loc, choices) => {
                 format!(
                     "{}\nThis side is offering either of {}.",
                     Self::display_loc(code, loc),

@@ -168,7 +168,7 @@ where
                             value = Value::Sender(tx2);
                         }
 
-                        Message::Swap(runtime::Request::Either(loc, choices), tx) => {
+                        Message::Swap(runtime::Request::Match(loc, choices), tx) => {
                             handle.request_interaction(
                                 context,
                                 Value::Sender(tx),

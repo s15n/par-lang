@@ -23,7 +23,7 @@ pub enum Operation<Loc, Name> {
     Send(Loc),
     Receive(Loc),
     Choose(Loc, Name),
-    Either(Loc, Arc<[Name]>),
+    Match(Loc, Arc<[Name]>),
     Break(Loc),
     Continue(Loc),
 }
@@ -57,7 +57,7 @@ impl<Loc, Name> Message<Loc, Name> {
 #[derive(Clone, Debug)]
 pub enum Request<Loc, Name> {
     Receive(Loc),
-    Either(Loc, Arc<[Name]>),
+    Match(Loc, Arc<[Name]>),
     Continue(Loc),
     Dynamic(Loc),
 }
@@ -66,7 +66,7 @@ impl<Loc, Name> Request<Loc, Name> {
     pub fn into_operation(self) -> Operation<Loc, Name> {
         match self {
             Request::Receive(loc) => Operation::Receive(loc),
-            Request::Either(loc, choices) => Operation::Either(loc, choices),
+            Request::Match(loc, choices) => Operation::Match(loc, choices),
             Request::Continue(loc) => Operation::Continue(loc),
             Request::Dynamic(loc) => Operation::Unknown(loc),
         }
@@ -78,7 +78,7 @@ impl<Loc, Name> Request<Loc, Name> {
         match (self, other) {
             (Self::Dynamic(_), _) | (_, Self::Dynamic(_)) => true,
             (Self::Receive(_), Self::Receive(_)) => true,
-            (Self::Either(_, _), Self::Either(_, _)) => true,
+            (Self::Match(_, _), Self::Match(_, _)) => true,
             (Self::Continue(_), Self::Continue(_)) => true,
             (_, _) => false,
         }
@@ -256,7 +256,7 @@ where
                                         [object],
                                         Error::IncompatibleOperations(
                                             Operation::Choose(loc1, chosen),
-                                            Operation::Either(loc.clone(), Arc::clone(choices)),
+                                            Operation::Match(loc.clone(), Arc::clone(choices)),
                                         ),
                                     )
                                 }
@@ -395,7 +395,7 @@ where
         object: Value<Loc, Name>,
         choices: Arc<[Name]>,
     ) -> Result<(Loc, Name, Value<Loc, Name>), Error<Loc, Name>> {
-        let request = Request::Either(loc.clone(), Arc::clone(&choices));
+        let request = Request::Match(loc.clone(), Arc::clone(&choices));
         let mut rx = match object {
             Value::Receiver(rx) => rx,
             Value::Sender(tx) => self.swap(request.clone(), tx),
@@ -494,14 +494,14 @@ where
     ) -> Result<oneshot::Sender<Message<Loc, Name>>, Error<Loc, Name>> {
         match rx.await.ok().expect("sender dropped") {
             Message::Swap(Request::Dynamic(_), tx) => Ok(tx),
-            Message::Swap(Request::Either(_, choices), tx)
+            Message::Swap(Request::Match(_, choices), tx)
                 if choices.iter().any(|c| c == chosen) =>
             {
                 Ok(tx)
             }
             message => self.invalid_message_and_request(
                 message,
-                Request::Either(loc, Arc::new([chosen.clone()])),
+                Request::Match(loc, Arc::new([chosen.clone()])),
             ),
         }
     }
