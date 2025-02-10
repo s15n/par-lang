@@ -8,24 +8,24 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-pub struct Handle<Loc, Name> {
+pub struct Handle<Loc, Name, Typ> {
     refresh: Arc<dyn Fn() + Send + Sync>,
-    events: Vec<Event<Loc, Name>>,
-    interaction: Option<Result<Interaction<Loc, Name>, runtime::Error<Loc, Name>>>,
+    events: Vec<Event<Loc, Name, Typ>>,
+    interaction: Option<Result<Interaction<Loc, Name, Typ>, runtime::Error<Loc, Name>>>,
     cancelled: bool,
 }
 
-pub enum Event<Loc, Name> {
-    Send(Loc, Arc<Mutex<Handle<Loc, Name>>>),
-    Receive(Loc, Arc<Mutex<Handle<Loc, Name>>>),
+pub enum Event<Loc, Name, Typ> {
+    Send(Loc, Arc<Mutex<Handle<Loc, Name, Typ>>>),
+    Receive(Loc, Arc<Mutex<Handle<Loc, Name, Typ>>>),
     Choose(Loc, Name),
     Either(Loc, Name),
     Break(Loc),
     Continue(Loc),
 }
 
-struct Interaction<Loc, Name> {
-    context: Context<Loc, Name>,
+struct Interaction<Loc, Name, Typ> {
+    context: Context<Loc, Name, Typ>,
     value: Value<Loc, Name>,
     request: Request<Loc, Name>,
 }
@@ -36,12 +36,13 @@ pub enum Request<Loc, Name> {
     Either(Loc, Arc<[Name]>),
 }
 
-impl<Loc, Name> Handle<Loc, Name>
+impl<Loc, Name, Typ> Handle<Loc, Name, Typ>
 where
     Loc: Default + Clone + Eq + Hash + Send + Sync + 'static,
     Name: Clone + Eq + Hash + Send + Sync + 'static,
+    Typ: Send + Sync + 'static,
 {
-    pub fn events(&self) -> &[Event<Loc, Name>] {
+    pub fn events(&self) -> &[Event<Loc, Name, Typ>] {
         &self.events
     }
 
@@ -86,8 +87,8 @@ where
 
     pub fn start_expression(
         refresh: Arc<dyn Fn() + Send + Sync>,
-        context: Context<Loc, Name>,
-        expression: &Expression<Loc, Name>,
+        context: Context<Loc, Name, Typ>,
+        expression: &Expression<Loc, Name, Typ>,
     ) -> Arc<Mutex<Self>> {
         let mut context = context;
         match context.evaluate(expression) {
@@ -103,7 +104,7 @@ where
 
     pub fn start(
         refresh: Arc<dyn Fn() + Send + Sync>,
-        context: Context<Loc, Name>,
+        context: Context<Loc, Name, Typ>,
         value: Value<Loc, Name>,
     ) -> Arc<Mutex<Self>> {
         let handle = Arc::new(Mutex::new(Self {
@@ -123,7 +124,7 @@ where
 
     async fn run(
         handle: Arc<Mutex<Self>>,
-        mut context: Context<Loc, Name>,
+        mut context: Context<Loc, Name, Typ>,
         mut value: Value<Loc, Name>,
     ) {
         let mut consecutive_dynamic: usize = 0;
@@ -221,14 +222,14 @@ where
         }
     }
 
-    fn add_event(&mut self, event: Event<Loc, Name>) {
+    fn add_event(&mut self, event: Event<Loc, Name, Typ>) {
         self.events.push(event);
         (self.refresh)();
     }
 
     fn request_interaction(
         &mut self,
-        mut context: Context<Loc, Name>,
+        mut context: Context<Loc, Name, Typ>,
         value: Value<Loc, Name>,
         request: Request<Loc, Name>,
     ) {

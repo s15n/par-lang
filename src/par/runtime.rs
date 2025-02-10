@@ -90,21 +90,22 @@ pub enum Value<Loc, Name> {
     Sender(oneshot::Sender<Message<Loc, Name>>),
 }
 
-pub struct Context<Loc, Name> {
+pub struct Context<Loc, Name, Typ> {
     spawner: Arc<dyn Spawn + Send + Sync>,
-    globals: Arc<IndexMap<Name, Arc<Expression<Loc, Name>>>>,
+    globals: Arc<IndexMap<Name, Arc<Expression<Loc, Name, Typ>>>>,
     variables: IndexMap<Name, Value<Loc, Name>>,
-    loop_points: IndexMap<Option<Name>, (Name, Arc<Process<Loc, Name>>)>,
+    loop_points: IndexMap<Option<Name>, (Name, Arc<Process<Loc, Name, Typ>>)>,
 }
 
-impl<Loc, Name> Context<Loc, Name>
+impl<Loc, Name, Typ> Context<Loc, Name, Typ>
 where
     Loc: Clone + Eq + Hash + Send + Sync + 'static,
     Name: Clone + Eq + Hash + Send + Sync + 'static,
+    Typ: Send + Sync + 'static,
 {
     pub fn new(
         spawner: Arc<dyn Spawn + Send + Sync>,
-        globals: Arc<IndexMap<Name, Arc<Expression<Loc, Name>>>>,
+        globals: Arc<IndexMap<Name, Arc<Expression<Loc, Name, Typ>>>>,
     ) -> Self {
         Self {
             spawner,
@@ -175,12 +176,12 @@ where
 
     pub fn evaluate(
         &mut self,
-        expression: &Expression<Loc, Name>,
+        expression: &Expression<Loc, Name, Typ>,
     ) -> Result<Value<Loc, Name>, Error<Loc, Name>> {
         match expression {
-            Expression::Reference(loc, name) => self.get(loc, name),
+            Expression::Reference(loc, name, _) => self.get(loc, name),
 
-            Expression::Fork(loc, cap, channel, process) => {
+            Expression::Fork(loc, cap, channel, _, process) => {
                 let mut context = self.split();
                 self.capture(cap, &mut context)?;
 
@@ -199,17 +200,20 @@ where
         }
     }
 
-    pub async fn run(&mut self, process: Arc<Process<Loc, Name>>) -> Result<(), Error<Loc, Name>> {
+    pub async fn run(
+        &mut self,
+        process: Arc<Process<Loc, Name, Typ>>,
+    ) -> Result<(), Error<Loc, Name>> {
         let mut current_process = process;
         loop {
             match current_process.as_ref() {
-                Process::Let(loc, name, expression, process) => {
+                Process::Let(loc, name, _, expression, process) => {
                     let value = self.evaluate(expression)?;
                     self.put(loc, name.clone(), value)?;
                     current_process = Arc::clone(process);
                 }
 
-                Process::Do(loc, object_name, command) => {
+                Process::Do(loc, object_name, _, command) => {
                     let object = self.get(loc, object_name)?;
 
                     match command {

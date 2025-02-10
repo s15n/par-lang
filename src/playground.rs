@@ -10,10 +10,13 @@ use indexmap::IndexMap;
 
 use crate::{
     interact::{Event, Handle, Request},
-    par::language::{CompileError, Internal},
-    par::parse::{parse_program, Loc, Name, ParseError},
-    par::process::Expression,
-    par::runtime::{self, Context, Operation},
+    par::{
+        language::{CompileError, Internal},
+        parse::{parse_program, Loc, Name, ParseError},
+        process::Expression,
+        runtime::{self, Context, Operation},
+        types::Type,
+    },
     spawn::TokioSpawn,
 };
 
@@ -35,14 +38,19 @@ enum Error {
 #[derive(Clone)]
 struct Compiled {
     code: Arc<str>,
-    globals: Result<Arc<IndexMap<Internal<Name>, Arc<Expression<Loc, Internal<Name>>>>>, Error>,
+    globals: Result<
+        Arc<
+            IndexMap<Internal<Name>, Arc<Expression<Loc, Internal<Name>, Option<Type<Loc, Name>>>>>,
+        >,
+        Error,
+    >,
     pretty: Option<String>,
 }
 
 #[derive(Clone)]
 struct Interact {
     code: Arc<str>,
-    handle: Arc<Mutex<Handle<Loc, Internal<Name>>>>,
+    handle: Arc<Mutex<Handle<Loc, Internal<Name>, Option<Type<Loc, Name>>>>>,
 }
 
 impl Playground {
@@ -129,12 +137,7 @@ impl Playground {
                                     def.compile().map(|compiled| {
                                         (
                                             Internal::Original(name.clone()),
-                                            Arc::new(
-                                                compiled
-                                                    .optimize()
-                                                    .fix_captures(&IndexMap::new())
-                                                    .0,
-                                            ),
+                                            compiled.optimize().fix_captures(&IndexMap::new()).0,
                                         )
                                     })
                                 })
