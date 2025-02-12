@@ -8,13 +8,17 @@ name = @{ !(keyword ~ !("_" | ASCII_ALPHANUMERIC)) ~ (ASCII_ALPHA ~ ("_" | ASCII
 program     = { SOI ~ definition* ~ EOI }
 definition  = { "define" ~ name ~ "=" ~ expression }
 
-typ          = { typ_send | typ_receive | typ_either | typ_choice | typ_break | typ_continue }
-typ_send     = { "(" ~ typ ~ ")" ~ typ }
-typ_receive  = { "[" ~ typ ~ "]" ~ typ }
-typ_either   = { "either" ~ "{" ~ ("." ~ name ~ typ)* ~ "}" }
-typ_choice   = { "{" ~ (name ~ "=>" ~ typ)* ~ "}" }
-typ_break    = { "!" }
-typ_continue = { "?" }
+typ           = { typ_send | typ_receive | typ_either | typ_choice | typ_break | typ_continue | typ_recursive | typ_iterative | typ_self | typ_loop }
+typ_send      = { "(" ~ typ ~ ")" ~ typ }
+typ_receive   = { "[" ~ typ ~ "]" ~ typ }
+typ_either    = { "either" ~ "{" ~ ("." ~ name ~ typ)* ~ "}" }
+typ_choice    = { "{" ~ (name ~ "=>" ~ typ)* ~ "}" }
+typ_break     = { "!" }
+typ_continue  = { "?" }
+typ_recursive = { "recursive" ~ loop_label ~ typ }
+typ_iterative = { "iterative" ~ loop_label ~ typ }
+typ_self      = { "self" ~ loop_label }
+typ_loop      = { "loop" ~ loop_label }
 
 annotation = { (":" ~ typ)? }
 

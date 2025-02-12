@@ -149,12 +149,12 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Expression<Loc, Name> {
                     loc.clone(),
                     Captures::new(),
                     Internal::Result(None),
-                    original(annotation),
+                    None,
                     (),
                     Arc::new(process::Process::Let(
                         loc.clone(),
                         Internal::Original(name.clone()),
-                        None,
+                        original(annotation),
                         (),
                         expression,
                         Arc::new(process::Process::Do(

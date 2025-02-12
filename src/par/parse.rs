@@ -143,6 +143,32 @@ fn parse_type(pairs: &mut Pairs<'_, Rule>) -> Result<Type<Loc, Name>, ParseError
         Rule::typ_break => Ok(Type::Break(loc)),
         Rule::typ_continue => Ok(Type::Continue(loc)),
 
+        Rule::typ_recursive => {
+            let mut pairs = pair.into_inner();
+            let label = parse_loop_label(&mut pairs)?;
+            let body = parse_type(&mut pairs)?;
+            Ok(Type::Recursive(loc, label, Box::new(body)))
+        }
+
+        Rule::typ_iterative => {
+            let mut pairs = pair.into_inner();
+            let label = parse_loop_label(&mut pairs)?;
+            let body = parse_type(&mut pairs)?;
+            Ok(Type::Iterative(loc, label, Box::new(body)))
+        }
+
+        Rule::typ_self => {
+            let mut pairs = pair.into_inner();
+            let label = parse_loop_label(&mut pairs)?;
+            Ok(Type::Self_(loc, label))
+        }
+
+        Rule::typ_loop => {
+            let mut pairs = pair.into_inner();
+            let label = parse_loop_label(&mut pairs)?;
+            Ok(Type::Loop(loc, label))
+        }
+
         _ => unreachable!(),
     }
 }
