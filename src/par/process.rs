@@ -5,10 +5,20 @@ use std::{
     sync::Arc,
 };
 
+use super::types::Type;
+
 #[derive(Clone, Debug)]
 pub enum Process<Loc, Name, Typ> {
-    Let(Loc, Name, Typ, Arc<Expression<Loc, Name, Typ>>, Arc<Self>),
+    Let(
+        Loc,
+        Name,
+        Option<Type<Loc, Name>>,
+        Typ,
+        Arc<Expression<Loc, Name, Typ>>,
+        Arc<Self>,
+    ),
     Do(Loc, Name, Typ, Command<Loc, Name, Typ>),
+    Telltypes(Loc),
 }
 
 #[derive(Clone, Debug)]
@@ -18,7 +28,7 @@ pub enum Command<Loc, Name, Typ> {
         Arc<Expression<Loc, Name, Typ>>,
         Arc<Process<Loc, Name, Typ>>,
     ),
-    Receive(Name, Arc<Process<Loc, Name, Typ>>),
+    Receive(Name, Option<Type<Loc, Name>>, Arc<Process<Loc, Name, Typ>>),
     Choose(Name, Arc<Process<Loc, Name, Typ>>),
     Match(Arc<[Name]>, Box<[Arc<Process<Loc, Name, Typ>>]>),
     Break,
@@ -34,6 +44,7 @@ pub enum Expression<Loc, Name, Typ> {
         Loc,
         Captures<Loc, Name>,
         Name,
+        Option<Type<Loc, Name>>,
         Typ,
         Arc<Process<Loc, Name, Typ>>,
     ),
@@ -86,7 +97,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Process<Loc, Name, Typ> {
         loop_points: &IndexMap<Option<Name>, Captures<Loc, Name>>,
     ) -> (Arc<Self>, Captures<Loc, Name>) {
         match self {
-            Self::Let(loc, name, typ, expression, process) => {
+            Self::Let(loc, name, annotation, typ, expression, process) => {
                 let (process, mut caps) = process.fix_captures(loop_points);
                 caps.remove(name);
                 let (expression, caps1) = expression.fix_captures(loop_points);
@@ -95,6 +106,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Process<Loc, Name, Typ> {
                     Arc::new(Self::Let(
                         loc.clone(),
                         name.clone(),
+                        annotation.clone(),
                         typ.clone(),
                         expression,
                         process,
@@ -110,14 +122,16 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Process<Loc, Name, Typ> {
                     caps,
                 )
             }
+            Self::Telltypes(loc) => (Arc::new(Self::Telltypes(loc.clone())), Captures::new()),
         }
     }
 
     pub fn optimize(&self) -> Arc<Self> {
         match self {
-            Self::Let(loc, name, typ, expression, process) => Arc::new(Self::Let(
+            Self::Let(loc, name, annotation, typ, expression, process) => Arc::new(Self::Let(
                 loc.clone(),
                 name.clone(),
+                annotation.clone(),
                 typ.clone(),
                 expression.optimize(),
                 process.optimize(),
@@ -130,7 +144,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Process<Loc, Name, Typ> {
                     Command::Link(expression) => {
                         let expression = expression.optimize();
                         match expression.optimize().as_ref() {
-                            Expression::Fork(_, _, channel, _, process) if name == channel => {
+                            Expression::Fork(_, _, channel, _, _, process) if name == channel => {
                                 return Arc::clone(&process)
                             }
                             _ => Command::Link(expression),
@@ -139,8 +153,8 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Process<Loc, Name, Typ> {
                     Command::Send(argument, process) => {
                         Command::Send(argument.optimize(), process.optimize())
                     }
-                    Command::Receive(parameter, process) => {
-                        Command::Receive(parameter.clone(), process.optimize())
+                    Command::Receive(parameter, annotation, process) => {
+                        Command::Receive(parameter.clone(), annotation.clone(), process.optimize())
                     }
                     Command::Choose(chosen, process) => {
                         Command::Choose(chosen.clone(), process.optimize())
@@ -157,6 +171,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Process<Loc, Name, Typ> {
                     Command::Loop(label) => Command::Loop(label.clone()),
                 },
             )),
+            Self::Telltypes(loc) => Arc::new(Self::Telltypes(loc.clone())),
         }
     }
 }
@@ -177,10 +192,13 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Command<Loc, Name, Typ> {
                 caps.extend(caps1);
                 (Self::Send(argument, process), caps)
             }
-            Self::Receive(parameter, process) => {
+            Self::Receive(parameter, annotation, process) => {
                 let (process, mut caps) = process.fix_captures(loop_points);
                 caps.remove(parameter);
-                (Self::Receive(parameter.clone(), process), caps)
+                (
+                    Self::Receive(parameter.clone(), annotation.clone(), process),
+                    caps,
+                )
             }
             Self::Choose(chosen, process) => {
                 let (process, caps) = process.fix_captures(loop_points);
@@ -229,7 +247,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Expression<Loc, Name, Typ>
                 Arc::new(Self::Reference(loc.clone(), name.clone(), typ.clone())),
                 Captures::single(name.clone(), loc.clone()),
             ),
-            Self::Fork(loc, _, channel, typ, process) => {
+            Self::Fork(loc, _, channel, annotation, typ, process) => {
                 let (process, mut caps) = process.fix_captures(loop_points);
                 caps.remove(channel);
                 (
@@ -237,6 +255,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Expression<Loc, Name, Typ>
                         loc.clone(),
                         caps.clone(),
                         channel.clone(),
+                        annotation.clone(),
                         typ.clone(),
                         process,
                     )),
@@ -251,10 +270,11 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Expression<Loc, Name, Typ>
             Self::Reference(loc, name, typ) => {
                 Arc::new(Self::Reference(loc.clone(), name.clone(), typ.clone()))
             }
-            Self::Fork(loc, captures, channel, typ, process) => Arc::new(Self::Fork(
+            Self::Fork(loc, captures, channel, annotation, typ, process) => Arc::new(Self::Fork(
                 loc.clone(),
                 captures.clone(),
                 channel.clone(),
+                annotation.clone(),
                 typ.clone(),
                 process.optimize(),
             )),
@@ -265,7 +285,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Expression<Loc, Name, Typ>
 impl<Loc, Name: Display, Typ> Process<Loc, Name, Typ> {
     pub fn pretty(&self, f: &mut impl Write, indent: usize) -> fmt::Result {
         match self {
-            Self::Let(_, name, _, expression, process) => {
+            Self::Let(_, name, _, _, expression, process) => {
                 indentation(f, indent)?;
                 write!(f, "let {} = ", name)?;
                 expression.pretty(f, indent)?;
@@ -289,7 +309,7 @@ impl<Loc, Name: Display, Typ> Process<Loc, Name, Typ> {
                         process.pretty(f, indent)
                     }
 
-                    Command::Receive(parameter, process) => {
+                    Command::Receive(parameter, _, process) => {
                         write!(f, "[{}]", parameter)?;
                         process.pretty(f, indent)
                     }
@@ -338,6 +358,11 @@ impl<Loc, Name: Display, Typ> Process<Loc, Name, Typ> {
                     }
                 }
             }
+
+            Self::Telltypes(_) => {
+                indentation(f, indent)?;
+                write!(f, "telltypes")
+            }
         }
     }
 }
@@ -349,7 +374,7 @@ impl<Loc, Name: Display, Typ> Expression<Loc, Name, Typ> {
                 write!(f, "{}", name)
             }
 
-            Self::Fork(_, captures, channel, _, process) => {
+            Self::Fork(_, captures, channel, _, _, process) => {
                 write!(f, "chan {} |", channel)?;
                 for (i, cap) in captures.names.keys().enumerate() {
                     if i > 0 {

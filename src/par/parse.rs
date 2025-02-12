@@ -8,9 +8,12 @@ use pest::{
 };
 use pest_derive::Parser;
 
-use super::language::{
-    Apply, ApplyBranch, ApplyBranches, Command, CommandBranch, CommandBranches, Construct,
-    ConstructBranch, ConstructBranches, Expression, Process,
+use super::{
+    language::{
+        Apply, ApplyBranch, ApplyBranches, Command, CommandBranch, CommandBranches, Construct,
+        ConstructBranch, ConstructBranches, Expression, Process,
+    },
+    types::Type,
 };
 
 #[derive(Parser)]
@@ -96,6 +99,61 @@ fn parse_name(pairs: &mut Pairs<'_, Rule>) -> Result<(Loc, Name), ParseError> {
     ))
 }
 
+fn parse_type(pairs: &mut Pairs<'_, Rule>) -> Result<Type<Loc, Name>, ParseError> {
+    let pair = pairs.next().unwrap().into_inner().next().unwrap();
+    let loc = Loc::from(&pair);
+
+    match pair.as_rule() {
+        Rule::typ_send => {
+            let mut pairs = pair.into_inner();
+            let arg = parse_type(&mut pairs)?;
+            let then = parse_type(&mut pairs)?;
+            Ok(Type::Send(loc, Box::new(arg), Box::new(then)))
+        }
+
+        Rule::typ_receive => {
+            let mut pairs = pair.into_inner();
+            let arg = parse_type(&mut pairs)?;
+            let then = parse_type(&mut pairs)?;
+            Ok(Type::Receive(loc, Box::new(arg), Box::new(then)))
+        }
+
+        Rule::typ_either => {
+            let mut pairs = pair.into_inner();
+            let mut branches = IndexMap::new();
+            while let Some(pair) = pairs.next() {
+                let (_, name) = parse_name(&mut Pairs::single(pair))?;
+                let typ = parse_type(&mut pairs)?;
+                branches.insert(name, typ);
+            }
+            Ok(Type::Either(loc, branches))
+        }
+
+        Rule::typ_choice => {
+            let mut pairs = pair.into_inner();
+            let mut branches = IndexMap::new();
+            while let Some(pair) = pairs.next() {
+                let (_, name) = parse_name(&mut Pairs::single(pair))?;
+                let typ = parse_type(&mut pairs)?;
+                branches.insert(name, typ);
+            }
+            Ok(Type::Choice(loc, branches))
+        }
+
+        Rule::typ_break => Ok(Type::Break(loc)),
+        Rule::typ_continue => Ok(Type::Continue(loc)),
+
+        _ => unreachable!(),
+    }
+}
+
+fn parse_annotation(pairs: &mut Pairs<'_, Rule>) -> Result<Option<Type<Loc, Name>>, ParseError> {
+    match pairs.next().unwrap().into_inner().next() {
+        Some(pair) => Ok(Some(parse_type(&mut Pairs::single(pair))?)),
+        None => Ok(None),
+    }
+}
+
 fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Expression<Loc, Name>, ParseError> {
     let pair = pairs.next().unwrap().into_inner().next().unwrap();
     let loc = Loc::from(&pair);
@@ -104,11 +162,13 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Expression<Loc, Name>
         Rule::expr_let => {
             let mut pairs = pair.into_inner();
             let (_, name) = parse_name(&mut pairs)?;
+            let annotation = parse_annotation(&mut pairs)?;
             let expression = parse_expression(&mut pairs)?;
             let body = parse_expression(&mut pairs)?;
             Ok(Expression::Let(
                 loc,
                 name,
+                annotation,
                 Box::new(expression),
                 Box::new(body),
             ))
@@ -124,8 +184,9 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Expression<Loc, Name>
         Rule::expr_fork => {
             let mut pairs = pair.into_inner();
             let (_, name) = parse_name(&mut pairs)?;
+            let annotation = parse_annotation(&mut pairs)?;
             let process = parse_process(&mut pairs)?;
-            Ok(Expression::Fork(loc, name, Box::new(process)))
+            Ok(Expression::Fork(loc, name, annotation, Box::new(process)))
         }
 
         Rule::construction => Ok(Expression::Construction(
@@ -171,8 +232,14 @@ fn parse_construct(pairs: &mut Pairs<'_, Rule>) -> Result<Construct<Loc, Name>, 
         Rule::cons_receive => {
             let mut pairs = pair.into_inner();
             let (_, parameter) = parse_name(&mut pairs)?;
+            let annotation = parse_annotation(&mut pairs)?;
             let construct = parse_construct(&mut pairs)?;
-            Ok(Construct::Receive(loc, parameter, Box::new(construct)))
+            Ok(Construct::Receive(
+                loc,
+                parameter,
+                annotation,
+                Box::new(construct),
+            ))
         }
 
         Rule::cons_choose => {
@@ -228,8 +295,14 @@ fn parse_construct_branch(
         Rule::cons_branch_receive => {
             let mut pairs = pair.into_inner();
             let (_, parameter) = parse_name(&mut pairs)?;
+            let annotation = parse_annotation(&mut pairs)?;
             let branch = parse_construct_branch(&mut pairs)?;
-            Ok(ConstructBranch::Receive(loc, parameter, Box::new(branch)))
+            Ok(ConstructBranch::Receive(
+                loc,
+                parameter,
+                annotation,
+                Box::new(branch),
+            ))
         }
 
         _ => unreachable!(),
@@ -300,8 +373,14 @@ fn parse_apply_branch(pairs: &mut Pairs<'_, Rule>) -> Result<ApplyBranch<Loc, Na
         Rule::apply_branch_receive => {
             let mut pairs = pair.into_inner();
             let (_, parameter) = parse_name(&mut pairs)?;
+            let annotation = parse_annotation(&mut pairs)?;
             let branch = parse_apply_branch(&mut pairs)?;
-            Ok(ApplyBranch::Receive(loc, parameter, Box::new(branch)))
+            Ok(ApplyBranch::Receive(
+                loc,
+                parameter,
+                annotation,
+                Box::new(branch),
+            ))
         }
 
         Rule::apply_branch_continue => {
@@ -322,17 +401,21 @@ fn parse_process(pairs: &mut Pairs<'_, Rule>) -> Result<Process<Loc, Name>, Pars
         Rule::proc_let => {
             let mut pairs = pair.into_inner();
             let (_, name) = parse_name(&mut pairs)?;
+            let annotation = parse_annotation(&mut pairs)?;
             let expression = parse_expression(&mut pairs)?;
             let process = parse_process(&mut pairs)?;
             Ok(Process::Let(
                 loc,
                 name,
+                annotation,
                 Box::new(expression),
                 Box::new(process),
             ))
         }
 
         Rule::proc_pass => Ok(Process::Pass(loc)),
+
+        Rule::proc_telltypes => Ok(Process::Telltypes(loc)),
 
         Rule::command => {
             let mut pairs = pair.into_inner();
@@ -374,8 +457,14 @@ fn parse_command(pairs: &mut Pairs<'_, Rule>) -> Result<Command<Loc, Name>, Pars
         Rule::cmd_receive => {
             let mut pairs = pair.into_inner();
             let (_, parameter) = parse_name(&mut pairs)?;
+            let annotation = parse_annotation(&mut pairs)?;
             let command = parse_command(&mut pairs)?;
-            Ok(Command::Receive(loc, parameter, Box::new(command)))
+            Ok(Command::Receive(
+                loc,
+                parameter,
+                annotation,
+                Box::new(command),
+            ))
         }
 
         Rule::cmd_choose => {
@@ -454,8 +543,14 @@ fn parse_command_branch(
         Rule::cmd_branch_receive => {
             let mut pairs = pair.into_inner();
             let (_, parameter) = parse_name(&mut pairs)?;
+            let annotation = parse_annotation(&mut pairs)?;
             let branch = parse_command_branch(&mut pairs)?;
-            Ok(CommandBranch::Receive(loc, parameter, Box::new(branch)))
+            Ok(CommandBranch::Receive(
+                loc,
+                parameter,
+                annotation,
+                Box::new(branch),
+            ))
         }
 
         Rule::cmd_branch_continue => {

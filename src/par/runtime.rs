@@ -15,6 +15,7 @@ pub enum Error<Loc, Name> {
     IncompatibleOperations(Operation<Loc, Name>, Operation<Loc, Name>),
     NoSuchLoopPoint(Loc, Option<Name>),
     Multiple(Box<Self>, Box<Self>),
+    Telltypes(Loc),
 }
 
 #[derive(Clone, Debug)]
@@ -181,7 +182,7 @@ where
         match expression {
             Expression::Reference(loc, name, _) => self.get(loc, name),
 
-            Expression::Fork(loc, cap, channel, _, process) => {
+            Expression::Fork(loc, cap, channel, _, _, process) => {
                 let mut context = self.split();
                 self.capture(cap, &mut context)?;
 
@@ -207,7 +208,7 @@ where
         let mut current_process = process;
         loop {
             match current_process.as_ref() {
-                Process::Let(loc, name, _, expression, process) => {
+                Process::Let(loc, name, _, _, expression, process) => {
                     let value = self.evaluate(expression)?;
                     self.put(loc, name.clone(), value)?;
                     current_process = Arc::clone(process);
@@ -235,7 +236,7 @@ where
                             current_process = Arc::clone(process);
                         }
 
-                        Command::Receive(parameter, process) => {
+                        Command::Receive(parameter, _, process) => {
                             let (argument, object) = self.receive_from(loc.clone(), object).await?;
                             self.put(loc, object_name.clone(), object)?;
                             self.put(loc, parameter.clone(), argument)?;
@@ -299,6 +300,8 @@ where
                         }
                     }
                 }
+
+                Process::Telltypes(loc) => return self.throw([], Error::Telltypes(loc.clone())),
             }
         }
     }
