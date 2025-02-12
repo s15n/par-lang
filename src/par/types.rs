@@ -109,7 +109,11 @@ impl<Loc, Name: Eq + Hash> Type<Loc, Name> {
 }
 
 impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
-    pub fn check_subtype(&self, loc: &Loc, u: &Type<Loc, Name>) -> Result<(), TypeError<Loc, Name>> {
+    pub fn check_subtype(
+        &self,
+        loc: &Loc,
+        u: &Type<Loc, Name>,
+    ) -> Result<(), TypeError<Loc, Name>> {
         if !self.is_subtype_of(u) {
             return Err(TypeError::CannotAssignFromTo(
                 loc.clone(),
@@ -191,7 +195,10 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
         mut types: Vec<Self>,
     ) -> Result<Self, TypeError<Loc, Name>> {
         let Some(mut typ) = types.pop() else {
-            return Err(TypeError::TypeMustBeKnownAtThisPoint(loc.clone(), name.clone()));
+            return Err(TypeError::TypeMustBeKnownAtThisPoint(
+                loc.clone(),
+                name.clone(),
+            ));
         };
         while let Some(typ1) = types.pop() {
             typ = typ1.unify(typ)?;
@@ -255,7 +262,10 @@ where
         for (name, loc) in &cap.names {
             if let Some(subject) = inference_subject {
                 if name == subject {
-                    return Err(TypeError::TypeMustBeKnownAtThisPoint(loc.clone(), name.clone()));
+                    return Err(TypeError::TypeMustBeKnownAtThisPoint(
+                        loc.clone(),
+                        name.clone(),
+                    ));
                 }
             }
             let value = match self.get_variable(name) {
@@ -471,7 +481,8 @@ where
         &mut self,
         process: &Process<Loc, Name, ()>,
         subject: &Name,
-    ) -> Result<(Arc<Process<Loc, Name, Type<Loc, Name>>>, Type<Loc, Name>), TypeError<Loc, Name>> {
+    ) -> Result<(Arc<Process<Loc, Name, Type<Loc, Name>>>, Type<Loc, Name>), TypeError<Loc, Name>>
+    {
         match process {
             Process::Let(loc, name, annotation, (), expression, process) => {
                 let (expression, typ) = match annotation {
@@ -593,7 +604,7 @@ where
                     typed_processes.push(process);
                     branch_types.insert(branch.clone(), typ);
                 }
-                
+
                 (
                     Command::Match(Arc::clone(branches), Box::from(typed_processes)),
                     Type::Either(loc.clone(), branch_types),
