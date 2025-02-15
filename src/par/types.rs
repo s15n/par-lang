@@ -10,13 +10,14 @@ use super::process::{Captures, Command, Expression, Process};
 
 #[derive(Clone, Debug)]
 pub enum TypeError<Loc, Name> {
+    TypeNameNotDefined(Loc, Name),
     NameNotDefined(Loc, Name),
     ShadowedObligation(Loc, Name),
     TypeMustBeKnownAtThisPoint(Loc, Name),
     ParameterTypeMustBeKnown(Loc, Name, Name),
     CannotAssignFromTo(Loc, Type<Loc, Name>, Type<Loc, Name>),
     UnfulfilledObligations(Loc, Vec<Name>),
-    InvalidOperation(Operation<Loc, Name>, Type<Loc, Name>),
+    InvalidOperation(Loc, Operation<Loc, Name>, Type<Loc, Name>),
     InvalidBranch(Loc, Name, Type<Loc, Name>),
     MissingBranch(Loc, Name, Type<Loc, Name>),
     RedundantBranch(Loc, Name, Type<Loc, Name>),
@@ -41,6 +42,8 @@ pub enum Operation<Loc, Name> {
 
 #[derive(Clone, Debug)]
 pub enum Type<Loc, Name> {
+    Name(Loc, Name),
+    DualName(Loc, Name),
     Send(Loc, Box<Self>, Box<Self>),
     Receive(Loc, Box<Self>, Box<Self>),
     Either(Loc, IndexMap<Name, Self>),
@@ -59,9 +62,56 @@ enum TypePoint<Name> {
     Loop(Option<Name>),
 }
 
+#[derive(Clone, Debug)]
+pub struct TypeDefs<Loc, Name>(pub IndexMap<Name, Type<Loc, Name>>);
+
+impl<Loc: Clone, Name: Clone + Eq + Hash> TypeDefs<Loc, Name> {
+    pub fn get(&self, loc: &Loc, name: &Name) -> Result<Type<Loc, Name>, TypeError<Loc, Name>> {
+        match self.0.get(name) {
+            Some(typ) => Ok(typ.clone()),
+            None => Err(TypeError::TypeNameNotDefined(loc.clone(), name.clone())),
+        }
+    }
+
+    pub fn get_dual(
+        &self,
+        loc: &Loc,
+        name: &Name,
+    ) -> Result<Type<Loc, Name>, TypeError<Loc, Name>> {
+        match self.0.get(name) {
+            Some(typ) => Ok(typ.dual()),
+            None => Err(TypeError::TypeNameNotDefined(loc.clone(), name.clone())),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Declarations<Loc, Name>(pub IndexMap<Name, Option<Type<Loc, Name>>>);
+
+impl<Loc, Name> Type<Loc, Name> {
+    pub fn get_loc(&self) -> &Loc {
+        match self {
+            Self::Name(loc, _) => loc,
+            Self::DualName(loc, _) => loc,
+            Self::Send(loc, _, _) => loc,
+            Self::Receive(loc, _, _) => loc,
+            Self::Either(loc, _) => loc,
+            Self::Choice(loc, _) => loc,
+            Self::Break(loc) => loc,
+            Self::Continue(loc) => loc,
+            Self::Recursive(loc, _, _) => loc,
+            Self::Iterative(loc, _, _) => loc,
+            Self::Self_(loc, _) => loc,
+            Self::Loop(loc, _) => loc,
+        }
+    }
+}
+
 impl<Loc, Name: Eq + Hash> Type<Loc, Name> {
     pub fn map_names<N: Eq + Hash>(self, f: &mut impl FnMut(Name) -> N) -> Type<Loc, N> {
         match self {
+            Self::Name(loc, name) => Type::Name(loc, f(name)),
+            Self::DualName(loc, name) => Type::DualName(loc, f(name)),
             Self::Send(loc, t, u) => {
                 Type::Send(loc, Box::new(t.map_names(f)), Box::new(u.map_names(f)))
             }
@@ -105,8 +155,9 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
         &self,
         loc: &Loc,
         u: &Type<Loc, Name>,
+        type_defs: &TypeDefs<Loc, Name>,
     ) -> Result<(), TypeError<Loc, Name>> {
-        if !self.is_subtype_of(u, &HashSet::new()) {
+        if !self.is_subtype_of(u, type_defs, &HashSet::new())? {
             return Err(TypeError::CannotAssignFromTo(
                 loc.clone(),
                 self.clone(),
@@ -119,30 +170,53 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
     fn is_subtype_of(
         &self,
         other: &Self,
+        type_defs: &TypeDefs<Loc, Name>,
         ind: &HashSet<(TypePoint<Name>, TypePoint<Name>)>,
-    ) -> bool {
-        match (self, other) {
+    ) -> Result<bool, TypeError<Loc, Name>> {
+        Ok(match (self, other) {
+            (Self::Name(_, name1), Self::Name(_, name2)) if name1 == name2 => true,
+            (Self::DualName(_, name1), Self::DualName(_, name2)) if name1 == name2 => true,
+
+            (Self::Name(loc, name), t2) => type_defs
+                .get(loc, name)?
+                .is_subtype_of(t2, type_defs, ind)?,
+            (t1, Self::Name(loc, name)) => {
+                t1.is_subtype_of(&type_defs.get(loc, name)?, type_defs, ind)?
+            }
+            (Self::DualName(loc, name), t2) => type_defs
+                .get_dual(loc, name)?
+                .is_subtype_of(t2, type_defs, ind)?,
+            (t1, Self::DualName(loc, name)) => {
+                t1.is_subtype_of(&type_defs.get_dual(loc, name)?, type_defs, ind)?
+            }
+
             (Self::Send(_, t1, u1), Self::Send(_, t2, u2)) => {
-                t1.is_subtype_of(t2, ind) && u1.is_subtype_of(u2, ind)
+                t1.is_subtype_of(t2, type_defs, ind)? && u1.is_subtype_of(u2, type_defs, ind)?
             }
             (Self::Receive(_, t1, u1), Self::Receive(_, t2, u2)) => {
-                t2.is_subtype_of(t1, ind) && u1.is_subtype_of(u2, ind)
+                t2.is_subtype_of(t1, type_defs, ind)? && u1.is_subtype_of(u2, type_defs, ind)?
             }
             (Self::Either(_, branches1), Self::Either(_, branches2)) => {
-                branches1.iter().all(|(branch, t1)| {
-                    branches2
-                        .get(branch)
-                        .map(|t2| t1.is_subtype_of(t2, ind))
-                        .unwrap_or(false)
-                })
+                for (branch, t1) in branches1 {
+                    let Some(t2) = branches2.get(branch) else {
+                        return Ok(false);
+                    };
+                    if !t1.is_subtype_of(t2, type_defs, ind)? {
+                        return Ok(false);
+                    }
+                }
+                true
             }
             (Self::Choice(_, branches1), Self::Choice(_, branches2)) => {
-                branches2.iter().all(|(branch, t2)| {
-                    branches1
-                        .get(branch)
-                        .map(|t1| t1.is_subtype_of(t2, ind))
-                        .unwrap_or(false)
-                })
+                for (branch, t2) in branches2 {
+                    let Some(t1) = branches1.get(branch) else {
+                        return Ok(false);
+                    };
+                    if !t1.is_subtype_of(t2, type_defs, ind)? {
+                        return Ok(false);
+                    }
+                }
+                true
             }
             (Self::Break(_), Self::Break(_)) => true,
             (Self::Continue(_), Self::Continue(_)) => true,
@@ -153,10 +227,10 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     TypePoint::Self_(label1.clone()),
                     TypePoint::Self_(label2.clone()),
                 ));
-                body1.is_subtype_of(body2, &ind)
+                body1.is_subtype_of(body2, type_defs, &ind)?
             }
             (typ, Self::Recursive(_, label, body)) => {
-                typ.is_subtype_of(&Self::expand_recursive(label, body), ind)
+                typ.is_subtype_of(&Self::expand_recursive(label, body), type_defs, ind)?
             }
             (Self::Iterative(_, label1, body1), Self::Iterative(_, label2, body2)) => {
                 let mut ind = ind.clone();
@@ -164,10 +238,10 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     TypePoint::Loop(label1.clone()),
                     TypePoint::Loop(label2.clone()),
                 ));
-                body1.is_subtype_of(body2, &ind)
+                body1.is_subtype_of(body2, type_defs, &ind)?
             }
             (Self::Iterative(_, label, body), typ) => {
-                Self::expand_iterative(label, body).is_subtype_of(typ, ind)
+                Self::expand_iterative(label, body).is_subtype_of(typ, type_defs, ind)?
             }
 
             (Self::Self_(_, label1), Self::Self_(_, label2)) => ind.contains(&(
@@ -180,11 +254,14 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             )),
 
             _ => false,
-        }
+        })
     }
 
     pub fn dual(&self) -> Self {
         match self {
+            Self::Name(loc, name) => Self::DualName(loc.clone(), name.clone()),
+            Self::DualName(loc, name) => Self::Name(loc.clone(), name.clone()),
+
             Self::Send(loc, t, u) => Self::Receive(loc.clone(), t.clone(), Box::new(u.dual())),
             Self::Receive(loc, t, u) => Self::Send(loc.clone(), t.clone(), Box::new(u.dual())),
             Self::Either(loc, branches) => Self::Choice(
@@ -220,6 +297,8 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
 
     fn expand_recursive_helper(self, top_label: &Option<Name>, top_body: &Self) -> Self {
         match self {
+            Self::Name(loc, name) => Self::Name(loc, name),
+            Self::DualName(loc, name) => Self::DualName(loc, name),
             Self::Send(loc, t, u) => Self::Send(
                 loc,
                 Box::new(t.expand_recursive_helper(top_label, top_body)),
@@ -245,7 +324,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     .collect(),
             ),
             Self::Break(loc) => Self::Break(loc),
-            Self::Continue(loc) => Self::Break(loc),
+            Self::Continue(loc) => Self::Continue(loc),
             Self::Recursive(loc, label, body) => {
                 if &label == top_label {
                     Self::Recursive(loc, label, body)
@@ -279,6 +358,8 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
 
     fn expand_iterative_helper(self, top_label: &Option<Name>, top_body: &Self) -> Self {
         match self {
+            Self::Name(loc, name) => Self::Name(loc, name),
+            Self::DualName(loc, name) => Self::DualName(loc, name),
             Self::Send(loc, t, u) => Self::Send(
                 loc,
                 Box::new(t.expand_iterative_helper(top_label, top_body)),
@@ -304,7 +385,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     .collect(),
             ),
             Self::Break(loc) => Self::Break(loc),
-            Self::Continue(loc) => Self::Break(loc),
+            Self::Continue(loc) => Self::Continue(loc),
             Self::Recursive(loc, label, body) => Self::Recursive(
                 loc,
                 label,
@@ -332,19 +413,42 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
         }
     }
 
-    pub fn unify(self, other: Self) -> Result<Self, TypeError<Loc, Name>> {
+    pub fn unify(
+        self,
+        other: Self,
+        type_defs: &TypeDefs<Loc, Name>,
+    ) -> Result<Self, TypeError<Loc, Name>> {
         Ok(match (self, other) {
-            (Self::Send(loc, t1, u1), Self::Send(_, t2, u2)) => {
-                Self::Send(loc, Box::new(t1.unify(*t2)?), Box::new(u1.unify(*u2)?))
+            (Self::Name(loc, name1), Self::Name(_, name2)) if name1 == name2 => {
+                Self::Name(loc, name1)
             }
-            (Self::Receive(loc, t1, u1), Self::Receive(_, t2, u2)) => {
-                Self::Receive(loc, Box::new(t1.unify(*t2)?), Box::new(u1.unify(*u2)?))
+            (Self::DualName(loc, name1), Self::DualName(_, name2)) if name1 == name2 => {
+                Self::DualName(loc, name1)
             }
+            (Self::Name(loc, name), t2) => type_defs.get(&loc, &name)?.unify(t2, type_defs)?,
+            (t1, Self::Name(loc, name)) => t1.unify(type_defs.get(&loc, &name)?, type_defs)?,
+            (Self::DualName(loc, name), t2) => {
+                type_defs.get_dual(&loc, &name)?.unify(t2, type_defs)?
+            }
+            (t1, Self::DualName(loc, name)) => {
+                t1.unify(type_defs.get_dual(&loc, &name)?, type_defs)?
+            }
+
+            (Self::Send(loc, t1, u1), Self::Send(_, t2, u2)) => Self::Send(
+                loc,
+                Box::new(t1.unify(*t2, type_defs)?),
+                Box::new(u1.unify(*u2, type_defs)?),
+            ),
+            (Self::Receive(loc, t1, u1), Self::Receive(_, t2, u2)) => Self::Receive(
+                loc,
+                Box::new(t1.unify(*t2, type_defs)?),
+                Box::new(u1.unify(*u2, type_defs)?),
+            ),
             (Self::Either(loc, branches1), Self::Either(_, branches2)) => {
                 let mut branches = branches1;
                 for (branch, typ2) in branches2 {
                     let typ = match branches.shift_remove(&branch) {
-                        Some(typ1) => typ1.unify(typ2)?,
+                        Some(typ1) => typ1.unify(typ2, type_defs)?,
                         None => typ2,
                     };
                     branches.insert(branch, typ);
@@ -355,7 +459,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                 let mut branches = branches1;
                 for (branch, typ2) in branches2 {
                     let typ = match branches.shift_remove(&branch) {
-                        Some(typ1) => typ1.unify(typ2)?,
+                        Some(typ1) => typ1.unify(typ2, type_defs)?,
                         None => typ2,
                     };
                     branches.insert(branch, typ);
@@ -364,6 +468,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             }
             (Self::Break(loc), Self::Break(_)) => Self::Break(loc),
             (Self::Continue(loc), Self::Continue(_)) => Self::Continue(loc),
+
             (typ1, typ2) => return Err(TypeError::TypesCannotBeUnified(typ1, typ2)), //TODO: recursive & iterative
         })
     }
@@ -372,6 +477,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
         loc: &Loc,
         name: &Name,
         mut types: Vec<Self>,
+        type_defs: &TypeDefs<Loc, Name>,
     ) -> Result<Self, TypeError<Loc, Name>> {
         let Some(mut typ) = types.pop() else {
             return Err(TypeError::TypeMustBeKnownAtThisPoint(
@@ -380,7 +486,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             ));
         };
         while let Some(typ1) = types.pop() {
-            typ = typ1.unify(typ)?;
+            typ = typ1.unify(typ, type_defs)?;
         }
         Ok(typ)
     }
@@ -388,6 +494,8 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
 
 #[derive(Clone, Debug)]
 pub struct Context<Loc, Name> {
+    type_defs: Arc<TypeDefs<Loc, Name>>,
+    declarations: Arc<Declarations<Loc, Name>>,
     variables: IndexMap<Name, Type<Loc, Name>>,
     loop_points: IndexMap<Option<Name>, (Name, Arc<IndexMap<Name, Type<Loc, Name>>>)>,
 }
@@ -397,8 +505,13 @@ where
     Loc: std::fmt::Debug + Clone + Eq + Hash,
     Name: Clone + Eq + Hash,
 {
-    pub fn new() -> Self {
+    pub fn new(
+        type_defs: Arc<TypeDefs<Loc, Name>>,
+        declarations: Arc<Declarations<Loc, Name>>,
+    ) -> Self {
         Self {
+            type_defs,
+            declarations,
             variables: IndexMap::new(),
             loop_points: IndexMap::new(),
         }
@@ -406,6 +519,8 @@ where
 
     pub fn split(&self) -> Self {
         Self {
+            type_defs: Arc::clone(&self.type_defs),
+            declarations: Arc::clone(&self.declarations),
             variables: IndexMap::new(),
             loop_points: self.loop_points.clone(),
         }
@@ -418,7 +533,14 @@ where
     pub fn get(&mut self, loc: &Loc, name: &Name) -> Result<Type<Loc, Name>, TypeError<Loc, Name>> {
         match self.get_variable(name) {
             Some(typ) => Ok(typ),
-            None => Err(TypeError::NameNotDefined(loc.clone(), name.clone())),
+            None => match self.declarations.0.get(name) {
+                Some(Some(typ)) => Ok(typ.clone()),
+                Some(None) => Err(TypeError::TypeMustBeKnownAtThisPoint(
+                    loc.clone(),
+                    name.clone(),
+                )),
+                None => Err(TypeError::NameNotDefined(loc.clone(), name.clone())),
+            },
         }
     }
 
@@ -487,10 +609,7 @@ where
             }
 
             Process::Do(loc, object, (), command) => {
-                let typ = match self.get_variable(object) {
-                    Some(typ) => typ,
-                    None => return Err(TypeError::NameNotDefined(loc.clone(), object.clone())),
-                };
+                let typ = self.get(loc, object)?;
 
                 let (command, _) =
                     self.check_command(loc, object, &typ, command, &mut |context, process| {
@@ -529,6 +648,24 @@ where
         >,
     ) -> Result<(Command<Loc, Name, Type<Loc, Name>>, Vec<Type<Loc, Name>>), TypeError<Loc, Name>>
     {
+        if let Type::Name(_, name) = typ {
+            return self.check_command(
+                loc,
+                object,
+                &self.type_defs.get(loc, name)?,
+                command,
+                analyze_process,
+            );
+        }
+        if let Type::DualName(_, name) = typ {
+            return self.check_command(
+                loc,
+                object,
+                &self.type_defs.get_dual(loc, name)?,
+                command,
+                analyze_process,
+            );
+        }
         if let Type::Iterative(_, top_label, body) = typ {
             return self.check_command(
                 loc,
@@ -549,6 +686,7 @@ where
             Command::Send(argument, process) => {
                 let Type::Receive(_, argument_type, then_type) = typ else {
                     return Err(TypeError::InvalidOperation(
+                        loc.clone(),
                         Operation::Send(loc.clone()),
                         typ.clone(),
                     ));
@@ -562,12 +700,13 @@ where
             Command::Receive(parameter, annotation, process) => {
                 let Type::Send(_, parameter_type, then_type) = typ else {
                     return Err(TypeError::InvalidOperation(
+                        loc.clone(),
                         Operation::Receive(loc.clone()),
                         typ.clone(),
                     ));
                 };
                 if let Some(annotated_type) = annotation {
-                    parameter_type.check_subtype(loc, annotated_type)?;
+                    parameter_type.check_subtype(loc, annotated_type, &self.type_defs)?;
                 }
                 self.put(loc, parameter.clone(), *parameter_type.clone())?;
                 self.put(loc, object.clone(), *then_type.clone())?;
@@ -581,6 +720,7 @@ where
             Command::Choose(chosen, process) => {
                 let Type::Choice(_, branches) = typ else {
                     return Err(TypeError::InvalidOperation(
+                        loc.clone(),
                         Operation::Choose(loc.clone(), chosen.clone()),
                         typ.clone(),
                     ));
@@ -600,6 +740,7 @@ where
             Command::Match(branches, processes) => {
                 let Type::Either(_, required_branches) = typ else {
                     return Err(TypeError::InvalidOperation(
+                        loc.clone(),
                         Operation::Match(loc.clone(), Arc::clone(branches)),
                         typ.clone(),
                     ));
@@ -644,6 +785,7 @@ where
             Command::Break => {
                 let Type::Continue(_) = typ else {
                     return Err(TypeError::InvalidOperation(
+                        loc.clone(),
                         Operation::Break(loc.clone()),
                         typ.clone(),
                     ));
@@ -655,6 +797,7 @@ where
             Command::Continue(process) => {
                 let Type::Break(_) = typ else {
                     return Err(TypeError::InvalidOperation(
+                        loc.clone(),
                         Operation::Continue(loc.clone()),
                         typ.clone(),
                     ));
@@ -666,6 +809,7 @@ where
             Command::Begin(label, process) => {
                 let Type::Recursive(_, typ_label, typ_body) = typ else {
                     return Err(TypeError::InvalidOperation(
+                        loc.clone(),
                         Operation::Begin(loc.clone(), label.clone()),
                         typ.clone(),
                     ));
@@ -690,6 +834,7 @@ where
             Command::Loop(label) => {
                 let Type::Recursive(_, typ_label, typ_body) = typ else {
                     return Err(TypeError::InvalidOperation(
+                        loc.clone(),
                         Operation::Loop(loc.clone(), label.clone()),
                         typ.clone(),
                     ));
@@ -708,7 +853,11 @@ where
                             var.clone(),
                         ));
                     };
-                    if !current_type.is_subtype_of(type_at_begin, &HashSet::new()) {
+                    if !current_type.is_subtype_of(
+                        type_at_begin,
+                        &self.type_defs,
+                        &HashSet::new(),
+                    )? {
                         return Err(TypeError::LoopVariableChangedType(
                             loc.clone(),
                             var.clone(),
@@ -769,11 +918,7 @@ where
                         typ,
                     ));
                 }
-
-                let typ = match self.get_variable(object) {
-                    Some(typ) => typ,
-                    None => return Err(TypeError::NameNotDefined(loc.clone(), object.clone())),
-                };
+                let typ = self.get(loc, object)?;
 
                 let (command, inferred_types) =
                     self.check_command(loc, object, &typ, command, &mut |context, process| {
@@ -783,7 +928,7 @@ where
 
                 Ok((
                     Arc::new(Process::Do(loc.clone(), object.clone(), typ, command)),
-                    Type::unify_vec(loc, object, inferred_types)?,
+                    Type::unify_vec(loc, object, inferred_types, &self.type_defs)?,
                 ))
             }
 
@@ -900,7 +1045,11 @@ where
                             var.clone(),
                         ));
                     };
-                    if !current_type.is_subtype_of(type_at_begin, &HashSet::new()) {
+                    if !current_type.is_subtype_of(
+                        type_at_begin,
+                        &self.type_defs,
+                        &HashSet::new(),
+                    )? {
                         return Err(TypeError::LoopVariableChangedType(
                             loc.clone(),
                             var.clone(),
@@ -934,7 +1083,7 @@ where
                     ));
                 }
                 let typ = self.get(loc, name)?;
-                typ.check_subtype(loc, target_type)?;
+                typ.check_subtype(loc, target_type, &self.type_defs)?;
                 Ok(Arc::new(Expression::Reference(
                     loc.clone(),
                     name.clone(),
@@ -946,7 +1095,7 @@ where
                 let target_dual = target_type.dual();
                 let typ = match annotation {
                     Some(annotated_type) => {
-                        annotated_type.check_subtype(loc, &target_dual)?;
+                        annotated_type.check_subtype(loc, &target_dual, &self.type_defs)?;
                         annotated_type.clone()
                     }
                     None => target_dual,
@@ -1032,21 +1181,24 @@ where
 impl<Loc, Name: Display> Type<Loc, Name> {
     pub fn pretty(&self, f: &mut impl Write, indent: usize) -> fmt::Result {
         match self {
-            Type::Send(_, arg, then) => {
+            Self::Name(_, name) => write!(f, "{}", name),
+            Self::DualName(_, name) => write!(f, "chan {}", name),
+
+            Self::Send(_, arg, then) => {
                 write!(f, "(")?;
                 arg.pretty(f, indent)?;
                 write!(f, ") ")?;
                 then.pretty(f, indent)
             }
 
-            Type::Receive(_, param, then) => {
+            Self::Receive(_, param, then) => {
                 write!(f, "[")?;
                 param.pretty(f, indent)?;
                 write!(f, "] ")?;
                 then.pretty(f, indent)
             }
 
-            Type::Either(_, branches) => {
+            Self::Either(_, branches) => {
                 write!(f, "either {{")?;
                 for (branch, typ) in branches {
                     indentation(f, indent + 1)?;
@@ -1057,7 +1209,7 @@ impl<Loc, Name: Display> Type<Loc, Name> {
                 write!(f, "}}")
             }
 
-            Type::Choice(_, branches) => {
+            Self::Choice(_, branches) => {
                 write!(f, "{{")?;
                 for (branch, typ) in branches {
                     indentation(f, indent + 1)?;
@@ -1068,10 +1220,10 @@ impl<Loc, Name: Display> Type<Loc, Name> {
                 write!(f, "}}")
             }
 
-            Type::Break(_) => write!(f, "!"),
-            Type::Continue(_) => write!(f, "?"),
+            Self::Break(_) => write!(f, "!"),
+            Self::Continue(_) => write!(f, "?"),
 
-            Type::Recursive(_, label, body) => {
+            Self::Recursive(_, label, body) => {
                 write!(f, "recursive ")?;
                 if let Some(label) = label {
                     write!(f, "@{} ", label)?;
@@ -1079,7 +1231,7 @@ impl<Loc, Name: Display> Type<Loc, Name> {
                 body.pretty(f, indent)
             }
 
-            Type::Iterative(_, label, body) => {
+            Self::Iterative(_, label, body) => {
                 write!(f, "iterative ")?;
                 if let Some(label) = label {
                     write!(f, "@{} ", label)?;
@@ -1087,7 +1239,7 @@ impl<Loc, Name: Display> Type<Loc, Name> {
                 body.pretty(f, indent)
             }
 
-            Type::Self_(_, label) => {
+            Self::Self_(_, label) => {
                 write!(f, "self")?;
                 if let Some(label) = label {
                     write!(f, " @{}", label)?;
@@ -1095,7 +1247,7 @@ impl<Loc, Name: Display> Type<Loc, Name> {
                 Ok(())
             }
 
-            Type::Loop(_, label) => {
+            Self::Loop(_, label) => {
                 write!(f, "loop")?;
                 if let Some(label) = label {
                     write!(f, " @{}", label)?;
@@ -1112,4 +1264,132 @@ fn indentation(f: &mut impl Write, indent: usize) -> fmt::Result {
         write!(f, "  ")?;
     }
     Ok(())
+}
+
+impl<Loc, Name: Display> TypeError<Loc, Name> {
+    pub fn pretty(&self, display_loc: impl Fn(&Loc) -> String) -> String {
+        match self {
+            Self::TypeNameNotDefined(loc, name) => {
+                format!("{}\nType `{}` is not defined.", display_loc(loc), name)
+            }
+            Self::NameNotDefined(loc, name) => {
+                format!("{}\n`{}` is not defined.", display_loc(loc), name,)
+            }
+            Self::ShadowedObligation(loc, name) => {
+                format!(
+                    "{}\nCannot re-assign `{}` before handling it.",
+                    display_loc(loc),
+                    name,
+                )
+            }
+            Self::TypeMustBeKnownAtThisPoint(loc, _) => {
+                format!("{}\nType must be known at this point.", display_loc(loc),)
+            }
+            Self::ParameterTypeMustBeKnown(loc, _, param) => {
+                format!(
+                    "{}\nType of parameter `{}` must be known.",
+                    display_loc(loc),
+                    param,
+                )
+            }
+            Self::CannotAssignFromTo(loc, from_type, to_type) => {
+                let (mut from_type_str, mut to_type_str) = (String::new(), String::new());
+                from_type.pretty(&mut from_type_str, 1).unwrap();
+                to_type.pretty(&mut to_type_str, 1).unwrap();
+                format!(
+                    "{}\nThis type was required:\n\n  {}\n\nBut an incompatible type was provided:\n\n  {}",
+                    display_loc(loc),
+                    from_type_str,
+                    to_type_str,
+                )
+            }
+            Self::UnfulfilledObligations(loc, names) => {
+                format!(
+                    "{}\nCannot end this process before handling {}.",
+                    display_loc(loc),
+                    names
+                        .iter()
+                        .enumerate()
+                        .map(|(i, name)| if i == 0 {
+                            format!("`{}`", name)
+                        } else {
+                            format!(", `{}`", name)
+                        })
+                        .collect::<String>()
+                )
+            }
+            Self::InvalidOperation(loc, _, typ) => {
+                let mut typ_str = String::new();
+                typ.pretty(&mut typ_str, 1).unwrap();
+                format!(
+                    "{}\nThis operation cannot be performed on:\n\n  {}",
+                    display_loc(loc),
+                    typ_str,
+                )
+            }
+            Self::InvalidBranch(loc, branch, typ) => {
+                let mut typ_str = String::new();
+                typ.pretty(&mut typ_str, 1).unwrap();
+                format!(
+                    "{}\nBranch `{}` is not available on:\n\n  {}",
+                    display_loc(loc),
+                    branch,
+                    typ_str,
+                )
+            }
+            Self::MissingBranch(loc, branch, typ) => {
+                let mut typ_str = String::new();
+                typ.pretty(&mut typ_str, 1).unwrap();
+                format!(
+                    "{}\nBranch `{}` was not handled for:\n\n  {}",
+                    display_loc(loc),
+                    branch,
+                    typ_str,
+                )
+            }
+            Self::RedundantBranch(loc, branch, typ) => {
+                let mut typ_str = String::new();
+                typ.pretty(&mut typ_str, 1).unwrap();
+                format!(
+                    "{}\nBranch `{}` is not possible for:\n\n  {}",
+                    display_loc(loc),
+                    branch,
+                    typ_str,
+                )
+            }
+            Self::TypesCannotBeUnified(typ1, typ2) => {
+                format!(
+                    "{}\nThis is supposed to operate on the same type as this:\n\n{}\nBut these operations cannot be performed on the same type.",
+                    display_loc(typ1.get_loc()),
+                    display_loc(typ2.get_loc()),
+                )
+            }
+            Self::NoSuchLoopPoint(loc, _) => {
+                format!(
+                    "{}\nThere is no matching loop point in scope.",
+                    display_loc(loc),
+                )
+            }
+            Self::LoopVariableNotPreserved(loc, name) => {
+                format!(
+                    "{}\n`{}` is used by next iteration, but is no longer defined.",
+                    display_loc(loc),
+                    name,
+                )
+            }
+            Self::LoopVariableChangedType(loc, name, loop_type, begin_type) => {
+                let (mut loop_type_str, mut begin_type_str) = (String::new(), String::new());
+                loop_type.pretty(&mut loop_type_str, 1).unwrap();
+                begin_type.pretty(&mut begin_type_str, 1).unwrap();
+                format!(
+                    "{}\nFor next iteration, `{}` is required to be:\n\n  {}\n\nBut it has an incompatible type:\n\n  {}",
+                    display_loc(loc),
+                    name,
+                    begin_type_str,
+                    loop_type_str,
+                )
+            }
+            Self::Telltypes(_, index_map) => todo!(),
+        }
+    }
 }

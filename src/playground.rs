@@ -12,10 +12,10 @@ use crate::{
     interact::{Event, Handle, Request},
     par::{
         language::{CompileError, Internal},
-        parse::{parse_program, Loc, Name, ParseError},
+        parse::{parse_program, Loc, Name, ParseError, Program},
         process::Expression,
         runtime::{self, Context, Operation},
-        types::Type,
+        types::{self, Type, TypeError},
     },
     spawn::TokioSpawn,
 };
@@ -32,25 +32,21 @@ pub struct Playground {
 enum Error {
     Parse(ParseError),
     Compile(CompileError<Loc>),
+    Type(TypeError<Loc, Internal<Name>>),
     Runtime(runtime::Error<Loc, Internal<Name>>),
 }
 
 #[derive(Clone)]
 struct Compiled {
     code: Arc<str>,
-    globals: Result<
-        Arc<
-            IndexMap<Internal<Name>, Arc<Expression<Loc, Internal<Name>, Option<Type<Loc, Name>>>>>,
-        >,
-        Error,
-    >,
+    program: Result<Program<Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>, Error>,
     pretty: Option<String>,
 }
 
 #[derive(Clone)]
 struct Interact {
     code: Arc<str>,
-    handle: Arc<Mutex<Handle<Loc, Internal<Name>, Option<Type<Loc, Name>>>>>,
+    handle: Arc<Mutex<Handle<Loc, Internal<Name>, ()>>>,
 }
 
 impl Playground {
@@ -128,10 +124,32 @@ impl Playground {
                 ui.add_space(5.0);
 
                 if ui.button(egui::RichText::new("Compile").strong()).clicked() {
-                    let globals = parse_program(self.code.as_str())
+                    let program = parse_program(self.code.as_str())
                         .map_err(|error| Error::Parse(error))
-                        .and_then(|definitions| {
-                            let compile_result = definitions
+                        .and_then(|program| {
+                            let type_defs = program
+                                .type_defs
+                                .into_iter()
+                                .map(|(name, typ)| {
+                                    (
+                                        Internal::Original(name),
+                                        typ.map_names(&mut Internal::Original),
+                                    )
+                                })
+                                .collect();
+                            let declarations = program
+                                .declarations
+                                .into_iter()
+                                .map(|(name, option_typ)| {
+                                    (
+                                        Internal::Original(name),
+                                        option_typ
+                                            .map(|typ| typ.map_names(&mut Internal::Original)),
+                                    )
+                                })
+                                .collect();
+                            let compile_result = program
+                                .definitions
                                 .into_iter()
                                 .map(|(name, def)| {
                                     def.compile().map(|compiled| {
@@ -143,13 +161,18 @@ impl Playground {
                                 })
                                 .collect::<Result<_, CompileError<Loc>>>();
                             match compile_result {
-                                Ok(compiled) => Ok(Arc::<IndexMap<_, _>>::new(compiled)),
+                                Ok(compiled) => Ok(Program {
+                                    type_defs,
+                                    declarations,
+                                    definitions: compiled,
+                                }),
                                 Err(error) => Err(Error::Compile(error)),
                             }
                         });
 
-                    let pretty = globals.as_ref().ok().map(|globals| {
-                        globals
+                    let pretty = program.as_ref().ok().map(|program| {
+                        program
+                            .definitions
                             .iter()
                             .map(|(name, def)| {
                                 let mut buf = String::new();
@@ -163,59 +186,95 @@ impl Playground {
 
                     self.compiled = Some(Compiled {
                         code: Arc::from(self.code.as_str()),
-                        globals,
+                        program,
                         pretty,
                     });
                 }
 
                 if let Some(Compiled {
                     code,
-                    globals: Ok(globals),
+                    program: program_result,
                     pretty,
-                }) = &self.compiled
+                }) = &mut self.compiled
                 {
-                    if pretty.is_some() {
-                        ui.checkbox(
-                            &mut self.show_compiled,
-                            egui::RichText::new("Show compiled"),
-                        );
-                    }
+                    if let Ok(mut program) = program_result.clone() {
+                        if pretty.is_some() {
+                            ui.checkbox(
+                                &mut self.show_compiled,
+                                egui::RichText::new("Show compiled"),
+                            );
+                        }
 
-                    egui::menu::menu_custom_button(
-                        ui,
-                        egui::Button::new(
-                            egui::RichText::new("Run")
-                                .strong()
-                                .color(egui::Color32::BLACK),
-                        )
-                        .fill(green().lerp_to_gamma(egui::Color32::WHITE, 0.3)),
-                        |ui| {
-                            for (internal_name, expression) in globals.as_ref() {
-                                if let Internal::Original(name) = internal_name {
-                                    if ui.button(&name.string).clicked() {
-                                        if let Some(int) = self.interact.take() {
-                                            int.handle.lock().expect("lock failed").cancel();
+                        if ui
+                            .button(egui::RichText::new("Typecheck").strong())
+                            .clicked()
+                        {
+                            for (name, expression) in &program.definitions {
+                                let mut context = types::Context::new(
+                                    Arc::new(types::TypeDefs(program.type_defs.clone())),
+                                    Arc::new(types::Declarations(program.declarations.clone())),
+                                );
+                                match program.declarations.get(name) {
+                                    Some(Some(declaration)) => {
+                                        match context.check_expression(
+                                            None,
+                                            expression,
+                                            declaration,
+                                        ) {
+                                            Ok(_) => continue,
+                                            Err(error) => *program_result = Err(Error::Type(error)),
                                         }
-                                        self.interact = Some(Interact {
-                                            code: Arc::clone(&code),
-                                            handle: Handle::start_expression(
-                                                Arc::new({
-                                                    let ctx = ui.ctx().clone();
-                                                    move || ctx.request_repaint()
-                                                }),
-                                                Context::new(
-                                                    Arc::new(TokioSpawn),
-                                                    Arc::clone(globals),
-                                                ),
-                                                expression,
-                                            ),
-                                        });
-                                        ui.close_menu();
+                                    }
+                                    Some(None) | None => {
+                                        match context.infer_expression(None, expression) {
+                                            Ok((_, inferred_type)) => {
+                                                program
+                                                    .declarations
+                                                    .insert(name.clone(), Some(inferred_type));
+                                            }
+                                            Err(error) => *program_result = Err(Error::Type(error)),
+                                        }
                                     }
                                 }
                             }
-                        },
-                    );
+                        }
+
+                        egui::menu::menu_custom_button(
+                            ui,
+                            egui::Button::new(
+                                egui::RichText::new("Run")
+                                    .strong()
+                                    .color(egui::Color32::BLACK),
+                            )
+                            .fill(green().lerp_to_gamma(egui::Color32::WHITE, 0.3)),
+                            |ui| {
+                                for (internal_name, expression) in &program.definitions {
+                                    if let Internal::Original(name) = internal_name {
+                                        if ui.button(&name.string).clicked() {
+                                            if let Some(int) = self.interact.take() {
+                                                int.handle.lock().expect("lock failed").cancel();
+                                            }
+                                            self.interact = Some(Interact {
+                                                code: Arc::clone(&code),
+                                                handle: Handle::start_expression(
+                                                    Arc::new({
+                                                        let ctx = ui.ctx().clone();
+                                                        move || ctx.request_repaint()
+                                                    }),
+                                                    Context::new(
+                                                        Arc::new(TokioSpawn),
+                                                        Arc::new(program.definitions.clone()),
+                                                    ),
+                                                    expression,
+                                                ),
+                                            });
+                                            ui.close_menu();
+                                        }
+                                    }
+                                }
+                            },
+                        );
+                    }
                 }
             });
 
@@ -225,7 +284,7 @@ impl Playground {
                 egui::ScrollArea::both().show(ui, |ui| {
                     if let Some(Compiled {
                         code,
-                        globals: Err(error),
+                        program: Err(error),
                         ..
                     }) = &self.compiled
                     {
@@ -411,6 +470,8 @@ impl Error {
                 )
             }
 
+            Self::Type(error) => error.pretty(|loc| Self::display_loc(code, loc)),
+
             Self::Runtime(error) => Self::display_runtime_error(code, error),
         }
     }
@@ -465,6 +526,12 @@ impl Error {
                     "{}\n\n\n{}",
                     Self::display_runtime_error(code, error1),
                     Self::display_runtime_error(code, error2),
+                )
+            }
+            Telltypes(loc) => {
+                format!(
+                    "{}\nEncountered `telltypes`. Use only for type-checking.",
+                    Self::display_loc(code, loc)
                 )
             }
         }
@@ -546,7 +613,23 @@ fn par_syntax() -> Syntax {
         comment: "//",
         comment_multiline: [r#"/*"#, r#"*/"#],
         hyperlinks: BTreeSet::from([]),
-        keywords: BTreeSet::from(["define", "chan", "let", "do", "in", "pass", "begin", "loop"]),
+        keywords: BTreeSet::from([
+            "type",
+            "declare",
+            "define",
+            "chan",
+            "let",
+            "do",
+            "in",
+            "pass",
+            "begin",
+            "loop",
+            "telltypes",
+            "either",
+            "recursive",
+            "iterative",
+            "self",
+        ]),
         types: BTreeSet::from([]),
         special: BTreeSet::from(["<>"]),
     }

@@ -64,7 +64,14 @@ pub struct ParseError {
     pub location: Loc,
 }
 
-pub fn parse_program(source: &str) -> Result<IndexMap<Name, Expression<Loc, Name>>, ParseError> {
+#[derive(Clone, Debug)]
+pub struct Program<Name, Expr> {
+    pub type_defs: IndexMap<Name, Type<Loc, Name>>,
+    pub declarations: IndexMap<Name, Option<Type<Loc, Name>>>,
+    pub definitions: IndexMap<Name, Expr>,
+}
+
+pub fn parse_program(source: &str) -> Result<Program<Name, Expression<Loc, Name>>, ParseError> {
     let mut pairs = match Par::parse(Rule::program, source) {
         Ok(mut pairs) => pairs.next().unwrap().into_inner(),
         Err(error) => {
@@ -77,16 +84,45 @@ pub fn parse_program(source: &str) -> Result<IndexMap<Name, Expression<Loc, Name
         }
     };
 
+    let mut type_defs = IndexMap::new();
+    let mut declarations = IndexMap::new();
     let mut definitions = IndexMap::new();
+
     while let Some(pair) = pairs.next() {
-        if pair.as_rule() == Rule::definition {
-            let mut pairs = pair.into_inner();
-            let (_, name) = parse_name(&mut pairs)?;
-            let expression = parse_expression(&mut pairs)?;
-            definitions.insert(name, expression);
+        match pair.as_rule() {
+            Rule::type_def => {
+                let mut pairs = pair.into_inner();
+                let (_, name) = parse_name(&mut pairs)?;
+                let typ = parse_type(&mut pairs)?;
+                type_defs.insert(name, typ);
+            }
+
+            Rule::declaration => {
+                let mut pairs = pair.into_inner();
+                let (_, name) = parse_name(&mut pairs)?;
+                let typ = parse_type(&mut pairs)?;
+                declarations.insert(name, Some(typ));
+            }
+
+            Rule::definition => {
+                let mut pairs = pair.into_inner();
+                let (_, name) = parse_name(&mut pairs)?;
+                let expression = parse_expression(&mut pairs)?;
+                declarations.entry(name.clone()).or_insert(None);
+                definitions.insert(name, expression);
+            }
+
+            Rule::EOI => break,
+
+            _ => unreachable!(),
         }
     }
-    Ok(definitions)
+
+    Ok(Program {
+        type_defs,
+        declarations,
+        definitions,
+    })
 }
 
 fn parse_name(pairs: &mut Pairs<'_, Rule>) -> Result<(Loc, Name), ParseError> {
@@ -104,6 +140,12 @@ fn parse_type(pairs: &mut Pairs<'_, Rule>) -> Result<Type<Loc, Name>, ParseError
     let loc = Loc::from(&pair);
 
     match pair.as_rule() {
+        Rule::typ_name => {
+            let mut pairs = pair.into_inner();
+            let (_, name) = parse_name(&mut pairs)?;
+            Ok(Type::Name(loc, name))
+        }
+
         Rule::typ_send => {
             let mut pairs = pair.into_inner();
             let arg = parse_type(&mut pairs)?;

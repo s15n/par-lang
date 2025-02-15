@@ -1,14 +1,21 @@
 WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
 COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
-keyword = { "define" | "chan" | "let" | "do" | "in" | "pass" | "begin" | "loop" | "telltypes" | "either" }
+keyword = {
+    "type" | "declare" | "define" |
+    "chan" | "let" | "do" | "in" | "pass" | "begin" | "loop" | "telltypes" |
+    "either" | "recursive" | "iterative" | "self"
+}
 
 name = @{ !(keyword ~ !("_" | ASCII_ALPHANUMERIC)) ~ (ASCII_ALPHA ~ ("_" | ASCII_ALPHANUMERIC)*) }
 
-program     = { SOI ~ definition* ~ EOI }
+program     = { SOI ~ (type_def | declaration | definition)* ~ EOI }
+type_def    = { "type" ~ name ~ "=" ~ typ }
+declaration = { "declare" ~ name ~ ":" ~ typ }
 definition  = { "define" ~ name ~ "=" ~ expression }
 
-typ           = { typ_send | typ_receive | typ_either | typ_choice | typ_break | typ_continue | typ_recursive | typ_iterative | typ_self | typ_loop }
+typ           = { typ_name | typ_send | typ_receive | typ_either | typ_choice | typ_break | typ_continue | typ_recursive | typ_iterative | typ_self | typ_loop }
+typ_name      = { name }
 typ_send      = { "(" ~ typ ~ ")" ~ typ }
 typ_receive   = { "[" ~ typ ~ "]" ~ typ }
 typ_either    = { "either" ~ "{" ~ ("." ~ name ~ typ)* ~ "}" }
