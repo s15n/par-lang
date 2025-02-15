@@ -2,6 +2,7 @@ use indexmap::IndexMap;
 use std::{
     fmt::{self, Display, Write},
     hash::Hash,
+    os::unix::process,
     sync::Arc,
 };
 
@@ -18,7 +19,7 @@ pub enum Process<Loc, Name, Typ> {
         Arc<Self>,
     ),
     Do(Loc, Name, Typ, Command<Loc, Name, Typ>),
-    Telltypes(Loc),
+    Telltypes(Loc, Arc<Self>),
 }
 
 #[derive(Clone, Debug)]
@@ -35,6 +36,9 @@ pub enum Command<Loc, Name, Typ> {
     Continue(Arc<Process<Loc, Name, Typ>>),
     Begin(Option<Name>, Arc<Process<Loc, Name, Typ>>),
     Loop(Option<Name>),
+
+    SendType(Type<Loc, Name>, Arc<Process<Loc, Name, Typ>>),
+    ReceiveType(Name, Arc<Process<Loc, Name, Typ>>),
 }
 
 #[derive(Clone, Debug)]
@@ -122,7 +126,10 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Process<Loc, Name, Typ> {
                     caps,
                 )
             }
-            Self::Telltypes(loc) => (Arc::new(Self::Telltypes(loc.clone())), Captures::new()),
+            Self::Telltypes(loc, process) => {
+                let (process, caps) = process.fix_captures(loop_points);
+                (Arc::new(Self::Telltypes(loc.clone(), process)), caps)
+            }
         }
     }
 
@@ -169,9 +176,17 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Process<Loc, Name, Typ> {
                         Command::Begin(label.clone(), process.optimize())
                     }
                     Command::Loop(label) => Command::Loop(label.clone()),
+                    Command::SendType(argument, process) => {
+                        Command::SendType(argument.clone(), process.optimize())
+                    }
+                    Command::ReceiveType(parameter, process) => {
+                        Command::ReceiveType(parameter.clone(), process.optimize())
+                    }
                 },
             )),
-            Self::Telltypes(loc) => Arc::new(Self::Telltypes(loc.clone())),
+            Self::Telltypes(loc, process) => {
+                Arc::new(Self::Telltypes(loc.clone(), process.optimize()))
+            }
         }
     }
 }
@@ -233,6 +248,14 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Command<Loc, Name, Typ> {
                 Self::Loop(label.clone()),
                 loop_points.get(label).cloned().unwrap_or_default(),
             ),
+            Self::SendType(argument, process) => {
+                let (process, caps) = process.fix_captures(loop_points);
+                (Self::SendType(argument.clone(), process), caps)
+            }
+            Self::ReceiveType(parameter, process) => {
+                let (process, caps) = process.fix_captures(loop_points);
+                (Self::ReceiveType(parameter.clone(), process), caps)
+            }
         }
     }
 }
@@ -356,12 +379,25 @@ impl<Loc, Name: Display, Typ> Process<Loc, Name, Typ> {
                         }
                         Ok(())
                     }
+
+                    Command::SendType(argument, process) => {
+                        write!(f, "(type ")?;
+                        argument.pretty(f, indent)?;
+                        write!(f, ")")?;
+                        process.pretty(f, indent)
+                    }
+
+                    Command::ReceiveType(parameter, process) => {
+                        write!(f, "[type {}]", parameter)?;
+                        process.pretty(f, indent)
+                    }
                 }
             }
 
-            Self::Telltypes(_) => {
+            Self::Telltypes(_, process) => {
                 indentation(f, indent)?;
-                write!(f, "telltypes")
+                write!(f, "telltypes")?;
+                process.pretty(f, indent)
             }
         }
     }

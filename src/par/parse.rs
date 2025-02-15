@@ -237,6 +237,20 @@ fn parse_type(pairs: &mut Pairs<'_, Rule>) -> Result<Type<Loc, Name>, ParseError
             Ok(Type::Loop(loc, label))
         }
 
+        Rule::typ_send_type => {
+            let mut pairs = pair.into_inner();
+            let (_, name) = parse_name(&mut pairs)?;
+            let body = parse_type(&mut pairs)?;
+            Ok(Type::SendType(loc, name, Box::new(body)))
+        }
+
+        Rule::typ_recv_type => {
+            let mut pairs = pair.into_inner();
+            let (_, name) = parse_name(&mut pairs)?;
+            let body = parse_type(&mut pairs)?;
+            Ok(Type::ReceiveType(loc, name, Box::new(body)))
+        }
+
         _ => unreachable!(),
     }
 }
@@ -369,6 +383,20 @@ fn parse_construct(pairs: &mut Pairs<'_, Rule>) -> Result<Construct<Loc, Name>, 
             Ok(Construct::Loop(loc, label))
         }
 
+        Rule::cons_send_type => {
+            let mut pairs = pair.into_inner();
+            let argument = parse_type(&mut pairs)?;
+            let construct = parse_construct(&mut pairs)?;
+            Ok(Construct::SendType(loc, argument, Box::new(construct)))
+        }
+
+        Rule::cons_recv_type => {
+            let mut pairs = pair.into_inner();
+            let (_, parameter) = parse_name(&mut pairs)?;
+            let construct = parse_construct(&mut pairs)?;
+            Ok(Construct::ReceiveType(loc, parameter, Box::new(construct)))
+        }
+
         _ => unreachable!(),
     }
 }
@@ -395,6 +423,17 @@ fn parse_construct_branch(
                 loc,
                 parameter,
                 annotation,
+                Box::new(branch),
+            ))
+        }
+
+        Rule::cons_branch_recv_type => {
+            let mut pairs = pair.into_inner();
+            let (_, parameter) = parse_name(&mut pairs)?;
+            let branch = parse_construct_branch(&mut pairs)?;
+            Ok(ConstructBranch::ReceiveType(
+                loc,
+                parameter,
                 Box::new(branch),
             ))
         }
@@ -448,6 +487,13 @@ fn parse_apply(pairs: &mut Pairs<'_, Rule>) -> Result<Apply<Loc, Name>, ParseErr
             Ok(Apply::Loop(loc, label))
         }
 
+        Rule::apply_send_type => {
+            let mut pairs = pair.into_inner();
+            let argument = parse_type(&mut pairs)?;
+            let then = parse_apply(&mut pairs)?;
+            Ok(Apply::SendType(loc, argument, Box::new(then)))
+        }
+
         _ => unreachable!(),
     }
 }
@@ -483,6 +529,13 @@ fn parse_apply_branch(pairs: &mut Pairs<'_, Rule>) -> Result<ApplyBranch<Loc, Na
             Ok(ApplyBranch::Continue(loc, expression))
         }
 
+        Rule::apply_branch_recv_type => {
+            let mut pairs = pair.into_inner();
+            let (_, parameter) = parse_name(&mut pairs)?;
+            let branch = parse_apply_branch(&mut pairs)?;
+            Ok(ApplyBranch::ReceiveType(loc, parameter, Box::new(branch)))
+        }
+
         _ => unreachable!(),
     }
 }
@@ -509,7 +562,11 @@ fn parse_process(pairs: &mut Pairs<'_, Rule>) -> Result<Process<Loc, Name>, Pars
 
         Rule::proc_pass => Ok(Process::Pass(loc)),
 
-        Rule::proc_telltypes => Ok(Process::Telltypes(loc)),
+        Rule::proc_telltypes => {
+            let mut pairs = pair.into_inner();
+            let process = parse_process(&mut pairs)?;
+            Ok(Process::Telltypes(loc, Box::new(process)))
+        }
 
         Rule::command => {
             let mut pairs = pair.into_inner();
@@ -603,6 +660,20 @@ fn parse_command(pairs: &mut Pairs<'_, Rule>) -> Result<Command<Loc, Name>, Pars
             Ok(Command::Loop(loc, label))
         }
 
+        Rule::cmd_send_type => {
+            let mut pairs = pair.into_inner();
+            let argument = parse_type(&mut pairs)?;
+            let command = parse_command(&mut pairs)?;
+            Ok(Command::SendType(loc, argument, Box::new(command)))
+        }
+
+        Rule::cmd_recv_type => {
+            let mut pairs = pair.into_inner();
+            let (_, parameter) = parse_name(&mut pairs)?;
+            let command = parse_command(&mut pairs)?;
+            Ok(Command::ReceiveType(loc, parameter, Box::new(command)))
+        }
+
         _ => unreachable!(),
     }
 }
@@ -651,6 +722,13 @@ fn parse_command_branch(
             let mut pairs = pair.into_inner();
             let process = parse_process(&mut pairs)?;
             Ok(CommandBranch::Continue(loc, process))
+        }
+
+        Rule::cmd_branch_recv_type => {
+            let mut pairs = pair.into_inner();
+            let (_, parameter) = parse_name(&mut pairs)?;
+            let branch = parse_command_branch(&mut pairs)?;
+            Ok(CommandBranch::ReceiveType(loc, parameter, Box::new(branch)))
         }
 
         _ => unreachable!(),

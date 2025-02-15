@@ -225,7 +225,10 @@ impl Playground {
                                             declaration,
                                         ) {
                                             Ok(_) => continue,
-                                            Err(error) => *program_result = Err(Error::Type(error)),
+                                            Err(error) => {
+                                                *program_result = Err(Error::Type(error));
+                                                break;
+                                            }
                                         }
                                     }
                                     Some(None) | None => {
@@ -235,7 +238,10 @@ impl Playground {
                                                     .declarations
                                                     .insert(name.clone(), Some(inferred_type));
                                             }
-                                            Err(error) => *program_result = Err(Error::Type(error)),
+                                            Err(error) => {
+                                                *program_result = Err(Error::Type(error));
+                                                break;
+                                            }
                                         }
                                     }
                                 }
@@ -529,12 +535,6 @@ impl Error {
                     "{}\n\n\n{}",
                     Self::display_runtime_error(code, error1),
                     Self::display_runtime_error(code, error2),
-                )
-            }
-            Telltypes(loc) => {
-                format!(
-                    "{}\nEncountered `telltypes`. Use only for type-checking.",
-                    Self::display_loc(code, loc)
                 )
             }
         }

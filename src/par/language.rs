@@ -26,6 +26,8 @@ pub enum Construct<Loc, Name> {
     Break(Loc),
     Begin(Loc, Option<Name>, Box<Self>),
     Loop(Loc, Option<Name>),
+    SendType(Loc, Type<Loc, Name>, Box<Self>),
+    ReceiveType(Loc, Name, Box<Self>),
 }
 
 #[derive(Clone, Debug)]
@@ -35,6 +37,7 @@ pub struct ConstructBranches<Loc, Name>(pub IndexMap<Name, ConstructBranch<Loc, 
 pub enum ConstructBranch<Loc, Name> {
     Then(Loc, Expression<Loc, Name>),
     Receive(Loc, Name, Option<Type<Loc, Name>>, Box<Self>),
+    ReceiveType(Loc, Name, Box<Self>),
 }
 
 #[derive(Clone, Debug)]
@@ -45,6 +48,7 @@ pub enum Apply<Loc, Name> {
     Either(Loc, ApplyBranches<Loc, Name>),
     Begin(Loc, Option<Name>, Box<Self>),
     Loop(Loc, Option<Name>),
+    SendType(Loc, Type<Loc, Name>, Box<Self>),
 }
 
 #[derive(Clone, Debug)]
@@ -55,6 +59,7 @@ pub enum ApplyBranch<Loc, Name> {
     Then(Loc, Name, Expression<Loc, Name>),
     Receive(Loc, Name, Option<Type<Loc, Name>>, Box<Self>),
     Continue(Loc, Expression<Loc, Name>),
+    ReceiveType(Loc, Name, Box<Self>),
 }
 
 #[derive(Clone, Debug)]
@@ -68,7 +73,7 @@ pub enum Process<Loc, Name> {
     ),
     Command(Name, Command<Loc, Name>),
     Pass(Loc),
-    Telltypes(Loc),
+    Telltypes(Loc, Box<Self>),
     Noop(Loc),
 }
 
@@ -88,6 +93,8 @@ pub enum Command<Loc, Name> {
     Continue(Loc, Box<Process<Loc, Name>>),
     Begin(Loc, Option<Name>, Box<Self>),
     Loop(Loc, Option<Name>),
+    SendType(Loc, Type<Loc, Name>, Box<Self>),
+    ReceiveType(Loc, Name, Box<Self>),
 }
 
 #[derive(Clone, Debug)]
@@ -98,6 +105,7 @@ pub enum CommandBranch<Loc, Name> {
     Then(Process<Loc, Name>),
     Receive(Loc, Name, Option<Type<Loc, Name>>, Box<Self>),
     Continue(Loc, Process<Loc, Name>),
+    ReceiveType(Loc, Name, Box<Self>),
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -321,6 +329,27 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Construct<Loc, Name> {
                 (),
                 process::Command::Loop(Some(Internal::Result(label.clone()))),
             )),
+
+            Self::SendType(loc, argument, construct) => {
+                let argument = argument.clone().map_names(&mut Internal::Original);
+                let process = construct.compile()?;
+                Arc::new(process::Process::Do(
+                    loc.clone(),
+                    Internal::Result(None),
+                    (),
+                    process::Command::SendType(argument, process),
+                ))
+            }
+
+            Self::ReceiveType(loc, parameter, construct) => {
+                let process = construct.compile()?;
+                Arc::new(process::Process::Do(
+                    loc.clone(),
+                    Internal::Result(None),
+                    (),
+                    process::Command::ReceiveType(Internal::Original(parameter.clone()), process),
+                ))
+            }
         })
     }
 }
@@ -351,6 +380,16 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> ConstructBranch<Loc, Name> {
                         original(annotation),
                         process,
                     ),
+                ))
+            }
+
+            Self::ReceiveType(loc, parameter, branch) => {
+                let process = branch.compile()?;
+                Arc::new(process::Process::Do(
+                    loc.clone(),
+                    Internal::Result(None),
+                    (),
+                    process::Command::ReceiveType(Internal::Original(parameter.clone()), process),
                 ))
             }
         })
@@ -427,6 +466,17 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Apply<Loc, Name> {
                 (),
                 process::Command::Loop(Some(Internal::Object(label.clone()))),
             )),
+
+            Self::SendType(loc, argument, apply) => {
+                let argument = argument.clone().map_names(&mut Internal::Original);
+                let process = apply.compile()?;
+                Arc::new(process::Process::Do(
+                    loc.clone(),
+                    Internal::Object(None),
+                    (),
+                    process::Command::SendType(argument, process),
+                ))
+            }
         })
     }
 }
@@ -485,6 +535,16 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> ApplyBranch<Loc, Name> {
                     ))),
                 ))
             }
+
+            Self::ReceiveType(loc, parameter, branch) => {
+                let process = branch.compile()?;
+                Arc::new(process::Process::Do(
+                    loc.clone(),
+                    Internal::Object(None),
+                    (),
+                    process::Command::ReceiveType(Internal::Original(parameter.clone()), process),
+                ))
+            }
         })
     }
 }
@@ -514,7 +574,10 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Process<Loc, Name> {
                 None => Err(CompileError::PassNotPossible(loc.clone()))?,
             },
 
-            Self::Telltypes(loc) => Arc::new(process::Process::Telltypes(loc.clone())),
+            Self::Telltypes(loc, process) => Arc::new(process::Process::Telltypes(
+                loc.clone(),
+                process.compile(pass, do_result)?,
+            )),
 
             Self::Noop(loc) => match do_result {
                 Some(expression) => Arc::new(process::Process::Do(
@@ -653,6 +716,27 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
                 (),
                 process::Command::Loop(label.clone().map(Internal::Original)),
             )),
+
+            Self::SendType(loc, argument, command) => {
+                let argument = argument.clone().map_names(&mut Internal::Original);
+                let process = command.compile(object_name, pass, do_result)?;
+                Arc::new(process::Process::Do(
+                    loc.clone(),
+                    object_internal,
+                    (),
+                    process::Command::SendType(argument, process),
+                ))
+            }
+
+            Self::ReceiveType(loc, parameter, command) => {
+                let process = command.compile(object_name, pass, do_result)?;
+                Arc::new(process::Process::Do(
+                    loc.clone(),
+                    object_internal,
+                    (),
+                    process::Command::ReceiveType(Internal::Original(parameter.clone()), process),
+                ))
+            }
         })
     }
 }
@@ -690,6 +774,16 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> CommandBranch<Loc, Name> {
                     object_internal,
                     (),
                     process::Command::Continue(process),
+                ))
+            }
+
+            Self::ReceiveType(loc, parameter, branch) => {
+                let process = branch.compile(object_name, pass, do_result)?;
+                Arc::new(process::Process::Do(
+                    loc.clone(),
+                    object_internal,
+                    (),
+                    process::Command::ReceiveType(Internal::Original(parameter.clone()), process),
                 ))
             }
         })

@@ -15,7 +15,6 @@ pub enum Error<Loc, Name> {
     IncompatibleOperations(Operation<Loc, Name>, Operation<Loc, Name>),
     NoSuchLoopPoint(Loc, Option<Name>),
     Multiple(Box<Self>, Box<Self>),
-    Telltypes(Loc),
 }
 
 #[derive(Clone, Debug)]
@@ -298,10 +297,16 @@ where
                             self.put(loc, name, object)?;
                             current_process = process;
                         }
+
+                        Command::SendType(_, process) | Command::ReceiveType(_, process) => {
+                            current_process = Arc::clone(process);
+                        }
                     }
                 }
 
-                Process::Telltypes(loc) => return self.throw([], Error::Telltypes(loc.clone())),
+                Process::Telltypes(_, process) => {
+                    current_process = Arc::clone(process);
+                }
             }
         }
     }
