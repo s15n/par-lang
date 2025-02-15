@@ -66,7 +66,7 @@ pub struct ParseError {
 
 #[derive(Clone, Debug)]
 pub struct Program<Name, Expr> {
-    pub type_defs: IndexMap<Name, Type<Loc, Name>>,
+    pub type_defs: IndexMap<Name, (Vec<Name>, Type<Loc, Name>)>,
     pub declarations: IndexMap<Name, Option<Type<Loc, Name>>>,
     pub definitions: IndexMap<Name, Expr>,
 }
@@ -93,8 +93,9 @@ pub fn parse_program(source: &str) -> Result<Program<Name, Expression<Loc, Name>
             Rule::type_def => {
                 let mut pairs = pair.into_inner();
                 let (_, name) = parse_name(&mut pairs)?;
+                let params = parse_type_params(&mut pairs)?;
                 let typ = parse_type(&mut pairs)?;
-                type_defs.insert(name, typ);
+                type_defs.insert(name, (params, typ));
             }
 
             Rule::declaration => {
@@ -135,6 +136,30 @@ fn parse_name(pairs: &mut Pairs<'_, Rule>) -> Result<(Loc, Name), ParseError> {
     ))
 }
 
+fn parse_type_params(pairs: &mut Pairs<'_, Rule>) -> Result<Vec<Name>, ParseError> {
+    let mut pairs = pairs.next().unwrap().into_inner();
+
+    let mut params = Vec::new();
+    while let Some(pair) = pairs.next() {
+        let (_, param) = parse_name(&mut Pairs::single(pair))?;
+        params.push(param);
+    }
+
+    Ok(params)
+}
+
+fn parse_type_args(pairs: &mut Pairs<'_, Rule>) -> Result<Vec<Type<Loc, Name>>, ParseError> {
+    let mut pairs = pairs.next().unwrap().into_inner();
+
+    let mut args = Vec::new();
+    while let Some(pair) = pairs.next() {
+        let arg = parse_type(&mut Pairs::single(pair))?;
+        args.push(arg);
+    }
+
+    Ok(args)
+}
+
 fn parse_type(pairs: &mut Pairs<'_, Rule>) -> Result<Type<Loc, Name>, ParseError> {
     let pair = pairs.next().unwrap().into_inner().next().unwrap();
     let loc = Loc::from(&pair);
@@ -143,7 +168,8 @@ fn parse_type(pairs: &mut Pairs<'_, Rule>) -> Result<Type<Loc, Name>, ParseError
         Rule::typ_name => {
             let mut pairs = pair.into_inner();
             let (_, name) = parse_name(&mut pairs)?;
-            Ok(Type::Name(loc, name))
+            let args = parse_type_args(&mut pairs)?;
+            Ok(Type::Name(loc, name, args))
         }
 
         Rule::typ_send => {

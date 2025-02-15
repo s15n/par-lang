@@ -112,9 +112,9 @@ impl eframe::App for Playground {
 impl Playground {
     fn get_theme(&self, ui: &egui::Ui) -> ColorTheme {
         if ui.visuals().dark_mode {
-            fix_dark_theme(ColorTheme::GRUVBOX_DARK)
+            fix_dark_theme(ColorTheme::GRUVBOX)
         } else {
-            fix_light_theme(ColorTheme::GRUVBOX_LIGHT)
+            fix_light_theme(ColorTheme::GITHUB_LIGHT)
         }
     }
 
@@ -130,10 +130,13 @@ impl Playground {
                             let type_defs = program
                                 .type_defs
                                 .into_iter()
-                                .map(|(name, typ)| {
+                                .map(|(name, (params, typ))| {
                                     (
                                         Internal::Original(name),
-                                        typ.map_names(&mut Internal::Original),
+                                        (
+                                            params.into_iter().map(Internal::Original).collect(),
+                                            typ.map_names(&mut Internal::Original),
+                                        ),
                                     )
                                 })
                                 .collect();

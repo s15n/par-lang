@@ -10,12 +10,12 @@ keyword = {
 name = @{ !(keyword ~ !("_" | ASCII_ALPHANUMERIC)) ~ (ASCII_ALPHA ~ ("_" | ASCII_ALPHANUMERIC)*) }
 
 program     = { SOI ~ (type_def | declaration | definition)* ~ EOI }
-type_def    = { "type" ~ name ~ "=" ~ typ }
+type_def    = { "type" ~ name ~ type_params ~ "=" ~ typ }
 declaration = { "declare" ~ name ~ ":" ~ typ }
 definition  = { "define" ~ name ~ "=" ~ expression }
 
 typ           = { typ_name | typ_send | typ_receive | typ_either | typ_choice | typ_break | typ_continue | typ_recursive | typ_iterative | typ_self | typ_loop }
-typ_name      = { name }
+typ_name      = { name ~ type_args }
 typ_send      = { "(" ~ typ ~ ")" ~ typ }
 typ_receive   = { "[" ~ typ ~ "]" ~ typ }
 typ_either    = { "either" ~ "{" ~ ("." ~ name ~ typ)* ~ "}" }
@@ -26,6 +26,9 @@ typ_recursive = { "recursive" ~ loop_label ~ typ }
 typ_iterative = { "iterative" ~ loop_label ~ typ }
 typ_self      = { "self" ~ loop_label }
 typ_loop      = { "loop" ~ loop_label }
+
+type_params = { ("<" ~ name+ ~ ">")? }
+type_args   = { ("<" ~ typ+ ~ ">")? }
 
 annotation = { (":" ~ typ)? }
 
