@@ -420,6 +420,10 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             (typ, Self::Recursive(_, label, body)) => {
                 typ.is_subtype_of(&Self::expand_recursive(label, body), type_defs, ind)?
             }
+            (Self::Recursive(_, label, body), typ) => {
+                //FIXME: this is dangerous with partly overlapping types
+                Self::expand_recursive(label, body).is_subtype_of(typ, type_defs, ind)?
+            }
             (Self::Iterative(_, label1, body1), Self::Iterative(_, label2, body2)) => {
                 let mut ind = ind.clone();
                 ind.insert((
@@ -430,6 +434,10 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             }
             (Self::Iterative(_, label, body), typ) => {
                 Self::expand_iterative(label, body).is_subtype_of(typ, type_defs, ind)?
+            }
+            (typ, Self::Iterative(_, label, body)) => {
+                //FIXME: this is dangerous with partly overlapping types
+                typ.is_subtype_of(&Self::expand_iterative(label, body), type_defs, ind)?
             }
 
             (Self::Self_(_, label1), Self::Self_(_, label2)) => ind.contains(&(
@@ -932,6 +940,18 @@ where
                 analyze_process,
             );
         }
+        if !matches!(command, Command::Begin(_, _) | Command::Loop(_)) {
+            if let Type::Recursive(_, top_label, body) = typ {
+                return self.check_command(
+                    inference_subject,
+                    loc,
+                    object,
+                    &Type::expand_recursive(top_label, body),
+                    command,
+                    analyze_process,
+                );
+            }
+        }
 
         Ok(match command {
             Command::Link(expression) => {
@@ -1103,11 +1123,11 @@ where
                 };
                 self.put(loc, driver.clone(), expanded)?;
 
-                let mut inferred_loop = Vec::new();
+                let mut inferred_loop = None;
 
                 for (var, type_at_begin) in variables.as_ref() {
                     if Some(var) == inference_subject {
-                        inferred_loop.push(type_at_begin.clone());
+                        inferred_loop = Some(type_at_begin.clone());
                         continue;
                     }
                     let Some(current_type) = self.get_variable(var) else {
@@ -1131,7 +1151,13 @@ where
                 }
                 self.cannot_have_obligations(loc)?;
 
-                (Command::Loop(label.clone()), inferred_loop)
+                (
+                    Command::Loop(label.clone()),
+                    inferred_loop
+                        .or(Some(Type::Loop(loc.clone(), label.clone())))
+                        .into_iter()
+                        .collect(),
+                )
             }
 
             Command::SendType(argument, process) => {
