@@ -93,7 +93,7 @@ cmd_loop      = { "loop" ~ loop_label }
 cmd_send_type = { "(" ~ "type" ~ typ ~ ")" ~ cmd }
 cmd_recv_type = { "[" ~ "type" ~ name ~ "]" ~ cmd }
 
-pass_process = { proc_let | proc_pass | command }
+pass_process = { proc_let | proc_pass | proc_telltypes | command }
 
 cmd_branches         = { (name ~ cmd_branch)* }
 cmd_branch           = { cmd_branch_then | cmd_branch_receive | cmd_branch_continue | cmd_branch_recv_type }
