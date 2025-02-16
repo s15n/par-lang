@@ -214,7 +214,7 @@ impl Playground {
                         {
                             for (name, expression) in &program.definitions {
                                 let mut context = types::Context::new(
-                                    Arc::new(types::TypeDefs(program.type_defs.clone())),
+                                    Arc::new(program.type_defs.clone()),
                                     Arc::new(types::Declarations(program.declarations.clone())),
                                 );
                                 match program.declarations.get(name) {

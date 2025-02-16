@@ -1,4 +1,4 @@
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use std::{
     collections::HashSet,
     fmt::{self, Display, Write},
@@ -70,7 +70,10 @@ enum TypePoint<Name> {
 }
 
 #[derive(Clone, Debug)]
-pub struct TypeDefs<Loc, Name>(pub IndexMap<Name, (Vec<Name>, Type<Loc, Name>)>);
+pub struct TypeDefs<Loc, Name> {
+    globals: Arc<IndexMap<Name, (Vec<Name>, Type<Loc, Name>)>>,
+    vars: IndexSet<Name>,
+}
 
 impl<Loc: Clone, Name: Clone + Eq + Hash> TypeDefs<Loc, Name> {
     pub fn get(
@@ -79,7 +82,18 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> TypeDefs<Loc, Name> {
         name: &Name,
         args: &[Type<Loc, Name>],
     ) -> Result<Type<Loc, Name>, TypeError<Loc, Name>> {
-        match self.0.get(name) {
+        if self.vars.contains(name) {
+            if !args.is_empty() {
+                return Err(TypeError::WrongNumberOfTypeArgs(
+                    loc.clone(),
+                    name.clone(),
+                    0,
+                    args.len(),
+                ));
+            }
+            return Ok(Type::Var(loc.clone(), name.clone()));
+        }
+        match self.globals.get(name) {
             Some((params, typ)) => {
                 if params.len() != args.len() {
                     return Err(TypeError::WrongNumberOfTypeArgs(
@@ -105,7 +119,18 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> TypeDefs<Loc, Name> {
         name: &Name,
         args: &[Type<Loc, Name>],
     ) -> Result<Type<Loc, Name>, TypeError<Loc, Name>> {
-        match self.0.get(name) {
+        if self.vars.contains(name) {
+            if !args.is_empty() {
+                return Err(TypeError::WrongNumberOfTypeArgs(
+                    loc.clone(),
+                    name.clone(),
+                    0,
+                    args.len(),
+                ));
+            }
+            return Ok(Type::DualVar(loc.clone(), name.clone()));
+        }
+        match self.globals.get(name) {
             Some((params, typ)) => {
                 if params.len() != args.len() {
                     return Err(TypeError::WrongNumberOfTypeArgs(
@@ -214,15 +239,19 @@ fn map_label<Name, N>(label: Option<Name>, f: &mut impl FnMut(Name) -> N) -> Opt
 impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
     pub fn substitute(self, var: &Name, typ: &Self) -> Result<Self, TypeError<Loc, Name>> {
         Ok(match self {
-            Self::Var(loc, name) => if &name == var {
-                typ.clone()
-            } else {
-                Self::Var(loc, name)
+            Self::Var(loc, name) => {
+                if &name == var {
+                    typ.clone()
+                } else {
+                    Self::Var(loc, name)
+                }
             }
-            Self::DualVar(loc, name) => if &name == var {
-                typ.clone()
-            } else {
-                Self::Var(loc, name)
+            Self::DualVar(loc, name) => {
+                if &name == var {
+                    typ.clone()
+                } else {
+                    Self::Var(loc, name)
+                }
             }
             Self::Name(loc, name, args) if &name == var => {
                 if !args.is_empty() {
@@ -626,7 +655,9 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
     ) -> Result<Self, TypeError<Loc, Name>> {
         Ok(match (self, other) {
             (Self::Var(loc, name1), Self::Var(_, name2)) if name1 == name2 => Self::Var(loc, name1),
-            (Self::DualVar(loc, name1), Self::DualVar(_, name2)) if name1 == name2 => Self::DualVar(loc, name1),
+            (Self::DualVar(loc, name1), Self::DualVar(_, name2)) if name1 == name2 => {
+                Self::DualVar(loc, name1)
+            }
             (Self::Name(loc, name, args), t2) => {
                 type_defs.get(&loc, &name, &args)?.unify(t2, type_defs)?
             }
@@ -676,13 +707,11 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             (Self::Continue(loc), Self::Continue(_)) => Self::Continue(loc),
 
             (Self::SendType(loc, name1, body1), Self::SendType(_, name2, body2)) => {
-                let body2 = body2
-                    .substitute(&name2, &Type::Var(loc.clone(), name1.clone()))?;
+                let body2 = body2.substitute(&name2, &Type::Var(loc.clone(), name1.clone()))?;
                 Self::SendType(loc, name1, Box::new(body1.unify(body2, type_defs)?))
             }
             (Self::ReceiveType(loc, name1, body1), Self::ReceiveType(_, name2, body2)) => {
-                let body2 = body2
-                    .substitute(&name2, &Type::Var(loc.clone(), name1.clone()))?;
+                let body2 = body2.substitute(&name2, &Type::Var(loc.clone(), name1.clone()))?;
                 Self::ReceiveType(loc, name1, Box::new(body1.unify(body2, type_defs)?))
             }
 
@@ -711,7 +740,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
 
 #[derive(Clone, Debug)]
 pub struct Context<Loc, Name> {
-    type_defs: Arc<TypeDefs<Loc, Name>>,
+    type_defs: TypeDefs<Loc, Name>,
     declarations: Arc<Declarations<Loc, Name>>,
     variables: IndexMap<Name, Type<Loc, Name>>,
     loop_points: IndexMap<Option<Name>, (Name, Arc<IndexMap<Name, Type<Loc, Name>>>)>,
@@ -723,11 +752,14 @@ where
     Name: Clone + Eq + Hash,
 {
     pub fn new(
-        type_defs: Arc<TypeDefs<Loc, Name>>,
+        globals_type_defs: Arc<IndexMap<Name, (Vec<Name>, Type<Loc, Name>)>>,
         declarations: Arc<Declarations<Loc, Name>>,
     ) -> Self {
         Self {
-            type_defs,
+            type_defs: TypeDefs {
+                globals: globals_type_defs,
+                vars: IndexSet::new(),
+            },
             declarations,
             variables: IndexMap::new(),
             loop_points: IndexMap::new(),
@@ -736,7 +768,7 @@ where
 
     pub fn split(&self) -> Self {
         Self {
-            type_defs: Arc::clone(&self.type_defs),
+            type_defs: self.type_defs.clone(),
             declarations: Arc::clone(&self.declarations),
             variables: IndexMap::new(),
             loop_points: self.loop_points.clone(),
@@ -828,10 +860,14 @@ where
             Process::Do(loc, object, (), command) => {
                 let typ = self.get(loc, object)?;
 
-                let (command, _) =
-                    self.check_command(loc, object, &typ, command, &mut |context, process| {
-                        Ok((context.check_process(process)?, vec![]))
-                    })?;
+                let (command, _) = self.check_command(
+                    None,
+                    loc,
+                    object,
+                    &typ,
+                    command,
+                    &mut |context, process| Ok((context.check_process(process)?, vec![])),
+                )?;
 
                 Ok(Arc::new(Process::Do(
                     loc.clone(),
@@ -849,6 +885,7 @@ where
 
     fn check_command(
         &mut self,
+        inference_subject: Option<&Name>,
         loc: &Loc,
         object: &Name,
         typ: &Type<Loc, Name>,
@@ -867,6 +904,7 @@ where
     {
         if let Type::Name(_, name, args) = typ {
             return self.check_command(
+                inference_subject,
                 loc,
                 object,
                 &self.type_defs.get(loc, name, args)?,
@@ -876,6 +914,7 @@ where
         }
         if let Type::DualName(_, name, args) = typ {
             return self.check_command(
+                inference_subject,
                 loc,
                 object,
                 &self.type_defs.get_dual(loc, name, args)?,
@@ -885,6 +924,7 @@ where
         }
         if let Type::Iterative(_, top_label, body) = typ {
             return self.check_command(
+                inference_subject,
                 loc,
                 object,
                 &Type::expand_iterative(top_label, body),
@@ -1063,7 +1103,13 @@ where
                 };
                 self.put(loc, driver.clone(), expanded)?;
 
+                let mut inferred_loop = Vec::new();
+
                 for (var, type_at_begin) in variables.as_ref() {
+                    if Some(var) == inference_subject {
+                        inferred_loop.push(type_at_begin.clone());
+                        continue;
+                    }
                     let Some(current_type) = self.get_variable(var) else {
                         return Err(TypeError::LoopVariableNotPreserved(
                             loc.clone(),
@@ -1085,9 +1131,7 @@ where
                 }
                 self.cannot_have_obligations(loc)?;
 
-                let inferred_loop = Type::Loop(loc.clone(), label.clone());
-
-                (Command::Loop(label.clone()), vec![inferred_loop])
+                (Command::Loop(label.clone()), inferred_loop)
             }
 
             Command::SendType(argument, process) => {
@@ -1112,10 +1156,10 @@ where
                         typ.clone(),
                     ));
                 };
-                let then_type = then_type.clone().substitute(
-                    type_name,
-                    &Type::Var(loc.clone(), parameter.clone()),
-                )?;
+                let then_type = then_type
+                    .clone()
+                    .substitute(type_name, &Type::Var(loc.clone(), parameter.clone()))?;
+                self.type_defs.vars.insert(type_name.clone());
                 self.put(loc, object.clone(), then_type)?;
                 let (process, inferred_types) = analyze_process(self, process)?;
                 (
@@ -1171,11 +1215,17 @@ where
                 }
                 let typ = self.get(loc, object)?;
 
-                let (command, inferred_types) =
-                    self.check_command(loc, object, &typ, command, &mut |context, process| {
+                let (command, inferred_types) = self.check_command(
+                    Some(subject),
+                    loc,
+                    object,
+                    &typ,
+                    command,
+                    &mut |context, process| {
                         let (process, typ) = context.infer_process(process, subject)?;
                         Ok((process, vec![typ]))
-                    })?;
+                    },
+                )?;
 
                 Ok((
                     Arc::new(Process::Do(loc.clone(), object.clone(), typ, command)),
