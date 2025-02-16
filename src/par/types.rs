@@ -1694,8 +1694,9 @@ impl<Loc, Name: Display> TypeError<Loc, Name> {
                     loop_type_str,
                 )
             }
-            Self::Telltypes(_, variables) => {
+            Self::Telltypes(loc, variables) => {
                 let mut buf = String::new();
+                write!(&mut buf, "{}\n", display_loc(loc)).unwrap();
                 for (name, typ) in variables {
                     write!(&mut buf, "{}: ", name).unwrap();
                     typ.pretty(&mut buf, 0).unwrap();
