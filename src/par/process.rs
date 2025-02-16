@@ -2,7 +2,6 @@ use indexmap::IndexMap;
 use std::{
     fmt::{self, Display, Write},
     hash::Hash,
-    os::unix::process,
     sync::Arc,
 };
 

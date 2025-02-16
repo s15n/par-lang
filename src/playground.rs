@@ -15,7 +15,7 @@ use crate::{
         parse::{parse_program, Loc, Name, ParseError, Program},
         process::Expression,
         runtime::{self, Context, Operation},
-        types::{self, Type, TypeError},
+        types::{self, TypeError},
     },
     spawn::TokioSpawn,
 };
