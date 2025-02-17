@@ -114,12 +114,18 @@ pub enum CommandBranch<Loc, Name> {
     ReceiveType(Loc, Name, Box<Self>),
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Internal<Name> {
     Original(Name),
     Result(Option<Name>),
     Object(Option<Name>),
     Assign(usize),
+}
+
+impl<Name: From<String>> From<String> for Internal<Name> {
+    fn from(value: String) -> Self {
+        Self::Original(Name::from(value))
+    }
 }
 
 impl<Name: Display> Display for Internal<Name> {

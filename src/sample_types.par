@@ -41,6 +41,7 @@ def mapSeq = [type A][type B] [seq][mapper]
     } in (y) loop
   }
 
+dec listrgb: List<Color>
 def listrgb =
   .item(.red!)
   .item(.green!)
@@ -83,6 +84,7 @@ def bools_forever =
     } in (output) loop
   }
 
+dec zip: [List<Color>][Seq<Color>]List<(Color)(Color)!>
 def zip = [list: List<Color>][seq: Seq<Color>] list begin {
   empty? => do {
     seq.close?

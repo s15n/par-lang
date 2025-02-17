@@ -48,9 +48,15 @@ impl Loc {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Name {
     pub string: String,
+}
+
+impl From<String> for Name {
+    fn from(string: String) -> Self {
+        Self { string }
+    }
 }
 
 impl Display for Name {
@@ -69,6 +75,16 @@ pub struct Program<Name, Expr> {
     pub type_defs: IndexMap<Name, (Vec<Name>, Type<Loc, Name>)>,
     pub declarations: IndexMap<Name, Option<Type<Loc, Name>>>,
     pub definitions: IndexMap<Name, Expr>,
+}
+
+impl<Name, Expr> Default for Program<Name, Expr> {
+    fn default() -> Self {
+        Self {
+            type_defs: Default::default(),
+            declarations: Default::default(),
+            definitions: Default::default(),
+        }
+    }
 }
 
 pub fn parse_program(source: &str) -> Result<Program<Name, Expression<Loc, Name>>, ParseError> {
