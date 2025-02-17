@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeMap,
     fmt::{Debug, Display},
     sync::Arc,
 };
@@ -11,21 +10,42 @@ use crate::par::{
     language::Internal,
     parse::{Name, Program},
     process::{Captures, Command, Expression, Process},
+    types::Type,
 };
 
 use super::net::{Net, Tree};
 
-type Prog<Loc, Name, Typ> = Program<Name, Arc<Expression<Loc, Name, Typ>>>;
+type Prog<Loc, Name> = Program<Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>;
 
-pub struct Compiler<'program, Loc, Name: Debug + Clone + Eq + Hash, Typ> {
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum VariableKind {
+    // Can only be used once.
+    Linear,
+    // Replicable, but needs no dereliction
+    Replicable,
+    // Replicable, and needs dereliction
+    Boxed,
+}
+
+#[derive(Clone)]
+pub struct TypedTree<Loc: Clone, Name: Clone> {
+    tree: Tree,
+    ty: Type<Loc, Name>,
+}
+
+pub struct Compiler<'program, Loc: Clone, Name: Debug + Clone + Eq + Hash> {
     net: Net,
-    vars: IndexMap<Name, Tree>,
-    types: IndexMap<Name, Typ>,
-    // Vars that can be replicated with dup and era
-    replicable_vars: IndexMap<Name, Tree>,
-    program: &'program Prog<Loc, Name, Typ>,
+    vars: IndexMap<Name, (TypedTree<Loc, Name>, VariableKind)>,
+    program: &'program Prog<Loc, Name>,
     global_name_to_id: IndexMap<Name, usize>,
+    id_to_ty: Vec<Type<Loc, Name>>,
     id_to_package: Vec<Tree>,
+}
+
+impl Tree {
+    fn with_type<Loc: Clone, Name: Clone>(self, ty: Type<Loc, Name>) -> TypedTree<Loc, Name> {
+        TypedTree { tree: self, ty }
+    }
 }
 
 fn multiplex_trees(mut trees: Vec<Tree>) -> Tree {
@@ -39,12 +59,16 @@ fn multiplex_trees(mut trees: Vec<Tree>) -> Tree {
     }
 }
 
-impl<'program, Loc: Debug, Name: Debug + Clone + Eq + Hash + Display, Typ>
-    Compiler<'program, Loc, Name, Typ>
+impl<'program, Loc: Debug + Clone, Name: Debug + Clone + Eq + Hash + Display>
+    Compiler<'program, Loc, Name>
 {
-    fn compile_global(&mut self, name: &Name) -> Option<Tree> {
-        if let Some(tree) = self.global_name_to_id.get(name) {
-            return Some(Tree::Package(*tree));
+    fn compile_global(&mut self, name: &Name) -> Option<TypedTree<Loc, Name>> {
+        if let Some(id) = self.global_name_to_id.get(name) {
+            let ty = self.id_to_ty.get(*id).unwrap().clone();
+            return Some(TypedTree {
+                tree: Tree::Package(*id),
+                ty,
+            });
         };
         let global = self.program.definitions.get(name)?;
         let old_net = core::mem::take(&mut self.net);
@@ -54,15 +78,16 @@ impl<'program, Loc: Debug, Name: Debug + Clone + Eq + Hash + Display, Typ>
         let tree = self.with_captures(&Captures::default(), |this| {
             this.compile_expression(global.as_ref())
         });
-        self.net.ports.push_back(tree);
+        self.net.ports.push_back(tree.tree);
         self.net.packages = Arc::new(self.id_to_package.clone().into_iter().enumerate().collect());
         println!("{}", self.net.show());
         self.net.normal();
-        let tree = self.net.ports.pop_back().unwrap();
-        self.id_to_package.push(tree);
+        let package_contents = self.net.ports.pop_back().unwrap();
+        self.id_to_ty.push(tree.ty.clone());
+        self.id_to_package.push(package_contents);
         self.net = old_net;
 
-        Some(Tree::Package(id))
+        Some(Tree::Package(id).with_type(tree.ty))
     }
     fn with_captures<T>(
         &mut self,
@@ -70,62 +95,104 @@ impl<'program, Loc: Debug, Name: Debug + Clone + Eq + Hash + Display, Typ>
         f: impl FnOnce(&mut Self) -> T,
     ) -> T {
         println!("{:?}", captures);
-        let mut replicables = IndexMap::new();
         let mut vars = IndexMap::new();
         for (name, _) in captures.names.iter() {
-            let (tree, is_replicable) = self.use_variable(name);
-            if is_replicable {
-                replicables.insert(name.clone(), tree);
-            } else {
-                vars.insert(name.clone(), tree);
-            }
+            let (tree, kind) = self.use_variable(name);
+            vars.insert(name.clone(), (tree, kind));
         }
-        core::mem::swap(&mut replicables, &mut self.replicable_vars);
         core::mem::swap(&mut vars, &mut self.vars);
         let t = f(self);
-        core::mem::swap(&mut replicables, &mut self.replicable_vars);
         core::mem::swap(&mut vars, &mut self.vars);
         // drop all replicables
-        for (_, v) in replicables.into_iter() {
-            self.net.link(v, Tree::e());
-        }
-        // assert no variables were unclosed
-        if !vars.is_empty() {
-            let s: Vec<String> = vars.keys().map(|x| format!("{}", x)).collect();
-            panic!("some variablse were not closed: {}", s.join(", "));
+        for (name, (value, kind)) in vars.into_iter() {
+            if kind == VariableKind::Linear {
+                panic!("some variables were not closed: {}", name);
+            } else {
+                self.net.link(value.tree, Tree::e());
+            }
         }
         t
     }
-    fn bind_variable(&mut self, name: &Name, tree: Tree) {
-        assert!(self.vars.insert(name.clone(), tree).is_none())
+    fn bind_variable(&mut self, name: &Name, tree: TypedTree<Loc, Name>) {
+        assert!(self
+            .vars
+            .insert(name.clone(), (tree, VariableKind::Linear))
+            .is_none())
     }
-    // TODO: This should do dereliction, when necessary.
-    fn instantiate_variable(&mut self, name: &Name) -> Tree {
-        self.use_variable(name).0
+    fn instantiate_variable(&mut self, name: &Name) -> TypedTree<Loc, Name> {
+        let (value, kind) = self.use_variable(name);
+        if kind == VariableKind::Boxed {
+            todo!()
+        }
+        value
     }
-    fn use_variable(&mut self, name: &Name) -> (Tree, bool) {
-        if let Some(value) = self.vars.swap_remove(name) {
-            (value, false)
-        } else if let Some(old_value) = self.replicable_vars.swap_remove(name) {
-            let (w0, w1) = self.net.create_wire();
-            let (v0, v1) = self.net.create_wire();
-            self.net.link(Tree::d(v0, w0), old_value);
-            self.replicable_vars.insert(name.clone(), w1);
-            (v1, true)
+    fn use_variable(&mut self, name: &Name) -> (TypedTree<Loc, Name>, VariableKind) {
+        if let Some((tree, kind)) = self.vars.swap_remove(name) {
+            match kind {
+                VariableKind::Linear => (tree, kind),
+                kind => {
+                    let (w0, w1) = self.net.create_wire();
+                    let (v0, v1) = self.net.create_wire();
+                    self.net.link(Tree::d(v0, w0), tree.tree);
+                    self.vars.insert(
+                        name.clone(),
+                        (
+                            TypedTree {
+                                tree: w1,
+                                ty: tree.ty.clone(),
+                            },
+                            kind,
+                        ),
+                    );
+                    (
+                        TypedTree {
+                            tree: v1,
+                            ty: tree.ty.clone(),
+                        },
+                        kind,
+                    )
+                }
+            }
         } else if self.compile_global(name).is_some() {
             let value = self.compile_global(name).unwrap();
-            self.replicable_vars.insert(name.clone(), value.clone());
-            (value, true)
+            let v = (value.clone(), VariableKind::Replicable);
+            self.vars.insert(name.clone(), v.clone());
+            v
         } else {
             panic!("unknown variable {}", name)
         }
     }
-    fn compile_expression(&mut self, expr: &Expression<Loc, Name, Typ>) -> Tree {
+    fn create_typed_wire(
+        &mut self,
+        t: Type<Loc, Name>,
+    ) -> (TypedTree<Loc, Name>, TypedTree<Loc, Name>) {
+        let (v0, v1) = self.net.create_wire();
+        (
+            TypedTree {
+                tree: v0,
+                ty: t.clone(),
+            },
+            TypedTree {
+                tree: v1,
+                ty: t.dual(),
+            },
+        )
+    }
+    fn cast(&mut self, from: TypedTree<Loc, Name>, to: Type<Loc, Name>) -> TypedTree<Loc, Name> {
+        todo!()
+    }
+    fn compile_expression(
+        &mut self,
+        expr: &Expression<Loc, Name, Type<Loc, Name>>,
+    ) -> TypedTree<Loc, Name> {
         match expr {
-            Expression::Reference(_, name, _) => self.use_variable(name).0,
-            Expression::Fork(_, captures, name, _, _, proc) => {
+            Expression::Reference(_, name, ty) => {
+                let inner = self.instantiate_variable(name);
+                self.cast(inner, ty.clone())
+            }
+            Expression::Fork(_, captures, name, _, typ, proc) => {
                 self.with_captures(captures, |this| {
-                    let (v0, v1) = this.net.create_wire();
+                    let (v0, v1) = this.create_typed_wire(t);
                     this.bind_variable(name, v0);
                     this.compile_process(proc);
                     v1
@@ -133,15 +200,17 @@ impl<'program, Loc: Debug, Name: Debug + Clone + Eq + Hash + Display, Typ>
             }
         }
     }
-    fn compile_process(&mut self, proc: &Process<Loc, Name, Typ>) {
+    fn compile_process(&mut self, proc: &Process<Loc, Name, Type<Loc, Name>>) {
         match proc {
             Process::Let(_, key, _, _, value, rest) => {
                 let value = self.compile_expression(value);
-                self.vars.insert(key.clone(), value);
+                self.vars.insert(key.clone(), (value, VariableKind::Linear));
                 self.compile_process(rest);
             }
 
-            Process::Do(_, name, _, command) => self.compile_command(name.clone(), command),
+            Process::Do(_, name, target_ty, command) => {
+                self.compile_command(name.clone(), target_ty.clone(), command)
+            }
             _ => todo!(),
         }
     }
@@ -153,33 +222,43 @@ impl<'program, Loc: Debug, Name: Debug + Clone + Eq + Hash + Display, Typ>
         }
     }
     fn show_state(&mut self) {
-        println!("Vars:");
-        for (k, v) in &self.vars {
-            println!(" {}: {}", k, self.net.show_tree(&v))
-        }
-        println!("Replicable vars:");
-        for (k, v) in &self.replicable_vars {
-            println!(" {}: {}", k, self.net.show_tree(&v))
+        println!("Variables:");
+        for (name, (value, kind)) in &self.vars {
+            println!(
+                " {}: {:?} = {}",
+                name,
+                value.ty,
+                self.net.show_tree(&value.tree)
+            )
         }
         println!("Net:");
         println!(" {}", self.net.show());
         println!("");
     }
-    fn compile_command(&mut self, name: Name, cmd: &Command<Loc, Name, Typ>) {
+    fn link_typed(&mut self, a: TypedTree<Loc, Name>, b: TypedTree<Loc, Name>) {
+        self.net.link(a.tree, b.tree);
+    }
+    fn compile_command(
+        &mut self,
+        name: Name,
+        ty: Type<Loc, Name>,
+        cmd: &Command<Loc, Name, Type<Loc, Name>>,
+    ) {
         match cmd {
             Command::Link(a) => {
                 let a = self.compile_expression(a);
                 let b = self.instantiate_variable(&name);
-                self.net.link(a, b);
+                self.link_typed(a, b);
             }
             // types get erased.
             Command::SendType(_, process) => self.compile_process(process),
             Command::ReceiveType(_, process) => self.compile_process(process),
             Command::Send(expr, process) => {
                 let expr = self.compile_expression(expr);
-                let (v0, v1) = self.net.create_wire();
-                let old_tree = self.vars.insert(name, v1).unwrap();
-                self.net.link(Tree::c(v0, expr), old_tree);
+                let (v0, v1) = self.create_typed_wire(ty);
+                let old_tree = self.instantiate_variable(&name);
+                self.bind_variable(&name, v0);
+                self.net.link(Tree::c(v1.tree, expr.tree), old_tree.tree);
                 self.compile_process(process);
             }
             Command::Receive(target, _, process) => {
@@ -282,14 +361,13 @@ impl<'program, Loc: Debug, Name: Debug + Clone + Eq + Hash + Display, Typ>
     }
 }
 
-pub fn compile_file<Loc: Debug, Typ>(program: &Prog<Loc, Internal<Name>, Typ>) -> IcCompiled {
+pub fn compile_file<Loc: Debug + Clone>(program: &Prog<Loc, Internal<Name>>) -> IcCompiled {
     let mut compiler = Compiler {
         net: Net::default(),
         vars: IndexMap::default(),
-        replicable_vars: IndexMap::default(),
         global_name_to_id: Default::default(),
         id_to_package: Default::default(),
-        types: IndexMap::new(),
+        id_to_ty: Default::default(),
         program,
     };
     for k in compiler.program.definitions.clone().keys() {
