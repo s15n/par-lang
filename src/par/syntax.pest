@@ -14,8 +14,9 @@ type_def    = { "type" ~ name ~ type_params ~ "=" ~ typ }
 declaration = { "declare" ~ name ~ ":" ~ typ }
 definition  = { "define" ~ name ~ "=" ~ expression }
 
-typ           = { typ_name | typ_send | typ_receive | typ_either | typ_choice | typ_break | typ_continue | typ_recursive | typ_iterative | typ_self | typ_loop | typ_send_type | typ_recv_type }
+typ           = { typ_name | typ_dual_name | typ_send | typ_receive | typ_either | typ_choice | typ_break | typ_continue | typ_recursive | typ_iterative | typ_self | typ_loop | typ_send_type | typ_recv_type }
 typ_name      = { name ~ type_args }
+typ_dual_name = { "chan" ~ name ~ type_args }
 typ_send      = { "(" ~ typ ~ ")" ~ typ }
 typ_receive   = { "[" ~ typ ~ "]" ~ typ }
 typ_either    = { "either" ~ "{" ~ ("." ~ name ~ typ)* ~ "}" }
