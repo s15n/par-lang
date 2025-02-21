@@ -1654,7 +1654,7 @@ impl<Loc, Name: Display> TypeError<Loc, Name> {
                 )
             }
             Self::NameNotDefined(loc, name) => {
-                format!("{}\n`{}` is not defined.", display_loc(loc), name,)
+                format!("{}\n`{}` is not defined.", display_loc(loc), name)
             }
             Self::ShadowedObligation(loc, name) => {
                 format!(
@@ -1664,7 +1664,7 @@ impl<Loc, Name: Display> TypeError<Loc, Name> {
                 )
             }
             Self::TypeMustBeKnownAtThisPoint(loc, _) => {
-                format!("{}\nType must be known at this point.", display_loc(loc),)
+                format!("{}\nType must be known at this point.", display_loc(loc))
             }
             Self::ParameterTypeMustBeKnown(loc, _, param) => {
                 format!(
