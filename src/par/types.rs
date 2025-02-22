@@ -1625,11 +1625,14 @@ where
                     subject.clone(),
                 ))
             }
-            Command::ReceiveType(_, _) => {
-                return Err(TypeError::TypeMustBeKnownAtThisPoint(
-                    loc.clone(),
-                    subject.clone(),
-                ))
+
+            Command::ReceiveType(parameter, process) => {
+                self.type_defs.vars.insert(parameter.clone());
+                let (process, then_type) = self.infer_process(process, subject)?;
+                (
+                    Command::ReceiveType(parameter.clone(), process),
+                    Type::SendType(loc.clone(), parameter.clone(), Box::new(then_type)),
+                )
             }
         })
     }
