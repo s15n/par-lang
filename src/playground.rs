@@ -25,6 +25,7 @@ pub struct Playground {
     compiled: Option<Compiled>,
     interact: Option<Interact>,
     editor_font_size: f32,
+    typecheck: bool,
     show_compiled: bool,
 }
 
@@ -65,6 +66,7 @@ impl Playground {
             compiled: None,
             interact: None,
             editor_font_size: 16.0,
+            typecheck: true,
             show_compiled: false,
         })
     }
@@ -122,6 +124,8 @@ impl Playground {
         ui.vertical(|ui| {
             ui.horizontal_top(|ui| {
                 ui.add_space(5.0);
+
+                ui.checkbox(&mut self.typecheck, egui::RichText::new("Typecheck"));
 
                 if ui.button(egui::RichText::new("Compile").strong()).clicked() {
                     let program = parse_program(self.code.as_str())
@@ -192,98 +196,101 @@ impl Playground {
                         program,
                         pretty,
                     });
-                }
 
-                if let Some(Compiled {
-                    code,
-                    program: program_result,
-                    pretty,
-                }) = &mut self.compiled
-                {
-                    if let Ok(mut program) = program_result.clone() {
-                        if pretty.is_some() {
-                            ui.checkbox(
-                                &mut self.show_compiled,
-                                egui::RichText::new("Show compiled"),
-                            );
-                        }
-
-                        if ui
-                            .button(egui::RichText::new("Typecheck").strong())
-                            .clicked()
+                    if self.typecheck {
+                        if let Some(Compiled {
+                            program: program_result,
+                            ..
+                        }) = &mut self.compiled
                         {
-                            for (name, expression) in &program.definitions {
-                                let mut context = types::Context::new(
-                                    Arc::new(program.type_defs.clone()),
-                                    Arc::new(types::Declarations(program.declarations.clone())),
-                                );
-                                match program.declarations.get(name) {
-                                    Some(Some(declaration)) => {
-                                        match context.check_expression(
-                                            None,
-                                            expression,
-                                            declaration,
-                                        ) {
-                                            Ok(_) => continue,
-                                            Err(error) => {
-                                                *program_result = Err(Error::Type(error));
-                                                break;
+                            if let Ok(mut program) = program_result.clone() {
+                                for (name, expression) in &program.definitions {
+                                    let mut context = types::Context::new(
+                                        Arc::new(program.type_defs.clone()),
+                                        Arc::new(types::Declarations(program.declarations.clone())),
+                                    );
+                                    match program.declarations.get(name) {
+                                        Some(Some(declaration)) => {
+                                            match context.check_expression(
+                                                None,
+                                                expression,
+                                                declaration,
+                                            ) {
+                                                Ok(_) => continue,
+                                                Err(error) => {
+                                                    *program_result = Err(Error::Type(error));
+                                                    break;
+                                                }
                                             }
                                         }
-                                    }
-                                    Some(None) | None => {
-                                        match context.infer_expression(None, expression) {
-                                            Ok((_, inferred_type)) => {
-                                                program
-                                                    .declarations
-                                                    .insert(name.clone(), Some(inferred_type));
-                                            }
-                                            Err(error) => {
-                                                *program_result = Err(Error::Type(error));
-                                                break;
+                                        Some(None) | None => {
+                                            match context.infer_expression(None, expression) {
+                                                Ok((_, inferred_type)) => {
+                                                    program
+                                                        .declarations
+                                                        .insert(name.clone(), Some(inferred_type));
+                                                }
+                                                Err(error) => {
+                                                    *program_result = Err(Error::Type(error));
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
                         }
+                    }
+                }
 
-                        egui::menu::menu_custom_button(
-                            ui,
-                            egui::Button::new(
-                                egui::RichText::new("Run")
-                                    .strong()
-                                    .color(egui::Color32::BLACK),
-                            )
-                            .fill(green().lerp_to_gamma(egui::Color32::WHITE, 0.3)),
-                            |ui| {
-                                for (internal_name, expression) in &program.definitions {
-                                    if let Internal::Original(name) = internal_name {
-                                        if ui.button(&name.string).clicked() {
-                                            if let Some(int) = self.interact.take() {
-                                                int.handle.lock().expect("lock failed").cancel();
-                                            }
-                                            self.interact = Some(Interact {
-                                                code: Arc::clone(&code),
-                                                handle: Handle::start_expression(
-                                                    Arc::new({
-                                                        let ctx = ui.ctx().clone();
-                                                        move || ctx.request_repaint()
-                                                    }),
-                                                    Context::new(
-                                                        Arc::new(TokioSpawn),
-                                                        Arc::new(program.definitions.clone()),
-                                                    ),
-                                                    expression,
-                                                ),
-                                            });
-                                            ui.close_menu();
-                                        }
-                                    }
-                                }
-                            },
+                if let Some(Compiled {
+                    code,
+                    program: Ok(program),
+                    pretty,
+                }) = &mut self.compiled
+                {
+                    if pretty.is_some() {
+                        ui.checkbox(
+                            &mut self.show_compiled,
+                            egui::RichText::new("Show compiled"),
                         );
                     }
+
+                    egui::menu::menu_custom_button(
+                        ui,
+                        egui::Button::new(
+                            egui::RichText::new("Run")
+                                .strong()
+                                .color(egui::Color32::BLACK),
+                        )
+                        .fill(green().lerp_to_gamma(egui::Color32::WHITE, 0.3)),
+                        |ui| {
+                            for (internal_name, expression) in &program.definitions {
+                                if let Internal::Original(name) = internal_name {
+                                    if ui.button(&name.string).clicked() {
+                                        if let Some(int) = self.interact.take() {
+                                            int.handle.lock().expect("lock failed").cancel();
+                                        }
+                                        self.interact = Some(Interact {
+                                            code: Arc::clone(&code),
+                                            handle: Handle::start_expression(
+                                                Arc::new({
+                                                    let ctx = ui.ctx().clone();
+                                                    move || ctx.request_repaint()
+                                                }),
+                                                Context::new(
+                                                    Arc::new(TokioSpawn),
+                                                    Arc::new(program.definitions.clone()),
+                                                ),
+                                                expression,
+                                            ),
+                                        });
+                                        ui.close_menu();
+                                    }
+                                }
+                            }
+                        },
+                    );
                 }
             });
 
