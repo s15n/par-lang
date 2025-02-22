@@ -99,9 +99,9 @@ define zip = [list: List<Color>][seq: Seq<Color>] list begin {
   } in .item((x)(y)!) xs loop
 }
 
-define zippie = zip(listrgb)(red_forever)
+define zipped = zip(listrgb)(red_forever)
 
-define zip2 = [seq1: Seq<Color>][seq2: Seq<Color>] begin {
+define zip2 = [type T] [seq1: Seq<T>][seq2: Seq<T>] begin {
   close => do {
     seq1.close?
     seq2.close?
