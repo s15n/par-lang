@@ -76,6 +76,10 @@ impl<'program, Loc: Debug + Clone, Name: Debug + Clone + Eq + Hash + Display>
         let id = self.id_to_package.len();
         self.global_name_to_id.insert(name.clone(), id);
         let tree = self.with_captures(&Captures::default(), |this| {
+            let mut s = String::new();
+            global.pretty(&mut s, 0);
+            println!("{}", s);
+            println!("{:#?}", global);
             this.compile_expression(global.as_ref())
         });
         self.net.ports.push_back(tree.tree);
@@ -178,8 +182,52 @@ impl<'program, Loc: Debug + Clone, Name: Debug + Clone + Eq + Hash + Display>
             },
         )
     }
+    // cast an expression into another type.
     fn cast(&mut self, from: TypedTree<Loc, Name>, to: Type<Loc, Name>) -> TypedTree<Loc, Name> {
-        todo!()
+        match (&from.ty, &to) {
+            (Type::Send(_, from_fst, from_snd), Type::Send(_, to_fst, to_snd)) => {
+                let (fst0, fst1) = self.create_typed_wire(from_fst.as_ref().clone());
+                let (snd0, snd1) = self.create_typed_wire(from_snd.as_ref().clone());
+                self.net.link(from.tree, Tree::c(fst1.tree, snd1.tree));
+                Tree::c(
+                    self.cast(fst0, to_fst.as_ref().clone()).tree,
+                    self.cast(snd0, to_snd.as_ref().clone()).tree,
+                )
+                .with_type(to)
+            }
+            (Type::Receive(_, from_fst, from_snd), Type::Receive(_, to_fst, to_snd)) => {
+                let (fst0, fst1) = self.create_typed_wire(from_fst.dual());
+                let (snd0, snd1) = self.create_typed_wire(from_snd.as_ref().clone());
+                self.net.link(from.tree, Tree::c(fst1.tree, snd1.tree));
+                Tree::c(
+                    self.cast(fst0, to_fst.dual()).tree,
+                    self.cast(snd0, to_snd.as_ref().clone()).tree,
+                )
+                .with_type(to)
+            }
+            (Type::Choice(_, from_choices), Type::Choice(_, to_choices)) => {
+                // to_choices must contain from_choices
+                // we destructure from_choices and then construct the result, returing the chosen choice object in each case.
+                let (v0, v1) = self.create_typed_wire(to.clone());
+                let mut cases = vec![];
+                let out_of = to_choices.len();
+                for (k, ty) in from_choices {
+                    let (x0, x1) = self.create_typed_wire(ty.clone());
+
+                    let index = to_choices
+                        .get_index_of(k)
+                        .expect("Can't cast between these choices");
+                    cases.push((self.choice_instance(x1.tree, index, out_of), x0.tree));
+                }
+                let either = self.either_instance(v1.tree, cases);
+                self.net.link(from.tree, either);
+                v0
+            }
+
+            (Type::Break(_), Type::Break(_)) => from,
+            (Type::Continue(_), Type::Continue(_)) => from,
+            (a, b) => todo!("Can't cast from {:?} to {:?}", a, b),
+        }
     }
     fn compile_expression(
         &mut self,
@@ -192,7 +240,7 @@ impl<'program, Loc: Debug + Clone, Name: Debug + Clone + Eq + Hash + Display>
             }
             Expression::Fork(_, captures, name, _, typ, proc) => {
                 self.with_captures(captures, |this| {
-                    let (v0, v1) = this.create_typed_wire(t);
+                    let (v0, v1) = this.create_typed_wire(typ.clone());
                     this.bind_variable(name, v0);
                     this.compile_process(proc);
                     v1
@@ -214,13 +262,6 @@ impl<'program, Loc: Debug + Clone, Name: Debug + Clone + Eq + Hash + Display>
             _ => todo!(),
         }
     }
-    fn link_var(&mut self, name: Name, a: Tree) {
-        if let Some(b) = self.vars.swap_remove(&name) {
-            self.net.link(a, b)
-        } else {
-            self.vars.insert(name, a);
-        }
-    }
     fn show_state(&mut self) {
         println!("Variables:");
         for (name, (value, kind)) in &self.vars {
@@ -238,6 +279,18 @@ impl<'program, Loc: Debug + Clone, Name: Debug + Clone + Eq + Hash + Display>
     fn link_typed(&mut self, a: TypedTree<Loc, Name>, b: TypedTree<Loc, Name>) {
         self.net.link(a.tree, b.tree);
     }
+    fn choice_instance(&mut self, tree: Tree, index: usize, out_of: usize) -> Tree {
+        let (w0, w1) = self.net.create_wire();
+        let mut trees: Vec<_> = std::iter::repeat(Tree::e()).take(out_of).collect();
+        *trees.get_mut(index).unwrap() = Tree::c(w1, tree);
+        Tree::c(w0, multiplex_trees(trees))
+    }
+    fn either_instance(&mut self, ctx_out: Tree, cases: Vec<(Tree, Tree)>) -> Tree {
+        Tree::c(
+            ctx_out,
+            multiplex_trees(cases.into_iter().map(|(a, b)| Tree::c(a, b)).collect()),
+        )
+    }
     fn compile_command(
         &mut self,
         name: Name,
@@ -254,101 +307,108 @@ impl<'program, Loc: Debug + Clone, Name: Debug + Clone + Eq + Hash + Display>
             Command::SendType(_, process) => self.compile_process(process),
             Command::ReceiveType(_, process) => self.compile_process(process),
             Command::Send(expr, process) => {
+                let a = self.instantiate_variable(&name);
+                let a = self.cast(a, ty);
+                let Type::Receive(_, arg_type, ret_type) = a.ty else {
+                    unreachable!()
+                };
                 let expr = self.compile_expression(expr);
-                let (v0, v1) = self.create_typed_wire(ty);
-                let old_tree = self.instantiate_variable(&name);
+                let expr = self.cast(expr, *arg_type);
+
+                let (v0, v1) = self.create_typed_wire(*ret_type);
                 self.bind_variable(&name, v0);
-                self.net.link(Tree::c(v1.tree, expr.tree), old_tree.tree);
+                //
+                self.net.link(Tree::c(v1.tree, expr.tree), a.tree);
                 self.compile_process(process);
             }
             Command::Receive(target, _, process) => {
-                let (v0, v1) = self.net.create_wire();
-                let (w0, w1) = self.net.create_wire();
-                let old_tree = self
-                    .vars
-                    .insert(name.clone(), v1)
-                    .unwrap_or_else(|| panic!("could not find var {}", name));
-                self.vars.insert(target.clone(), w1);
-                self.net.link(Tree::c(v0, w0), old_tree);
+                let a = self.instantiate_variable(&name);
+                let a = self.cast(a, ty);
+                let Type::Send(_, arg_type, ret_type) = a.ty else {
+                    unreachable!()
+                };
+                let (v0, v1) = self.create_typed_wire(*arg_type);
+                let (w0, w1) = self.create_typed_wire(*ret_type);
+                self.bind_variable(&name, w0);
+                self.bind_variable(&target, v0);
+                //
+                self.net.link(Tree::c(w1.tree, v1.tree), a.tree);
                 self.compile_process(process);
             }
-            Command::Choose(signal, process) => {
-                // TODO this is really terrible, but it's just a proof of concept solution.
-                let is_right = format!("{}", signal) == "right";
-                let is_left = format!("{}", signal) == "left";
-                assert!(is_right ^ is_left);
+            Command::Choose(chosen, process) => {
+                let a = self.instantiate_variable(&name);
+                let a = self.cast(a, ty);
 
-                let (v0, v1) = self.net.create_wire();
-                let (w0, w1) = self.net.create_wire();
-                let old_tree = self.vars.insert(name, v1).unwrap();
-                self.net.link(
-                    if is_left {
-                        Tree::c(w0, Tree::c(Tree::c(w1, v0), Tree::e()))
-                    } else {
-                        Tree::c(w0, Tree::c(Tree::e(), Tree::c(w1, v0)))
-                    },
-                    old_tree,
-                );
+                let Type::Choice(_, branches) = a.ty else {
+                    unreachable!()
+                };
+                let Some(branch_type) = branches.get(chosen) else {
+                    unreachable!()
+                };
+                branches.sort_keys();
+                let branch_index = branches.sort.get_index_of(chosen).unwrap();
+                self.choice_instance(tree, branch_index, branches.len());
+                self.net.link(building_tree, a.tree);
+                self.bind_variable(&name, v0);
                 self.compile_process(process);
             }
             Command::Match(names, processes) => {
                 let old_tree = self.instantiate_variable(&name);
                 // Multiplex all other variables in the context.
                 let mut m_trees = vec![];
+                let mut m_tys = vec![];
                 let mut m_vars = vec![];
-                let mut m_is_replicable = vec![];
+                let mut m_kind = vec![];
                 for (k, v) in core::mem::take(&mut self.vars) {
+                    let (v, kind) = self.use_variable(&name);
                     m_vars.push(k);
-                    m_trees.push(v);
-                    m_is_replicable.push(false);
-                }
-                for k in self.replicable_vars.clone().keys() {
-                    let v = self.use_variable(&k).0;
-                    m_vars.push(k.clone());
-                    m_trees.push(v);
-                    m_is_replicable.push(true);
+                    m_trees.push(v.tree);
+                    m_tys.push(v.ty);
+                    m_kind.push(kind);
                 }
                 let context_in = multiplex_trees(m_trees);
 
-                let mut case_left: Option<Tree> = None;
-                let mut case_right: Option<Tree> = None;
-                for (name_here, process) in names.iter().zip(processes.iter()) {
-                    let (w0, w1) = self.net.create_wire();
-                    self.vars.insert(name.clone(), w0);
+                let mut branches = vec![];
+
+                let Type::Either(_, required_branches) = ty else {
+                    unreachable!()
+                };
+
+                for ((choice_here, process), branch) in names
+                    .iter()
+                    .zip(processes.iter())
+                    .zip(required_branches.values())
+                {
+                    let (w0, w1) = self.create_typed_wire(branch.clone());
+                    self.bind_variable(&name, w0);
 
                     // multiplex the conetxt frmo the inside now
                     let mut m_trees = vec![];
-                    for (name, is_replicable) in m_vars.iter().zip(m_is_replicable.iter()) {
+                    for (name, (ty, kind)) in m_vars.iter().zip(m_tys.iter().zip(m_kind.iter())) {
                         let (v0, v1) = self.net.create_wire();
-                        if *is_replicable {
-                            self.replicable_vars.insert(name.clone(), v0);
-                        } else {
-                            self.vars.insert(name.clone(), v0);
-                        }
+                        self.vars
+                            .insert(name.clone(), (v0.with_type(ty.clone()), kind.clone()));
 
                         m_trees.push(v1);
                     }
                     let context_out = multiplex_trees(m_trees);
 
                     self.compile_process(process);
-                    if format!("{}", name_here) == "left" {
-                        case_left = Some(Tree::c(context_out, w1));
-                    } else if format!("{}", name_here) == "right" {
-                        case_right = Some(Tree::c(context_out, w1));
-                    } else {
-                        todo!()
-                    }
+                    branches.push(Tree::c(context_out, w1.tree))
                 }
-                self.net.link(
-                    old_tree,
-                    Tree::c(context_in, Tree::c(case_left.unwrap(), case_right.unwrap())),
-                );
+                let mut t = Tree::e();
+                for i in branches.into_iter().rev() {
+                    t = Tree::c(i, t);
+                }
+                self.net.link(old_tree.tree, t);
             }
             Command::Break => {
-                self.link_var(name, Tree::e());
+                let a = self.instantiate_variable(&name).tree;
+                self.net.link(a, Tree::e());
             }
             Command::Continue(process) => {
-                self.link_var(name, Tree::e());
+                let a = self.instantiate_variable(&name).tree;
+                self.net.link(a, Tree::e());
                 self.compile_process(process);
             }
             Command::Begin(name, rest) => {
