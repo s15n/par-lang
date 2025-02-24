@@ -73,24 +73,18 @@ impl Tree {
         }
     }
     pub fn show(&self) -> String {
-        self.show_with_context(&mut BTreeMap::default())
+        self.show_with_context(&mut (BTreeMap::default(), 0))
     }
-    pub fn show_with_context(&self, ctx: &mut BTreeMap<usize, String>) -> String {
+    pub fn show_with_context(&self, ctx: &mut (BTreeMap<usize, String>, usize)) -> String {
         use Tree::*;
         match self {
             Var(id) => {
-                if let Some(name) = ctx.get(id) {
+                if let Some(name) = ctx.0.get(id) {
                     name.clone()
                 } else {
-                    let mut free_var = None;
-                    for i in 0.. {
-                        if ctx.get(&i).is_none() {
-                            free_var = Some(i);
-                            break;
-                        }
-                    }
-                    let free_var = free_var.unwrap();
-                    ctx.insert(*id, number_to_string(free_var));
+                    ctx.1 += 1;
+                    let free_var = ctx.1 - 1;
+                    ctx.0.insert(*id, number_to_string(free_var));
                     number_to_string(free_var)
                 }
             }

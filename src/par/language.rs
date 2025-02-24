@@ -108,7 +108,7 @@ pub enum CommandBranch<Loc, Name> {
     ReceiveType(Loc, Name, Box<Self>),
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Internal<Name> {
     Original(Name),
     Result(Option<Name>),

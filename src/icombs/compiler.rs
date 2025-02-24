@@ -33,7 +33,7 @@ pub struct TypedTree<Loc: Clone, Name: Clone> {
     ty: Type<Loc, Name>,
 }
 
-pub struct Compiler<'program, Loc: Clone, Name: Debug + Clone + Eq + Hash> {
+pub struct Compiler<'program, Loc: Clone, Name: Debug + Clone + Eq + Hash + Ord> {
     net: Net,
     vars: IndexMap<Name, (TypedTree<Loc, Name>, VariableKind)>,
     program: &'program Prog<Loc, Name>,
@@ -59,7 +59,7 @@ fn multiplex_trees(mut trees: Vec<Tree>) -> Tree {
     }
 }
 
-impl<'program, Loc: Debug + Clone, Name: Debug + Clone + Eq + Hash + Display>
+impl<'program, Loc: Debug + Clone, Name: Debug + Clone + Eq + Hash + Display + Ord>
     Compiler<'program, Loc, Name>
 {
     fn compile_global(&mut self, name: &Name) -> Option<TypedTree<Loc, Name>> {
@@ -208,6 +208,10 @@ impl<'program, Loc: Debug + Clone, Name: Debug + Clone + Eq + Hash + Display>
             (Type::Choice(_, from_choices), Type::Choice(_, to_choices)) => {
                 // to_choices must contain from_choices
                 // we destructure from_choices and then construct the result, returing the chosen choice object in each case.
+                let mut from_choices = from_choices.clone();
+                let mut to_choices = to_choices.clone();
+                from_choices.sort_keys();
+                to_choices.sort_keys();
                 let (v0, v1) = self.create_typed_wire(to.clone());
                 let mut cases = vec![];
                 let out_of = to_choices.len();
@@ -215,7 +219,7 @@ impl<'program, Loc: Debug + Clone, Name: Debug + Clone + Eq + Hash + Display>
                     let (x0, x1) = self.create_typed_wire(ty.clone());
 
                     let index = to_choices
-                        .get_index_of(k)
+                        .get_index_of(&k)
                         .expect("Can't cast between these choices");
                     cases.push((self.choice_instance(x1.tree, index, out_of), x0.tree));
                 }
@@ -339,16 +343,17 @@ impl<'program, Loc: Debug + Clone, Name: Debug + Clone + Eq + Hash + Display>
                 let a = self.instantiate_variable(&name);
                 let a = self.cast(a, ty);
 
-                let Type::Choice(_, branches) = a.ty else {
-                    unreachable!()
-                };
-                let Some(branch_type) = branches.get(chosen) else {
+                let Type::Choice(_, mut branches) = a.ty else {
                     unreachable!()
                 };
                 branches.sort_keys();
-                let branch_index = branches.sort.get_index_of(chosen).unwrap();
-                self.choice_instance(tree, branch_index, branches.len());
-                self.net.link(building_tree, a.tree);
+                let Some(branch_type) = branches.get(chosen) else {
+                    unreachable!()
+                };
+                let branch_index = branches.get_index_of(chosen).unwrap();
+                let (v0, v1) = self.create_typed_wire(branch_type.clone());
+                let choosing_tree = self.choice_instance(v1.tree, branch_index, branches.len());
+                self.net.link(choosing_tree, a.tree);
                 self.bind_variable(&name, v0);
                 self.compile_process(process);
             }
@@ -370,13 +375,15 @@ impl<'program, Loc: Debug + Clone, Name: Debug + Clone + Eq + Hash + Display>
 
                 let mut branches = vec![];
 
-                let Type::Either(_, required_branches) = ty else {
+                let Type::Either(_, mut required_branches) = ty else {
                     unreachable!()
                 };
+                required_branches.sort_keys();
+                let mut choice_and_process: Vec<_> = names.iter().zip(processes.iter()).collect();
+                choice_and_process.sort_by_key(|k| k.0);
 
-                for ((choice_here, process), branch) in names
-                    .iter()
-                    .zip(processes.iter())
+                for ((choice_here, process), branch) in choice_and_process
+                    .into_iter()
                     .zip(required_branches.values())
                 {
                     let (w0, w1) = self.create_typed_wire(branch.clone());
