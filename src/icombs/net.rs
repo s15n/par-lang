@@ -73,7 +73,7 @@ impl Tree {
         }
     }
     pub fn show(&self) -> String {
-        self.show_with_context(&mut (BTreeMap::default(), 0))
+        self.show_with_context(&mut (BTreeMap::new(), 0))
     }
     pub fn show_with_context(&self, ctx: &mut (BTreeMap<usize, String>, usize)) -> String {
         use Tree::*;
@@ -272,13 +272,24 @@ impl Net {
         }
     }
     pub fn show(&self) -> String {
+        self.show_indent(0)
+    }
+    pub fn show_indent(&self, indent: usize) -> String {
         use core::fmt::Write;
+        let indent_string = "    ".repeat(indent);
         let mut s = String::new();
         for i in &self.ports {
-            write!(&mut s, "{}\n", self.show_tree(i)).unwrap();
+            write!(&mut s, "{}{}\n", indent_string, self.show_tree(i)).unwrap();
         }
         for (a, b) in &self.redexes {
-            write!(&mut s, "{} ~ {}\n", self.show_tree(a), self.show_tree(b)).unwrap();
+            write!(
+                &mut s,
+                "{}{} ~ {}\n",
+                indent_string,
+                self.show_tree(a),
+                self.show_tree(b)
+            )
+            .unwrap();
         }
         s
     }

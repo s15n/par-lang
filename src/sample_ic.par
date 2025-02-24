@@ -1,10 +1,9 @@
-type Bool {
-    .true!
-    .false!
-}
 
 define main = chan user {
-    let a: Bool = .true!
+    let a: either {
+        .true!
+        .false!
+    } = .true!
     a {
         true? => { user! }
         false? => { user! }

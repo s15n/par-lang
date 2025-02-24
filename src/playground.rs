@@ -93,6 +93,7 @@ impl Compiled {
                 },
             }
         }
+        new_program.type_defs = program.type_defs.clone();
         return Compiled {
             program,
             pretty,
