@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     fmt::{Debug, Display},
     sync::Arc,
 };
@@ -39,6 +40,7 @@ pub struct Compiler<'program, Name: Debug + Clone + Eq + Hash + Ord> {
     vars: IndexMap<Name, (TypedTree<Name>, VariableKind)>,
     program: &'program Prog<Name>,
     global_name_to_id: IndexMap<Name, usize>,
+    type_variables: BTreeSet<Name>,
     id_to_ty: Vec<Type<Loc, Name>>,
     id_to_package: Vec<Tree>,
 }
@@ -212,13 +214,17 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 to_choices.sort_keys();
                 let mut cases = vec![];
                 let out_of = from_choices.len();
-                for (k, ty) in to_choices {
-                    let (x0, x1) = self.create_typed_wire(ty.clone());
+                for (k, to_ty) in to_choices {
+                    let from_ty = from_choices.get(&k).unwrap();
+                    let (x0, x1) = self.create_typed_wire(from_ty.clone());
 
                     let index = from_choices
                         .get_index_of(&k)
                         .expect("Can't cast between these choices");
-                    cases.push((self.either_instance(x1.tree, index, out_of), x0.tree));
+                    cases.push((
+                        self.either_instance(x1.tree, index, out_of),
+                        self.cast(x0, to_ty).tree,
+                    ));
                 }
                 self.choice_instance(from.tree, cases).with_type(to)
             }
@@ -233,13 +239,15 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 let (v0, v1) = self.create_typed_wire(to.clone());
                 let mut cases = vec![];
                 let out_of = to_either.len();
-                for (k, ty) in from_either {
-                    let (x0, x1) = self.create_typed_wire(ty.clone());
+                for (k, from_ty) in from_either {
+                    let to_ty = to_either.get(&k).unwrap();
+                    let (x0, x1) = self.create_typed_wire(from_ty.clone());
 
                     let index = to_either
                         .get_index_of(&k)
                         .expect("Can't cast between these choices");
-                    cases.push((self.either_instance(x1.tree, index, out_of), x0.tree));
+                    let x0 = self.cast(x0, to_ty.clone()).tree;
+                    cases.push((self.either_instance(x0, index, out_of), x1.tree));
                 }
                 let either = self.choice_instance(v1.tree, cases);
                 self.net.link(from.tree, either);
@@ -248,6 +256,12 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
 
             (Type::Break(_), Type::Break(_)) => from,
             (Type::Continue(_), Type::Continue(_)) => from,
+            (Type::SendType(_, _, a), Type::SendType(_, _, b)) => {
+                self.cast(from.tree.with_type(*a.clone()), *b.clone())
+            }
+            (Type::ReceiveType(_, _, a), Type::ReceiveType(_, _, b)) => {
+                self.cast(from.tree.with_type(*a.clone()), *b.clone())
+            }
             (Type::Name(_, name, args), to) => {
                 let ty = self.dereference_type_def(name, args);
                 self.cast(from.tree.with_type(ty), to.clone())
@@ -339,6 +353,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
         *trees.get_mut(index).unwrap() = Tree::c(w1, tree);
         Tree::c(w0, multiplex_trees(trees))
     }
+    /// cases is a list of (context, payload).
     fn choice_instance(&mut self, ctx_out: Tree, cases: Vec<(Tree, Tree)>) -> Tree {
         Tree::c(
             ctx_out,
@@ -373,8 +388,26 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 self.link_typed(a, b);
             }
             // types get erased.
-            Command::SendType(_, process) => self.compile_process(process),
-            Command::ReceiveType(_, process) => self.compile_process(process),
+            Command::SendType(_, process) => {
+                let a = self.instantiate_variable(&name);
+                let a = self.cast(a, ty);
+                let Type::SendType(_, src_name, ret_type) = a.ty else {
+                    unreachable!()
+                };
+                self.bind_variable(&name, a.tree.with_type(*ret_type));
+
+                self.compile_process(process);
+            }
+            Command::ReceiveType(_, process) => {
+                let a = self.instantiate_variable(&name);
+                let a = self.cast(a, ty);
+                let Type::ReceiveType(_, dest_name, ret_type) = a.ty else {
+                    unreachable!()
+                };
+                self.bind_variable(&name, a.tree.with_type(*ret_type));
+
+                self.compile_process(process);
+            }
             Command::Send(expr, process) => {
                 // < name(expr) process >
                 // ==
@@ -524,8 +557,8 @@ pub fn compile_file(program: &Prog<Internal<Name>>) -> IcCompiled {
 
 #[derive(Clone, Default)]
 pub struct IcCompiled {
-    id_to_package: Arc<IndexMap<usize, Tree>>,
-    name_to_id: IndexMap<Internal<Name>, usize>,
+    pub(crate) id_to_package: Arc<IndexMap<usize, Tree>>,
+    pub(crate) name_to_id: IndexMap<Internal<Name>, usize>,
 }
 
 impl Display for IcCompiled {
@@ -540,5 +573,17 @@ impl Display for IcCompiled {
             f.write_fmt(format_args!("@{} = {}\n", k, v.show()))?;
         }
         Ok(())
+    }
+}
+
+impl IcCompiled {
+    pub fn get_with_name(&self, name: &Internal<Name>) -> Option<Tree> {
+        let id = self.name_to_id.get(name)?;
+        self.id_to_package.get(id).cloned()
+    }
+    pub fn create_net(&self) -> Net {
+        let mut net = Net::default();
+        net.packages = self.id_to_package.clone();
+        net
     }
 }

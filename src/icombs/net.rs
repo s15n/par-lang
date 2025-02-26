@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use indexmap::IndexMap;
 
-type VarId = usize;
+pub type VarId = usize;
 
 pub fn number_to_string(mut number: usize) -> String {
     let mut result = String::new();

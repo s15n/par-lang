@@ -6,6 +6,8 @@ mod interact;
 mod par;
 mod playground;
 mod spawn;
+#[cfg(test)]
+mod tests;
 
 #[tokio::main]
 async fn main() {

@@ -53,6 +53,12 @@ pub struct Name {
     pub string: String,
 }
 
+impl From<String> for Name {
+    fn from(string: String) -> Self {
+        Self { string }
+    }
+}
+
 impl Display for Name {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.string)

@@ -115,6 +115,12 @@ pub enum Internal<Name> {
     Object(Option<Name>),
 }
 
+impl<Name: From<String>> From<String> for Internal<Name> {
+    fn from(value: String) -> Self {
+        Self::Original(Name::from(value))
+    }
+}
+
 impl<Name: Display> Display for Internal<Name> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

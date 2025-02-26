@@ -1,11 +1,2 @@
-
-define main = chan user {
-    let a: either {
-        .true!
-        .false!
-    } = .true!
-    a {
-        true? => { user! }
-        false? => { user! }
-    }
-}
+declare main: [type T] [T] { true => T }
+define main = [type T] [a] { true => a }

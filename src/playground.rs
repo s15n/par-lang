@@ -32,14 +32,63 @@ pub struct Playground {
 }
 
 #[derive(Clone)]
-struct Compiled {
-    program: Program<Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
-    pretty: String,
-    checked: Result<Checked, TypeError<Loc, Internal<Name>>>,
+pub(crate) struct Compiled {
+    pub(crate) program: Program<Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
+    pub(crate) pretty: String,
+    pub(crate) checked: Result<Checked, TypeError<Loc, Internal<Name>>>,
 }
 
 impl Compiled {
-    fn from_program(
+    pub(crate) fn from_string(source: &str) -> Result<Compiled, Error> {
+        parse_program(source)
+            .map_err(|error| Error::Parse(error))
+            .and_then(|program| {
+                let type_defs = program
+                    .type_defs
+                    .into_iter()
+                    .map(|(name, (params, typ))| {
+                        (
+                            Internal::Original(name),
+                            (
+                                params.into_iter().map(Internal::Original).collect(),
+                                typ.map_names(&mut Internal::Original),
+                            ),
+                        )
+                    })
+                    .collect();
+                let declarations = program
+                    .declarations
+                    .into_iter()
+                    .map(|(name, option_typ)| {
+                        (
+                            Internal::Original(name),
+                            option_typ.map(|typ| typ.map_names(&mut Internal::Original)),
+                        )
+                    })
+                    .collect();
+                let compile_result = program
+                    .definitions
+                    .into_iter()
+                    .map(|(name, def)| {
+                        def.compile().map(|compiled| {
+                            (
+                                Internal::Original(name.clone()),
+                                compiled.optimize().fix_captures(&IndexMap::new()).0,
+                            )
+                        })
+                    })
+                    .collect::<Result<_, CompileError<Loc>>>();
+                match compile_result {
+                    Ok(compiled) => Ok(Compiled::from_program(Program {
+                        type_defs,
+                        declarations,
+                        definitions: compiled,
+                    })),
+                    Err(error) => Err(Error::Compile(error)),
+                }
+            })
+    }
+    pub(crate) fn from_program(
         program: Program<Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
     ) -> Self {
         let pretty = program
@@ -103,14 +152,14 @@ impl Compiled {
 }
 
 #[derive(Clone)]
-struct Checked {
-    program:
+pub(crate) struct Checked {
+    pub(crate) program:
         Program<Internal<Name>, Arc<Expression<Loc, Internal<Name>, Type<Loc, Internal<Name>>>>>,
-    ic_compiled: Option<crate::icombs::IcCompiled>,
+    pub(crate) ic_compiled: Option<crate::icombs::IcCompiled>,
 }
 
 impl Checked {
-    fn from_program(
+    pub(crate) fn from_program(
         program: Program<
             Internal<Name>,
             Arc<Expression<Loc, Internal<Name>, Type<Loc, Internal<Name>>>>,
@@ -125,7 +174,7 @@ impl Checked {
 }
 
 #[derive(Clone, Debug)]
-enum Error {
+pub(crate) enum Error {
     Parse(ParseError),
     Compile(CompileError<Loc>),
     Type(TypeError<Loc, Internal<Name>>),
@@ -241,55 +290,7 @@ impl Playground {
         }
     }
     fn recompile(&mut self) {
-        self.compiled = Some(
-            parse_program(self.code.as_str())
-                .map_err(|error| Error::Parse(error))
-                .and_then(|program| {
-                    let type_defs = program
-                        .type_defs
-                        .into_iter()
-                        .map(|(name, (params, typ))| {
-                            (
-                                Internal::Original(name),
-                                (
-                                    params.into_iter().map(Internal::Original).collect(),
-                                    typ.map_names(&mut Internal::Original),
-                                ),
-                            )
-                        })
-                        .collect();
-                    let declarations = program
-                        .declarations
-                        .into_iter()
-                        .map(|(name, option_typ)| {
-                            (
-                                Internal::Original(name),
-                                option_typ.map(|typ| typ.map_names(&mut Internal::Original)),
-                            )
-                        })
-                        .collect();
-                    let compile_result = program
-                        .definitions
-                        .into_iter()
-                        .map(|(name, def)| {
-                            def.compile().map(|compiled| {
-                                (
-                                    Internal::Original(name.clone()),
-                                    compiled.optimize().fix_captures(&IndexMap::new()).0,
-                                )
-                            })
-                        })
-                        .collect::<Result<_, CompileError<Loc>>>();
-                    match compile_result {
-                        Ok(compiled) => Ok(Compiled::from_program(Program {
-                            type_defs,
-                            declarations,
-                            definitions: compiled,
-                        })),
-                        Err(error) => Err(Error::Compile(error)),
-                    }
-                }),
-        );
+        self.compiled = Some(Compiled::from_string(self.code.as_str()));
         self.compiled_code = Arc::from(self.code.as_str());
     }
 
