@@ -251,30 +251,32 @@ impl Playground {
         program: &Program<Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
         compiled_code: Arc<str>,
     ) {
-        for (internal_name, expression) in &program.definitions {
-            if let Internal::Original(name) = internal_name {
-                if ui.button(&name.string).clicked() {
-                    if let Some(int) = interact.take() {
-                        int.handle.lock().expect("lock failed").cancel();
-                    }
-                    *interact = Some(Interact {
-                        code: Arc::clone(&compiled_code),
-                        handle: Handle::start_expression(
-                            Arc::new({
-                                let ctx = ui.ctx().clone();
-                                move || ctx.request_repaint()
-                            }),
-                            Context::new(
-                                Arc::new(TokioSpawn),
-                                Arc::new(program.definitions.clone()),
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for (internal_name, expression) in &program.definitions {
+                if let Internal::Original(name) = internal_name {
+                    if ui.button(&name.string).clicked() {
+                        if let Some(int) = interact.take() {
+                            int.handle.lock().expect("lock failed").cancel();
+                        }
+                        *interact = Some(Interact {
+                            code: Arc::clone(&compiled_code),
+                            handle: Handle::start_expression(
+                                Arc::new({
+                                    let ctx = ui.ctx().clone();
+                                    move || ctx.request_repaint()
+                                }),
+                                Context::new(
+                                    Arc::new(TokioSpawn),
+                                    Arc::new(program.definitions.clone()),
+                                ),
+                                expression,
                             ),
-                            expression,
-                        ),
-                    });
-                    ui.close_menu();
+                        });
+                        ui.close_menu();
+                    }
                 }
             }
-        }
+        });
     }
     fn recompile(&mut self) {
         self.compiled = Some(Compiled::from_string(self.code.as_str()));
