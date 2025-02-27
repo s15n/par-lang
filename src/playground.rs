@@ -296,18 +296,20 @@ impl Playground {
                         egui::RichText::new("Show compiled"),
                     );
 
-                    egui::menu::menu_custom_button(
-                        ui,
-                        egui::Button::new(
-                            egui::RichText::new("Run")
-                                .strong()
-                                .color(egui::Color32::BLACK),
-                        )
-                        .fill(green().lerp_to_gamma(egui::Color32::WHITE, 0.3)),
-                        |ui| {
-                            Self::run(&mut self.interact, ui, program, self.compiled_code.clone());
-                        },
-                    );
+                    if !self.show_compiled {
+                        egui::menu::menu_custom_button(
+                            ui,
+                            egui::Button::new(
+                                egui::RichText::new("Run")
+                                    .strong()
+                                    .color(egui::Color32::BLACK),
+                            )
+                            .fill(green().lerp_to_gamma(egui::Color32::WHITE, 0.3)),
+                            |ui| {
+                                Self::run(&mut self.interact, ui, program, self.compiled_code.clone());
+                            },
+                        );
+                    }
                 }
             });
 
@@ -335,8 +337,7 @@ impl Playground {
                                 .with_theme(theme)
                                 .with_numlines(true)
                                 .show(ui, pretty);
-                        }
-                        if let Ok(_) = checked {
+                        } else if let Ok(_) = checked {
                             // :)
                             ui.label(
                                 egui::RichText::new("Type checking successful").color(green()),
@@ -346,9 +347,7 @@ impl Playground {
 
                             ui.label(egui::RichText::new(error).color(red()).code());
                         }
-                    }
-
-                    if let Some(int) = &self.interact {
+                    } else if let Some(int) = &self.interact {
                         self.show_interact(ui, int.clone());
                     }
                 });
