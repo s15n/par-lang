@@ -306,7 +306,12 @@ impl Playground {
                             )
                             .fill(green().lerp_to_gamma(egui::Color32::WHITE, 0.3)),
                             |ui| {
-                                Self::run(&mut self.interact, ui, program, self.compiled_code.clone());
+                                Self::run(
+                                    &mut self.interact,
+                                    ui,
+                                    program,
+                                    self.compiled_code.clone(),
+                                );
                             },
                         );
                     }
