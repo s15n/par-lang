@@ -352,7 +352,8 @@ impl Playground {
 
                             ui.label(egui::RichText::new(error).color(red()).code());
                         }
-                    } else if let Some(int) = &self.interact {
+                    }
+                    if let Some(int) = &self.interact {
                         self.show_interact(ui, int.clone());
                     }
                 });
@@ -698,4 +699,4 @@ fn blue() -> egui::Color32 {
     egui::Color32::from_hex("#118ab2").unwrap()
 }
 
-static DEFAULT_CODE: &str = include_str!("sample_types.par");
+static DEFAULT_CODE: &str = include_str!("../examples/sample_types.par");
