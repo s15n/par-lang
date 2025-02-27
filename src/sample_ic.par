@@ -1,2 +1,14 @@
-declare main: [type T] [T] { true => T }
-define main = [type T] [a] { true => a }
+
+type Bool = either { .true! .false! }
+declare true: Bool
+declare false: Bool
+declare unit: either { .unit! }
+define true = .true!
+define false = .false!
+define unit = .unit!
+declare not: [Bool] Bool
+define not = [x: Bool] x {
+  true? => .false!
+  false? => .true!
+}
+define main = not(true)

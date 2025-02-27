@@ -63,6 +63,69 @@ pub enum Type<Loc, Name> {
     ReceiveType(Loc, Name, Box<Self>),
 }
 
+impl<Loc: ::core::cmp::PartialEq, Name: ::core::cmp::PartialEq + Eq + Hash> ::core::cmp::PartialEq
+    for Type<Loc, Name>
+{
+    #[inline]
+    fn eq(&self, other: &Type<Loc, Name>) -> bool {
+        match (self, other) {
+            (Type::Var(__self_0, __self_1), Type::Var(__arg1_0, __arg1_1)) => {
+                __self_0 == __arg1_0 && __self_1 == __arg1_1
+            }
+            (Type::DualVar(__self_0, __self_1), Type::DualVar(__arg1_0, __arg1_1)) => {
+                __self_0 == __arg1_0 && __self_1 == __arg1_1
+            }
+            (
+                Type::Name(__self_0, __self_1, __self_2),
+                Type::Name(__arg1_0, __arg1_1, __arg1_2),
+            ) => __self_0 == __arg1_0 && __self_1 == __arg1_1 && __self_2 == __arg1_2,
+            (
+                Type::DualName(__self_0, __self_1, __self_2),
+                Type::DualName(__arg1_0, __arg1_1, __arg1_2),
+            ) => __self_0 == __arg1_0 && __self_1 == __arg1_1 && __self_2 == __arg1_2,
+            (
+                Type::Send(__self_0, __self_1, __self_2),
+                Type::Send(__arg1_0, __arg1_1, __arg1_2),
+            ) => __self_0 == __arg1_0 && __self_1 == __arg1_1 && __self_2 == __arg1_2,
+            (
+                Type::Receive(__self_0, __self_1, __self_2),
+                Type::Receive(__arg1_0, __arg1_1, __arg1_2),
+            ) => __self_0 == __arg1_0 && __self_1 == __arg1_1 && __self_2 == __arg1_2,
+            (Type::Either(__self_0, __self_1), Type::Either(__arg1_0, __arg1_1)) => {
+                __self_0 == __arg1_0 && __self_1 == __arg1_1
+            }
+            (Type::Choice(__self_0, __self_1), Type::Choice(__arg1_0, __arg1_1)) => {
+                __self_0 == __arg1_0 && __self_1 == __arg1_1
+            }
+            (Type::Break(__self_0), Type::Break(__arg1_0)) => __self_0 == __arg1_0,
+            (Type::Continue(__self_0), Type::Continue(__arg1_0)) => __self_0 == __arg1_0,
+            (
+                Type::Recursive(__self_0, __self_1, __self_2),
+                Type::Recursive(__arg1_0, __arg1_1, __arg1_2),
+            ) => __self_0 == __arg1_0 && __self_1 == __arg1_1 && __self_2 == __arg1_2,
+            (
+                Type::Iterative(__self_0, __self_1, __self_2),
+                Type::Iterative(__arg1_0, __arg1_1, __arg1_2),
+            ) => __self_0 == __arg1_0 && __self_1 == __arg1_1 && __self_2 == __arg1_2,
+            (Type::Self_(__self_0, __self_1), Type::Self_(__arg1_0, __arg1_1)) => {
+                __self_0 == __arg1_0 && __self_1 == __arg1_1
+            }
+            (Type::Loop(__self_0, __self_1), Type::Loop(__arg1_0, __arg1_1)) => {
+                __self_0 == __arg1_0 && __self_1 == __arg1_1
+            }
+            (
+                Type::SendType(__self_0, __self_1, __self_2),
+                Type::SendType(__arg1_0, __arg1_1, __arg1_2),
+            ) => __self_0 == __arg1_0 && __self_1 == __arg1_1 && __self_2 == __arg1_2,
+            (
+                Type::ReceiveType(__self_0, __self_1, __self_2),
+                Type::ReceiveType(__arg1_0, __arg1_1, __arg1_2),
+            ) => __self_0 == __arg1_0 && __self_1 == __arg1_1 && __self_2 == __arg1_2,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum TypePoint<Name> {
     Self_(Option<Name>),

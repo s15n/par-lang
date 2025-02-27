@@ -305,8 +305,7 @@ impl Playground {
 
                 if let Some(Ok(Compiled {
                     program,
-                    pretty,
-                    checked,
+                    ..
                 })) = &mut self.compiled
                 {
                     ui.checkbox(

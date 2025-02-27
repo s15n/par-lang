@@ -30,7 +30,6 @@ pub fn are_equivalent(net: &mut Net, left: Tree, right: Tree) -> bool {
         net.vars.insert(id, None);
     }
     net.redexes.push_back((left, right));
-    println!("{}", net.show());
     net.normal();
     // now, inspect the resulting ports
     // the condition for equivalence is:
@@ -44,7 +43,6 @@ pub fn are_equivalent(net: &mut Net, left: Tree, right: Tree) -> bool {
         }
     }
 
-    println!("{:?}", is_connected_to);
     for (a, b) in is_connected_to.iter() {
         let (a, b) = if left_map.contains_key(&a) {
             (a, b)

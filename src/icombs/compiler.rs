@@ -76,16 +76,26 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
 
         let id = self.id_to_package.len();
         self.global_name_to_id.insert(name.clone(), id);
-        let tree = self.with_captures(&Captures::default(), |this| {
+        if name.to_string() == "t_3" {
+            println!("{global:#?}");
+        }
+        let mut tree = self.with_captures(&Captures::default(), |this| {
             let mut s = String::new();
             global.pretty(&mut s, 0).unwrap();
-            println!("{}", s);
             this.compile_expression(global.as_ref())
         });
+        if let Some(Some(t)) = self.program.declarations.get(name) {
+            tree = self.cast(tree, t.clone())
+        }
         self.net.ports.push_back(tree.tree);
         self.net.packages = Arc::new(self.id_to_package.clone().into_iter().enumerate().collect());
-        println!("{}", self.net.show());
+        if name.to_string() == "t_3" {
+            println!("{}", self.net.show());
+        }
         self.net.normal();
+        if name.to_string() == "t_3" {
+            println!("{}", self.net.show());
+        }
         let package_contents = self.net.ports.pop_back().unwrap();
         self.id_to_ty.push(tree.ty.clone());
         self.id_to_package.push(package_contents);
@@ -98,7 +108,6 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
         captures: &Captures<Loc, Name>,
         f: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        println!("{:?}", captures);
         let mut vars = IndexMap::new();
         for (name, _) in captures.names.iter() {
             let (tree, kind) = self.use_variable(name);
@@ -182,6 +191,9 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
     }
     // cast an expression into another type.
     fn cast(&mut self, from: TypedTree<Name>, to: Type<Loc, Name>) -> TypedTree<Name> {
+        if &from.ty == &to {
+            return from;
+        }
         match (&from.ty, &to) {
             (Type::Send(_, from_fst, from_snd), Type::Send(_, to_fst, to_snd)) => {
                 let (fst0, fst1) = self.create_typed_wire(from_fst.as_ref().clone());
@@ -256,11 +268,12 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
 
             (Type::Break(_), Type::Break(_)) => from,
             (Type::Continue(_), Type::Continue(_)) => from,
-            (Type::SendType(_, _, a), Type::SendType(_, _, b)) => {
-                self.cast(from.tree.with_type(*a.clone()), *b.clone())
+            (Type::SendType(_, _, a), Type::SendType(l, n, b)) => {
+
+                self.cast(from.tree.with_type(*a.clone()), *b.clone()).tree.with_type(Type::SendType(l.clone(), n.clone(), b.clone()))
             }
-            (Type::ReceiveType(_, _, a), Type::ReceiveType(_, _, b)) => {
-                self.cast(from.tree.with_type(*a.clone()), *b.clone())
+            (Type::ReceiveType(_, _, a), Type::ReceiveType(l, n, b)) => {
+                self.cast(from.tree.with_type(*a.clone()), *b.clone()).tree.with_type(Type::ReceiveType(l.clone(), n.clone(), b.clone()))
             }
             (Type::Name(_, name, args), to) => {
                 let ty = self.dereference_type_def(name, args);
@@ -302,9 +315,9 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 self.with_captures(captures, |this| {
                     let (v0, v1) = this.create_typed_wire(typ.clone());
                     this.bind_variable(name, v0);
-                    println!("Pre-fork: name = {}", this.net.show_tree(&v1.tree));
+                    //println!("Pre-fork: name = {}", this.net.show_tree(&v1.tree));
                     this.compile_process(proc);
-                    println!("Post-fork: name = {}", this.net.show_tree(&v1.tree));
+                    //println!("Post-fork: name = {}", this.net.show_tree(&v1.tree));
                     v1
                 })
             }
@@ -320,7 +333,6 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
         match proc {
             Process::Let(_, key, _, _, value, rest) => {
                 let value = self.compile_expression(value);
-                println!("Var inserted: {}", key);
                 self.vars.insert(key.clone(), (value, VariableKind::Linear));
                 self.compile_process(rest);
             }
@@ -451,7 +463,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 let a = self.instantiate_variable(&name);
                 let a = self.cast(a, ty);
 
-                let Type::Choice(_, mut branches) = self.normalize_type(a.ty) else {
+                let Type::Choice(_, branches) = self.normalize_type(a.ty) else {
                     unreachable!()
                 };
                 let Some(branch_type) = branches.get(chosen) else {
@@ -459,7 +471,9 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 };
                 let branch_index = branches.get_index_of(chosen).unwrap();
                 let (v0, v1) = self.create_typed_wire(branch_type.clone());
+                println!("{}.{}", branch_index, branches.len());
                 let choosing_tree = self.either_instance(v1.tree, branch_index, branches.len());
+                println!("{}", choosing_tree.show());
                 self.net.link(choosing_tree, a.tree);
                 self.bind_variable(&name, v0);
                 self.compile_process(process);
@@ -480,7 +494,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 let context_in = multiplex_trees(m_trees);
 
                 let mut branches = vec![];
-                let Type::Either(_, mut required_branches) = self.normalize_type(ty) else {
+                let Type::Either(_, required_branches) = self.normalize_type(ty) else {
                     unreachable!()
                 };
                 let mut choice_and_process: Vec<_> = names.iter().zip(processes.iter()).collect();
@@ -492,7 +506,6 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 {
                     let (w0, w1) = self.create_typed_wire(branch.clone());
                     self.bind_variable(&name, w0);
-                    println!("Vars: {:?}", self.vars);
 
                     // multiplex the conetxt frmo the inside now
                     let mut m_trees = vec![];
@@ -509,6 +522,9 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                     branches.push((context_out, w1.tree))
                 }
                 let t = self.choice_instance(context_in, branches);
+
+                println!("{:?}", old_tree);
+                println!("{:?}", t);
                 self.net.link(old_tree.tree, t);
             }
             Command::Break => {
@@ -527,10 +543,10 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 self.net.link(a, Tree::e());
                 self.compile_process(process);
             }
-            Command::Begin(name, rest) => {
+            Command::Begin(_, _) => {
                 unreachable!()
             }
-            Command::Loop(name) => {
+            Command::Loop(_) => {
                 unreachable!()
             }
         }
@@ -544,6 +560,7 @@ pub fn compile_file(program: &Prog<Internal<Name>>) -> IcCompiled {
         global_name_to_id: Default::default(),
         id_to_package: Default::default(),
         id_to_ty: Default::default(),
+        type_variables: BTreeSet::default(),
         program,
     };
     for k in compiler.program.definitions.clone().keys() {
