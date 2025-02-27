@@ -483,10 +483,6 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             (typ, Self::Recursive(_, label, body)) => {
                 typ.is_subtype_of(&Self::expand_recursive(label, body), type_defs, ind)?
             }
-            (Self::Recursive(_, label, body), typ) => {
-                //FIXME: this is dangerous with partly overlapping types
-                Self::expand_recursive(label, body).is_subtype_of(typ, type_defs, ind)?
-            }
             (Self::Iterative(_, label1, body1), Self::Iterative(_, label2, body2)) => {
                 let mut ind = ind.clone();
                 ind.insert((
@@ -497,10 +493,6 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             }
             (Self::Iterative(_, label, body), typ) => {
                 Self::expand_iterative(label, body).is_subtype_of(typ, type_defs, ind)?
-            }
-            (typ, Self::Iterative(_, label, body)) => {
-                //FIXME: this is dangerous with partly overlapping types
-                typ.is_subtype_of(&Self::expand_iterative(label, body), type_defs, ind)?
             }
 
             (Self::Self_(_, label1), Self::Self_(_, label2)) => ind.contains(&(
@@ -819,7 +811,7 @@ pub struct Context<Loc, Name> {
 
 impl<Loc, Name> Context<Loc, Name>
 where
-    Loc: std::fmt::Debug + Clone + Eq + Hash,
+    Loc: Clone + Eq + Hash,
     Name: Clone + Eq + Hash,
 {
     pub fn new(
@@ -993,15 +985,17 @@ where
                 analyze_process,
             );
         }
-        if let Type::Iterative(_, top_label, body) = typ {
-            return self.check_command(
-                inference_subject,
-                loc,
-                object,
-                &Type::expand_iterative(top_label, body),
-                command,
-                analyze_process,
-            );
+        if !matches!(command, Command::Link(_)) {
+            if let Type::Iterative(_, top_label, body) = typ {
+                return self.check_command(
+                    inference_subject,
+                    loc,
+                    object,
+                    &Type::expand_iterative(top_label, body),
+                    command,
+                    analyze_process,
+                );
+            }
         }
         if !matches!(command, Command::Begin(_, _) | Command::Loop(_)) {
             if let Type::Recursive(_, top_label, body) = typ {
@@ -1147,20 +1141,38 @@ where
             }
 
             Command::Begin(label, process) => {
-                let Type::Recursive(_, typ_label, typ_body) = typ else {
+                let Type::Recursive(typ_loc, typ_label, typ_body) = typ else {
                     return Err(TypeError::InvalidOperation(
                         loc.clone(),
                         Operation::Begin(loc.clone(), label.clone()),
                         typ.clone(),
                     ));
                 };
-                let expanded = Type::expand_recursive(typ_label, typ_body);
 
-                self.put(loc, object.clone(), expanded)?;
                 self.loop_points.insert(
                     label.clone(),
-                    (object.clone(), Arc::new(self.variables.clone())),
+                    (
+                        object.clone(),
+                        Arc::new({
+                            let mut variables = self.variables.clone();
+                            variables.insert(
+                                object.clone(),
+                                Type::Recursive(
+                                    typ_loc.clone(),
+                                    typ_label.clone(),
+                                    typ_body.clone(),
+                                ),
+                            );
+                            variables
+                        }),
+                    ),
                 );
+
+                self.put(
+                    loc,
+                    object.clone(),
+                    Type::expand_recursive(typ_label, typ_body),
+                )?;
                 let (process, inferred_types) = analyze_process(self, process)?;
 
                 let inferred_iterative = inferred_types
