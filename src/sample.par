@@ -1,16 +1,16 @@
-define listrgb =
+def listrgb =
   .item(.red!)
   .item(.green!)
   .item(.blue!)
   .empty!
 
-define rgb = [value] value {
+def rgb = [value] value {
   red?   => .red!
   green? => .green!
   blue?  => .blue!
 }
 
-define zip = [list][seq] list begin {
+def zip = [list][seq] list begin {
   empty? => do {
     seq.close?
   } in .empty!
@@ -21,9 +21,9 @@ define zip = [list][seq] list begin {
   } in .item((x)(y)!) xs loop
 }
 
-define zip_rgbs = zip(listrgb)
+def zip_rgbs = zip(listrgb)
 
-define zip2 = [seq1][seq2] begin {
+def zip2 = [seq1][seq2] begin {
   close => do {
     seq1.close?
     seq2.close?
@@ -35,13 +35,12 @@ define zip2 = [seq1][seq2] begin {
   } in ((x)(y)!) loop
 }
 
-define concat = [left][right] left begin {
+def concat = [left][right] left begin {
   empty?     => right
   item[x] xs => .item(x) xs loop
 }
 
-
-define tree_of_colors =
+def tree_of_colors =
   .node
     (.node
       (.empty!)
@@ -56,7 +55,7 @@ define tree_of_colors =
       (.blue!)
       (.empty!)!)!
 
-define flatten_process_syntax = chan caller {
+def flatten_process_syntax = chan caller {
   caller[tree]
 
   let caller = chan return {
@@ -77,7 +76,7 @@ define flatten_process_syntax = chan caller {
   caller.empty!
 }
 
-define flatten = [tree] chan yield {
+def flatten = [tree] chan yield {
   let yield = tree begin {
     empty? => yield
 
@@ -90,13 +89,12 @@ define flatten = [tree] chan yield {
   yield.empty!
 }
 
-define flattened = flatten(tree_of_colors)
+def flattened = flatten(tree_of_colors)
 
+def true  = chan result { result.true! }
+def false = chan result { result.false! }
 
-define true  = chan result { result.true! }
-define false = chan result { result.false! }
-
-define list_of_booleans = chan consumer {
+def list_of_booleans = chan consumer {
   consumer
     .item(true)
     .item(false)
@@ -107,7 +105,7 @@ define list_of_booleans = chan consumer {
     .empty!
 }
 
-define reverse = chan caller {
+def reverse = chan caller {
   caller[list]
 
   let caller = chan return {
@@ -127,4 +125,4 @@ define reverse = chan caller {
   caller.empty!
 }
 
-define reverse_bools = reverse(list_of_booleans)
+def reverse_bools = reverse(list_of_booleans)

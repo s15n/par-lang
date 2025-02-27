@@ -625,8 +625,8 @@ fn par_syntax() -> Syntax {
         hyperlinks: BTreeSet::from([]),
         keywords: BTreeSet::from([
             "type",
-            "declare",
-            "define",
+            "dec",
+            "def",
             "chan",
             "let",
             "do",

@@ -16,12 +16,8 @@ type Mapper<A, B> = iterative {
   apply => [A] (B) loop
 }
 
-declare mapList: [type A][type B] [List<A>] [Mapper<A, B>] List<B>
-
-define mapList =
-  [type A][type B]
-  [list][mapper]
-
+dec mapList : [type A][type B] [List<A>] [Mapper<A, B>] List<B>
+def mapList = [type A][type B] [list][mapper]
   list begin {
     empty? => do {
       mapper.close?
@@ -32,11 +28,8 @@ define mapList =
     } in .item(y) xs loop
   }
 
-declare mapSeq: [type A][type B] [Seq<A>] [Mapper<A, B>] Seq<B>
-
-define mapSeq =
-  [type A][type B]
-  [seq][mapper]
+dec mapSeq : [type A][type B] [Seq<A>] [Mapper<A, B>] Seq<B>
+def mapSeq = [type A][type B] [seq][mapper]
   begin {
     close => do {
       seq.close?
@@ -48,32 +41,33 @@ define mapSeq =
     } in (y) loop
   }
 
-define listrgb =
+def listrgb =
   .item(.red!)
   .item(.green!)
   .item(.blue!)
   .empty!
 
-define red_forever = begin {
+dec red_forever : Seq<Color>
+def red_forever = begin {
   close => !
   next  => (.red!) loop
 }
 
-define rgb = [value: Color] value {
+def rgb = [value: Color] value {
   red?   => .red!
   green? => .green!
   blue?  => .blue!
 }
 
-define swap = [bool: Bool] bool {
+def swap = [bool: Bool] bool {
   true? => .false!
   false? => .true!
 }
 
-define true  = chan result { result.true! }
-define false = chan result { result.false! }
+def true  = chan result { result.true! }
+def false = chan result { result.false! }
 
-define bools_forever =
+def bools_forever =
   let bool: Bool = .true! in
   begin {
     close => bool {
@@ -89,7 +83,7 @@ define bools_forever =
     } in (output) loop
   }
 
-define zip = [list: List<Color>][seq: Seq<Color>] list begin {
+def zip = [list: List<Color>][seq: Seq<Color>] list begin {
   empty? => do {
     seq.close?
   } in .empty!
@@ -99,9 +93,9 @@ define zip = [list: List<Color>][seq: Seq<Color>] list begin {
   } in .item((x)(y)!) xs loop
 }
 
-define zipped = zip(listrgb)(red_forever)
+def zipped = zip(listrgb)(red_forever)
 
-define zip2 = [type T] [seq1: Seq<T>][seq2: Seq<T>] begin {
+def zip2 = [type T] [seq1: Seq<T>][seq2: Seq<T>] begin {
   close => do {
     seq1.close?
     seq2.close?

@@ -2,7 +2,7 @@ WHITESPACE = _{ " " | "\t" | "\n" | "\r" | "," }
 COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
 keyword = {
-    "type" | "declare" | "define" |
+    "type" | "dec" | "def" |
     "chan" | "let" | "do" | "in" | "pass" | "begin" | "loop" | "telltypes" |
     "either" | "recursive" | "iterative" | "self"
 }
@@ -11,8 +11,8 @@ name = @{ !(keyword ~ !("_" | ASCII_ALPHANUMERIC)) ~ (ASCII_ALPHA ~ ("_" | ASCII
 
 program     = { SOI ~ (type_def | declaration | definition)* ~ EOI }
 type_def    = { "type" ~ name ~ type_params ~ "=" ~ typ }
-declaration = { "declare" ~ name ~ ":" ~ typ }
-definition  = { "define" ~ name ~ "=" ~ expression }
+declaration = { "dec" ~ name ~ ":" ~ typ }
+definition  = { "def" ~ name ~ "=" ~ expression }
 
 typ           = { typ_name | typ_dual_name | typ_send | typ_receive | typ_either | typ_choice | typ_break | typ_continue | typ_recursive | typ_iterative | typ_self | typ_loop | typ_send_type | typ_recv_type }
 typ_name      = { name ~ type_args }

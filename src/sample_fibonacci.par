@@ -3,27 +3,27 @@ type Nat = recursive either {
   .add1 self
 }
 
-declare zero: Nat
-declare add1: [Nat] Nat
-declare drop: [Nat] !
-declare copy: [Nat] (Nat)(Nat)!
-declare add:  [Nat][Nat] Nat
+dec zero : Nat
+dec add1 : [Nat] Nat
+dec drop : [Nat] !
+dec copy : [Nat] (Nat)(Nat)!
+dec add  : [Nat][Nat] Nat
 
-define zero = .zero!
-define add1 = [n] .add1 n
+def zero = .zero!
+def add1 = [n] .add1 n
 
-define drop = [n] n begin {
+def drop = [n] n begin {
   zero?  => !
   add1 n => n loop
 }
 
-define copy = [n] n begin {
+def copy = [n] n begin {
   zero?  => (zero)(zero)!
   add1 n => let [n1][n2]? = n loop
     in (add1(n1))(add1(n2))!
 }
 
-define add = [n1][n2] n1 begin {
+def add = [n1][n2] n1 begin {
   zero?   => n2
   add1 n1 => add1(n1 loop)
 }
@@ -33,9 +33,8 @@ type Seq<T> = iterative {
   next  => (T) loop
 }
 
-declare fibonacci: Seq<Nat>
-
-define fibonacci = do {
+dec fibonacci : Seq<Nat>
+def fibonacci = do {
   let n1 = zero
   let n2 = add1(zero)
 } in begin {
