@@ -1,6 +1,7 @@
 //! This module contains a simple implementation for Interaction Combinators.
 //! It is not performant; it's mainly here to act as a storage and interchange format
 
+use std::any::Any;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
@@ -25,8 +26,12 @@ pub enum Tree {
     Era,
     Var(usize),
     Package(usize),
-    ExtOnce(Box<dyn FnOnce(&mut Net, Tree)>),
+    Ext(
+        Box<dyn FnOnce(&mut Net, Result<Tree, Box<dyn Any>>)>,
+        Box<dyn Any>,
+    ),
 }
+
 impl Tree {
     pub fn c(a: Tree, b: Tree) -> Tree {
         Tree::Con(Box::new(a), Box::new(b))
@@ -37,8 +42,11 @@ impl Tree {
     pub fn e() -> Tree {
         Tree::Era
     }
-    pub fn ext(f: impl FnOnce(&mut Net, Tree) + 'static) -> Tree {
-        Tree::ExtOnce(Box::new(f))
+    pub fn ext(
+        f: impl FnOnce(&mut Net, Result<Tree, Box<dyn Any>>) + 'static,
+        a: impl Any,
+    ) -> Tree {
+        Tree::Ext(Box::new(f), Box::new(a))
     }
     pub fn map_vars(&mut self, m: &mut impl FnMut(VarId) -> VarId) {
         use Tree::*;
@@ -107,7 +115,29 @@ impl Tree {
 }
 
 impl core::fmt::Debug for Tree {
-    fn fmt(&self, f: &mut core::fmt::Formatter) {}
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Tree::Con(a, b) => f.debug_tuple("Con").field(a).field(b).finish(),
+            Tree::Dup(a, b) => f.debug_tuple("Dup").field(a).field(b).finish(),
+            Tree::Era => f.debug_tuple("Era").finish(),
+            Tree::Var(id) => f.debug_tuple("Var").field(id).finish(),
+            Tree::Package(id) => f.debug_tuple("Package").field(id).finish(),
+            Tree::Ext(_, _) => f.debug_tuple("Ext").finish_non_exhaustive(),
+        }
+    }
+}
+
+impl Clone for Tree {
+    fn clone(&self) -> Self {
+        match self {
+            Tree::Con(a, b) => Tree::Con(a.clone(), b.clone()),
+            Tree::Dup(a, b) => Tree::Dup(a.clone(), b.clone()),
+            Tree::Era => Tree::Era,
+            Tree::Var(id) => Tree::Var(id.clone()),
+            Tree::Package(id) => Tree::Package(id.clone()),
+            Tree::Ext(_) => panic!("Can't clone `Ext` tree!"),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -140,6 +170,9 @@ impl Net {
                 self.link(*a1, Tree::Dup(Box::new(a10), Box::new(a11)));
                 self.link(*b0, Tree::Con(Box::new(b00), Box::new(b10)));
                 self.link(*b1, Tree::Con(Box::new(b01), Box::new(b11)));
+            }
+            (Ext(f, _), b) | (b, Ext(f, _)) => {
+                f(self, Ok(b));
             }
             (Package(_), Era) | (Era, Package(_)) => {}
             (Package(id), Dup(a, b)) | (Dup(a, b), Package(id)) => {
@@ -189,7 +222,6 @@ impl Net {
                 self.substitute_tree(a);
                 self.substitute_tree(b);
             }
-            Tree::Era => {}
             t @ Tree::Var(_) => {
                 let Tree::Var(id) = t else { unreachable!() };
                 if let Some(Some(mut a)) = self.vars.remove(id) {
@@ -199,7 +231,7 @@ impl Net {
                     self.vars.insert(*id, None);
                 }
             }
-            Tree::Package(_) => {}
+            _ => {}
         }
     }
     pub fn normal(&mut self) {
@@ -275,6 +307,7 @@ impl Net {
             Dup(a, b) => format!("[{} {}]", self.show_tree(a), self.show_tree(b)),
             Era => format!("*"),
             Package(id) => format!("@{}", id),
+            Ext(..) => format!("<ext>"),
         }
     }
     pub fn show(&self) -> String {
