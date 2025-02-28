@@ -19,13 +19,13 @@ pub fn number_to_string(mut number: usize) -> String {
     }
     result
 }
-#[derive(Debug, Clone)]
 pub enum Tree {
     Con(Box<Tree>, Box<Tree>),
     Dup(Box<Tree>, Box<Tree>),
     Era,
     Var(usize),
     Package(usize),
+    ExtOnce(Box<dyn FnOnce(&mut Net, Tree)>),
 }
 impl Tree {
     pub fn c(a: Tree, b: Tree) -> Tree {
@@ -36,6 +36,9 @@ impl Tree {
     }
     pub fn e() -> Tree {
         Tree::Era
+    }
+    pub fn ext(f: impl FnOnce(&mut Net, Tree) + 'static) -> Tree {
+        Tree::ExtOnce(Box::new(f))
     }
     pub fn map_vars(&mut self, m: &mut impl FnMut(VarId) -> VarId) {
         use Tree::*;
@@ -49,8 +52,7 @@ impl Tree {
                 a.map_vars(m);
                 b.map_vars(m);
             }
-            Era => {}
-            Package(..) => {}
+            _ => {}
         }
     }
     fn map_vars_tree(&mut self, m: &mut impl FnMut(VarId) -> Tree) {
@@ -68,8 +70,7 @@ impl Tree {
                 a.map_vars_tree(m);
                 b.map_vars_tree(m);
             }
-            Era => {}
-            Package(..) => {}
+            _ => {}
         }
     }
     pub fn show(&self) -> String {
@@ -100,8 +101,13 @@ impl Tree {
             ),
             Era => format!("*"),
             Package(id) => format!("@{}", id),
+            Ext(f) => format!("<ext>"),
         }
     }
+}
+
+impl core::fmt::Debug for Tree {
+    fn fmt(&self, f: &mut core::fmt::Formatter) {}
 }
 
 #[derive(Debug, Default)]
