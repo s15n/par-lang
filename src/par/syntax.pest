@@ -33,11 +33,12 @@ typ_recv_type = { "[" ~ "type" ~ name ~ "]" ~ typ }
 type_params = { ("<" ~ name+ ~ ">")? }
 type_args   = { ("<" ~ typ+ ~ ">")? }
 
-annotation      = { (":" ~ typ)? }
-assignment      = { assign_name | assign_receive | assign_continue }
-assign_name     = { name ~ annotation }
-assign_receive  = { "[" ~ assignment ~ "]" ~ assignment }
-assign_continue = { "?" }
+annotation       = { (":" ~ typ)? }
+assignment       = { assign_name | assign_receive | assign_continue | assign_recv_type }
+assign_name      = { name ~ annotation }
+assign_receive   = { "[" ~ assignment ~ "]" ~ assignment }
+assign_continue  = { "?" }
+assign_recv_type = { "[" ~ "type" ~ name ~ "]" ~ assignment }
 
 expression = { expr_let | expr_do | expr_fork | application | construction | ("{" ~ expression ~ "}") }
 expr_let   = { "let" ~ assignment ~ "=" ~ expression ~ "in" ~ expression }

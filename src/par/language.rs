@@ -12,6 +12,7 @@ pub enum Assignment<Loc, Name> {
     Name(Loc, Name, Option<Type<Loc, Name>>),
     Receive(Loc, Box<Self>, Box<Self>),
     Continue(Loc),
+    ReceiveType(Loc, Name, Box<Self>),
 }
 
 #[derive(Clone, Debug)]
@@ -249,6 +250,16 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Assignment<Loc, Name> {
                 (),
                 process::Command::Continue(process),
             )),
+
+            Self::ReceiveType(loc, parameter, rest) => Arc::new(process::Process::Do(
+                loc.clone(),
+                Internal::Assign(level),
+                (),
+                process::Command::ReceiveType(
+                    Internal::Original(parameter.clone()),
+                    rest.compile_helper(level, process),
+                ),
+            )),
         }
     }
 
@@ -261,6 +272,14 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Assignment<Loc, Name> {
                 Some(Type::Send(loc.clone(), Box::new(first), Box::new(rest)))
             }
             Self::Continue(loc) => Some(Type::Break(loc.clone())),
+            Self::ReceiveType(loc, parameter, rest) => {
+                let rest = rest.annotation()?;
+                Some(Type::SendType(
+                    loc.clone(),
+                    Internal::Original(parameter.clone()),
+                    Box::new(rest),
+                ))
+            }
         }
     }
 }

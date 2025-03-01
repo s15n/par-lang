@@ -306,6 +306,13 @@ fn parse_assignment(pairs: &mut Pairs<'_, Rule>) -> Result<Assignment<Loc, Name>
 
         Rule::assign_continue => Ok(Assignment::Continue(loc)),
 
+        Rule::assign_recv_type => {
+            let mut pairs = pair.into_inner();
+            let (_, parameter) = parse_name(&mut pairs)?;
+            let rest = parse_assignment(&mut pairs)?;
+            Ok(Assignment::ReceiveType(loc, parameter, Box::new(rest)))
+        }
+
         _ => unreachable!(),
     }
 }
