@@ -254,9 +254,9 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             }
             Self::DualVar(loc, name) => {
                 if &name == var {
-                    typ.clone()
+                    typ.dual()
                 } else {
-                    Self::Var(loc, name)
+                    Self::DualVar(loc, name)
                 }
             }
             Self::Name(loc, name, args) if &name == var => {
