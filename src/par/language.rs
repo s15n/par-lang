@@ -8,8 +8,15 @@ use super::{
 };
 
 #[derive(Clone, Debug)]
+pub enum Assignment<Loc, Name> {
+    Name(Loc, Name, Option<Type<Loc, Name>>),
+    Receive(Loc, Box<Self>, Box<Self>),
+    Continue(Loc),
+}
+
+#[derive(Clone, Debug)]
 pub enum Expression<Loc, Name> {
-    Let(Loc, Name, Option<Type<Loc, Name>>, Box<Self>, Box<Self>),
+    Let(Loc, Assignment<Loc, Name>, Box<Self>, Box<Self>),
     Do(Loc, Box<Process<Loc, Name>>, Box<Self>),
     Fork(Loc, Name, Option<Type<Loc, Name>>, Box<Process<Loc, Name>>),
     Construction(Loc, Construct<Loc, Name>),
@@ -20,7 +27,7 @@ pub enum Expression<Loc, Name> {
 pub enum Construct<Loc, Name> {
     Then(Loc, Box<Expression<Loc, Name>>),
     Send(Loc, Box<Expression<Loc, Name>>, Box<Self>),
-    Receive(Loc, Name, Option<Type<Loc, Name>>, Box<Self>),
+    Receive(Loc, Assignment<Loc, Name>, Box<Self>),
     Choose(Loc, Name, Box<Self>),
     Either(Loc, ConstructBranches<Loc, Name>),
     Break(Loc),
@@ -36,7 +43,7 @@ pub struct ConstructBranches<Loc, Name>(pub IndexMap<Name, ConstructBranch<Loc, 
 #[derive(Clone, Debug)]
 pub enum ConstructBranch<Loc, Name> {
     Then(Loc, Expression<Loc, Name>),
-    Receive(Loc, Name, Option<Type<Loc, Name>>, Box<Self>),
+    Receive(Loc, Assignment<Loc, Name>, Box<Self>),
     ReceiveType(Loc, Name, Box<Self>),
 }
 
@@ -57,7 +64,7 @@ pub struct ApplyBranches<Loc, Name>(pub IndexMap<Name, ApplyBranch<Loc, Name>>);
 #[derive(Clone, Debug)]
 pub enum ApplyBranch<Loc, Name> {
     Then(Loc, Name, Expression<Loc, Name>),
-    Receive(Loc, Name, Option<Type<Loc, Name>>, Box<Self>),
+    Receive(Loc, Assignment<Loc, Name>, Box<Self>),
     Continue(Loc, Expression<Loc, Name>),
     ReceiveType(Loc, Name, Box<Self>),
 }
@@ -66,8 +73,7 @@ pub enum ApplyBranch<Loc, Name> {
 pub enum Process<Loc, Name> {
     Let(
         Loc,
-        Name,
-        Option<Type<Loc, Name>>,
+        Assignment<Loc, Name>,
         Box<Expression<Loc, Name>>,
         Box<Self>,
     ),
@@ -82,7 +88,7 @@ pub enum Command<Loc, Name> {
     Then(Box<Process<Loc, Name>>),
     Link(Loc, Box<Expression<Loc, Name>>),
     Send(Loc, Box<Expression<Loc, Name>>, Box<Self>),
-    Receive(Loc, Name, Option<Type<Loc, Name>>, Box<Self>),
+    Receive(Loc, Assignment<Loc, Name>, Box<Self>),
     Choose(Loc, Name, Box<Self>),
     Either(
         Loc,
@@ -103,7 +109,7 @@ pub struct CommandBranches<Loc, Name>(pub IndexMap<Name, CommandBranch<Loc, Name
 #[derive(Clone, Debug)]
 pub enum CommandBranch<Loc, Name> {
     Then(Process<Loc, Name>),
-    Receive(Loc, Name, Option<Type<Loc, Name>>, Box<Self>),
+    Receive(Loc, Assignment<Loc, Name>, Box<Self>),
     Continue(Loc, Process<Loc, Name>),
     ReceiveType(Loc, Name, Box<Self>),
 }
@@ -113,6 +119,7 @@ pub enum Internal<Name> {
     Original(Name),
     Result(Option<Name>),
     Object(Option<Name>),
+    Assign(usize),
 }
 
 impl<Name: From<String>> From<String> for Internal<Name> {
@@ -137,6 +144,7 @@ impl<Name: Display> Display for Internal<Name> {
                 }
                 write!(f, "#object")
             }
+            Self::Assign(level) => write!(f, "#assign{}", level),
         }
     }
 }
@@ -151,12 +159,118 @@ pub enum CompileError<Loc> {
 type Pass<Loc, Name> = Option<Arc<process::Process<Loc, Internal<Name>, ()>>>;
 type DoResult<Loc, Name> = Option<Arc<process::Expression<Loc, Internal<Name>, ()>>>;
 
+impl<Loc: Clone, Name: Clone + Hash + Eq> Assignment<Loc, Name> {
+    pub fn compile_let(
+        &self,
+        loc: &Loc,
+        expression: Arc<process::Expression<Loc, Internal<Name>, ()>>,
+        process: Arc<process::Process<Loc, Internal<Name>, ()>>,
+    ) -> Arc<process::Process<Loc, Internal<Name>, ()>> {
+        if let Self::Name(_, name, annotation) = self {
+            return Arc::new(process::Process::Let(
+                loc.clone(),
+                Internal::Original(name.clone()),
+                original(annotation),
+                (),
+                expression,
+                process,
+            ));
+        }
+        Arc::new(process::Process::Let(
+            loc.clone(),
+            Internal::Assign(0),
+            self.annotation(),
+            (),
+            expression,
+            self.compile_helper(0, process),
+        ))
+    }
+
+    pub fn compile_receive(
+        &self,
+        level: usize,
+        loc: &Loc,
+        subject: &Internal<Name>,
+        process: Arc<process::Process<Loc, Internal<Name>, ()>>,
+    ) -> Arc<process::Process<Loc, Internal<Name>, ()>> {
+        if let Self::Name(_, name, annotation) = self {
+            return Arc::new(process::Process::Do(
+                loc.clone(),
+                subject.clone(),
+                (),
+                process::Command::Receive(
+                    Internal::Original(name.clone()),
+                    original(annotation),
+                    process,
+                ),
+            ));
+        }
+        Arc::new(process::Process::Do(
+            loc.clone(),
+            subject.clone(),
+            (),
+            process::Command::Receive(
+                Internal::Assign(level),
+                self.annotation(),
+                self.compile_helper(level, process),
+            ),
+        ))
+    }
+
+    fn compile_helper(
+        &self,
+        level: usize,
+        process: Arc<process::Process<Loc, Internal<Name>, ()>>,
+    ) -> Arc<process::Process<Loc, Internal<Name>, ()>> {
+        match self {
+            Self::Name(loc, name, annotation) => Arc::new(process::Process::Let(
+                loc.clone(),
+                Internal::Original(name.clone()),
+                original(annotation),
+                (),
+                Arc::new(process::Expression::Reference(
+                    loc.clone(),
+                    Internal::Assign(level),
+                    (),
+                )),
+                process,
+            )),
+
+            Self::Receive(loc, first, rest) => first.compile_receive(
+                level + 1,
+                loc,
+                &Internal::Assign(level),
+                rest.compile_helper(level, process),
+            ),
+
+            Self::Continue(loc) => Arc::new(process::Process::Do(
+                loc.clone(),
+                Internal::Assign(level),
+                (),
+                process::Command::Continue(process),
+            )),
+        }
+    }
+
+    fn annotation(&self) -> Option<Type<Loc, Internal<Name>>> {
+        match self {
+            Self::Name(_, _, annotation) => original(annotation),
+            Self::Receive(loc, first, rest) => {
+                let first = first.annotation()?;
+                let rest = rest.annotation()?;
+                Some(Type::Send(loc.clone(), Box::new(first), Box::new(rest)))
+            }
+            Self::Continue(loc) => Some(Type::Break(loc.clone())),
+        }
+    }
+}
+
 impl<Loc: Clone, Name: Clone + Hash + Eq> Expression<Loc, Name> {
     pub fn compile(
         &self,
     ) -> Result<Arc<process::Expression<Loc, Internal<Name>, ()>>, CompileError<Loc>> {
         Ok(match self {
-            Self::Let(loc, name, annotation, expression, body) => {
+            Self::Let(loc, assignment, expression, body) => {
                 let expression = expression.compile()?;
                 let body = body.compile()?;
                 Arc::new(process::Expression::Fork(
@@ -165,11 +279,8 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Expression<Loc, Name> {
                     Internal::Result(None),
                     None,
                     (),
-                    Arc::new(process::Process::Let(
-                        loc.clone(),
-                        Internal::Original(name.clone()),
-                        original(annotation),
-                        (),
+                    assignment.compile_let(
+                        loc,
                         expression,
                         Arc::new(process::Process::Do(
                             loc.clone(),
@@ -177,7 +288,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Expression<Loc, Name> {
                             (),
                             process::Command::Link(body),
                         )),
-                    )),
+                    ),
                 ))
             }
 
@@ -271,18 +382,9 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Construct<Loc, Name> {
                 ))
             }
 
-            Self::Receive(loc, parameter, annotation, construct) => {
+            Self::Receive(loc, assignment, construct) => {
                 let process = construct.compile()?;
-                Arc::new(process::Process::Do(
-                    loc.clone(),
-                    Internal::Result(None),
-                    (),
-                    process::Command::Receive(
-                        Internal::Original(parameter.clone()),
-                        original(annotation),
-                        process,
-                    ),
-                ))
+                assignment.compile_receive(0, loc, &Internal::Result(None), process)
             }
 
             Self::Choose(loc, chosen, construct) => {
@@ -375,18 +477,9 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> ConstructBranch<Loc, Name> {
                 ))
             }
 
-            Self::Receive(loc, parameter, annotation, branch) => {
+            Self::Receive(loc, assignment, branch) => {
                 let process = branch.compile()?;
-                Arc::new(process::Process::Do(
-                    loc.clone(),
-                    Internal::Result(None),
-                    (),
-                    process::Command::Receive(
-                        Internal::Original(parameter.clone()),
-                        original(annotation),
-                        process,
-                    ),
-                ))
+                assignment.compile_receive(0, loc, &Internal::Result(None), process)
             }
 
             Self::ReceiveType(loc, parameter, branch) => {
@@ -513,18 +606,9 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> ApplyBranch<Loc, Name> {
                 ))
             }
 
-            Self::Receive(loc, parameter, annotation, branch) => {
+            Self::Receive(loc, assignment, branch) => {
                 let process = branch.compile()?;
-                Arc::new(process::Process::Do(
-                    loc.clone(),
-                    Internal::Object(None),
-                    (),
-                    process::Command::Receive(
-                        Internal::Original(parameter.clone()),
-                        original(annotation),
-                        process,
-                    ),
-                ))
+                assignment.compile_receive(0, loc, &Internal::Object(None), process)
             }
 
             Self::Continue(loc, expression) => {
@@ -562,16 +646,11 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Process<Loc, Name> {
         do_result: DoResult<Loc, Name>,
     ) -> Result<Arc<process::Process<Loc, Internal<Name>, ()>>, CompileError<Loc>> {
         Ok(match self {
-            Self::Let(loc, name, annotation, expression, process) => {
-                Arc::new(process::Process::Let(
-                    loc.clone(),
-                    Internal::Original(name.clone()),
-                    original(annotation),
-                    (),
-                    expression.compile()?,
-                    process.compile(pass, do_result)?,
-                ))
-            }
+            Self::Let(loc, assignment, expression, process) => assignment.compile_let(
+                loc,
+                expression.compile()?,
+                process.compile(pass, do_result)?,
+            ),
 
             Self::Command(name, command) => command.compile(name, pass, do_result)?,
 
@@ -634,18 +713,9 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
                 ))
             }
 
-            Self::Receive(loc, parameter, annotation, command) => {
+            Self::Receive(loc, assignment, command) => {
                 let process = command.compile(object_name, pass, do_result)?;
-                Arc::new(process::Process::Do(
-                    loc.clone(),
-                    object_internal,
-                    (),
-                    process::Command::Receive(
-                        Internal::Original(parameter.clone()),
-                        original(annotation),
-                        process,
-                    ),
-                ))
+                assignment.compile_receive(0, loc, &object_internal, process)
             }
 
             Self::Choose(loc, chosen, command) => {
@@ -759,18 +829,9 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> CommandBranch<Loc, Name> {
         Ok(match self {
             Self::Then(process) => process.compile(pass, do_result)?,
 
-            Self::Receive(loc, parameter, annotation, branch) => {
+            Self::Receive(loc, assignment, branch) => {
                 let process = branch.compile(object_name, pass, do_result)?;
-                Arc::new(process::Process::Do(
-                    loc.clone(),
-                    object_internal,
-                    (),
-                    process::Command::Receive(
-                        Internal::Original(parameter.clone()),
-                        original(annotation),
-                        process,
-                    ),
-                ))
+                assignment.compile_receive(0, loc, &object_internal, process)
             }
 
             Self::Continue(loc, process) => {

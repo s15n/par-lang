@@ -4,7 +4,7 @@ use super::{Net, Tree};
 
 use pest::Parser;
 
-use pest::iterators::{ Pairs};
+use pest::iterators::Pairs;
 
 use pest_derive::Parser;
 

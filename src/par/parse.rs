@@ -10,8 +10,8 @@ use pest_derive::Parser;
 
 use super::{
     language::{
-        Apply, ApplyBranch, ApplyBranches, Command, CommandBranch, CommandBranches, Construct,
-        ConstructBranch, ConstructBranches, Expression, Process,
+        Apply, ApplyBranch, ApplyBranches, Assignment, Command, CommandBranch, CommandBranches,
+        Construct, ConstructBranch, ConstructBranches, Expression, Process,
     },
     types::Type,
 };
@@ -278,6 +278,31 @@ fn parse_annotation(pairs: &mut Pairs<'_, Rule>) -> Result<Option<Type<Loc, Name
     }
 }
 
+fn parse_assignment(pairs: &mut Pairs<'_, Rule>) -> Result<Assignment<Loc, Name>, ParseError> {
+    let pair = pairs.next().unwrap().into_inner().next().unwrap();
+    let loc = Loc::from(&pair);
+
+    match pair.as_rule() {
+        Rule::assign_name => {
+            let mut pairs = pair.into_inner();
+            let (loc, name) = parse_name(&mut pairs)?;
+            let annotation = parse_annotation(&mut pairs)?;
+            Ok(Assignment::Name(loc, name, annotation))
+        }
+
+        Rule::assign_receive => {
+            let mut pairs = pair.into_inner();
+            let first = parse_assignment(&mut pairs)?;
+            let rest = parse_assignment(&mut pairs)?;
+            Ok(Assignment::Receive(loc, Box::new(first), Box::new(rest)))
+        }
+
+        Rule::assign_continue => Ok(Assignment::Continue(loc)),
+
+        _ => unreachable!(),
+    }
+}
+
 fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Expression<Loc, Name>, ParseError> {
     let pair = pairs.next().unwrap().into_inner().next().unwrap();
     let loc = Loc::from(&pair);
@@ -285,14 +310,12 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Expression<Loc, Name>
     match pair.as_rule() {
         Rule::expr_let => {
             let mut pairs = pair.into_inner();
-            let (_, name) = parse_name(&mut pairs)?;
-            let annotation = parse_annotation(&mut pairs)?;
+            let assignment = parse_assignment(&mut pairs)?;
             let expression = parse_expression(&mut pairs)?;
             let body = parse_expression(&mut pairs)?;
             Ok(Expression::Let(
                 loc,
-                name,
-                annotation,
+                assignment,
                 Box::new(expression),
                 Box::new(body),
             ))
@@ -355,15 +378,9 @@ fn parse_construct(pairs: &mut Pairs<'_, Rule>) -> Result<Construct<Loc, Name>, 
 
         Rule::cons_receive => {
             let mut pairs = pair.into_inner();
-            let (_, parameter) = parse_name(&mut pairs)?;
-            let annotation = parse_annotation(&mut pairs)?;
+            let assignment = parse_assignment(&mut pairs)?;
             let construct = parse_construct(&mut pairs)?;
-            Ok(Construct::Receive(
-                loc,
-                parameter,
-                annotation,
-                Box::new(construct),
-            ))
+            Ok(Construct::Receive(loc, assignment, Box::new(construct)))
         }
 
         Rule::cons_choose => {
@@ -432,15 +449,9 @@ fn parse_construct_branch(
 
         Rule::cons_branch_receive => {
             let mut pairs = pair.into_inner();
-            let (_, parameter) = parse_name(&mut pairs)?;
-            let annotation = parse_annotation(&mut pairs)?;
+            let assignment = parse_assignment(&mut pairs)?;
             let branch = parse_construct_branch(&mut pairs)?;
-            Ok(ConstructBranch::Receive(
-                loc,
-                parameter,
-                annotation,
-                Box::new(branch),
-            ))
+            Ok(ConstructBranch::Receive(loc, assignment, Box::new(branch)))
         }
 
         Rule::cons_branch_recv_type => {
@@ -528,15 +539,9 @@ fn parse_apply_branch(pairs: &mut Pairs<'_, Rule>) -> Result<ApplyBranch<Loc, Na
 
         Rule::apply_branch_receive => {
             let mut pairs = pair.into_inner();
-            let (_, parameter) = parse_name(&mut pairs)?;
-            let annotation = parse_annotation(&mut pairs)?;
+            let assignment = parse_assignment(&mut pairs)?;
             let branch = parse_apply_branch(&mut pairs)?;
-            Ok(ApplyBranch::Receive(
-                loc,
-                parameter,
-                annotation,
-                Box::new(branch),
-            ))
+            Ok(ApplyBranch::Receive(loc, assignment, Box::new(branch)))
         }
 
         Rule::apply_branch_continue => {
@@ -563,14 +568,12 @@ fn parse_process(pairs: &mut Pairs<'_, Rule>) -> Result<Process<Loc, Name>, Pars
     match pair.as_rule() {
         Rule::proc_let => {
             let mut pairs = pair.into_inner();
-            let (_, name) = parse_name(&mut pairs)?;
-            let annotation = parse_annotation(&mut pairs)?;
+            let assignment = parse_assignment(&mut pairs)?;
             let expression = parse_expression(&mut pairs)?;
             let process = parse_process(&mut pairs)?;
             Ok(Process::Let(
                 loc,
-                name,
-                annotation,
+                assignment,
                 Box::new(expression),
                 Box::new(process),
             ))
@@ -623,15 +626,9 @@ fn parse_command(pairs: &mut Pairs<'_, Rule>) -> Result<Command<Loc, Name>, Pars
 
         Rule::cmd_receive => {
             let mut pairs = pair.into_inner();
-            let (_, parameter) = parse_name(&mut pairs)?;
-            let annotation = parse_annotation(&mut pairs)?;
+            let assignment = parse_assignment(&mut pairs)?;
             let command = parse_command(&mut pairs)?;
-            Ok(Command::Receive(
-                loc,
-                parameter,
-                annotation,
-                Box::new(command),
-            ))
+            Ok(Command::Receive(loc, assignment, Box::new(command)))
         }
 
         Rule::cmd_choose => {
@@ -723,15 +720,9 @@ fn parse_command_branch(
 
         Rule::cmd_branch_receive => {
             let mut pairs = pair.into_inner();
-            let (_, parameter) = parse_name(&mut pairs)?;
-            let annotation = parse_annotation(&mut pairs)?;
+            let assignment = parse_assignment(&mut pairs)?;
             let branch = parse_command_branch(&mut pairs)?;
-            Ok(CommandBranch::Receive(
-                loc,
-                parameter,
-                annotation,
-                Box::new(branch),
-            ))
+            Ok(CommandBranch::Receive(loc, assignment, Box::new(branch)))
         }
 
         Rule::cmd_branch_continue => {

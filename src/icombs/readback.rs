@@ -1,16 +1,9 @@
 use futures::{
-    channel::{
-        mpsc::{channel as mpsc_channel, Receiver as MpscReceiver, Sender as MpscSender},
-        oneshot::{channel, Receiver, Sender},
-    },
+    channel::oneshot::{channel, Receiver, Sender},
     executor::LocalPool,
-    future::{BoxFuture, LocalBoxFuture},
+    future::LocalBoxFuture,
 };
-use std::{
-    collections::VecDeque,
-    sync::atomic::Ordering,
-    sync::{atomic::AtomicUsize, Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use crate::par::parse::Name;
 
@@ -88,7 +81,7 @@ impl SharedState {
     }
     pub async fn read_port_as_tree(&self, tree: Tree) -> Tree {
         let (ext, rx) = self.make_oneshot_ext();
-        self.add_redex(ext, tree);
+        self.add_redex(ext, tree).await;
         match rx.await.unwrap() {
             PortContents::Aux(sender) => self.make_oneshot_ext_from_tx(sender),
             PortContents::Tree(tree) => tree,
