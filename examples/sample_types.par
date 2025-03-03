@@ -54,16 +54,21 @@ def red_forever = begin {
   next  => (.red!) loop
 }
 
+dec rgb : [Color] Color
 def rgb = [value: Color] value {
   red?   => .red!
   green? => .green!
   blue?  => .blue!
 }
 
+dec swap : [Bool] Bool
 def swap = [bool: Bool] bool {
   true? => .false!
   false? => .true!
 }
+
+dec true  : Bool
+dec false : Bool
 
 def true  = chan result { result.true! }
 def false = chan result { result.false! }
@@ -76,7 +81,7 @@ def bools_forever =
       false? => !
     }
     next => do {
-      let pair = bool {
+      let pair: (Bool)(Bool)! = bool {
         true? => (.true!)(.false!)!
         false? => (.false!)(.true!)!
       }
