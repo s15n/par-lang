@@ -27,7 +27,7 @@ pub enum Tree {
     Var(usize),
     Package(usize),
     Ext(
-        Box<dyn FnOnce(&mut Net, Result<Tree, Box<dyn Any>>)>,
+        Box<dyn FnOnce(&mut Net, Result<Tree, Box<dyn Any>>, Box<dyn Any>)>,
         Box<dyn Any>,
     ),
 }
@@ -43,7 +43,7 @@ impl Tree {
         Tree::Era
     }
     pub fn ext(
-        f: impl FnOnce(&mut Net, Result<Tree, Box<dyn Any>>) + 'static,
+        f: impl FnOnce(&mut Net, Result<Tree, Box<dyn Any>>, Box<dyn Any>) + 'static,
         a: impl Any,
     ) -> Tree {
         Tree::Ext(Box::new(f), Box::new(a))
@@ -109,7 +109,7 @@ impl Tree {
             ),
             Era => format!("*"),
             Package(id) => format!("@{}", id),
-            Ext(f) => format!("<ext>"),
+            Ext(f, _) => format!("<ext>"),
         }
     }
 }
@@ -135,7 +135,7 @@ impl Clone for Tree {
             Tree::Era => Tree::Era,
             Tree::Var(id) => Tree::Var(id.clone()),
             Tree::Package(id) => Tree::Package(id.clone()),
-            Tree::Ext(_) => panic!("Can't clone `Ext` tree!"),
+            Tree::Ext(_, _) => panic!("Can't clone `Ext` tree!"),
         }
     }
 }
@@ -171,8 +171,8 @@ impl Net {
                 self.link(*b0, Tree::Con(Box::new(b00), Box::new(b10)));
                 self.link(*b1, Tree::Con(Box::new(b01), Box::new(b11)));
             }
-            (Ext(f, _), b) | (b, Ext(f, _)) => {
-                f(self, Ok(b));
+            (Ext(f, a), b) | (b, Ext(f, a)) => {
+                f(self, Ok(b), a);
             }
             (Package(_), Era) | (Era, Package(_)) => {}
             (Package(id), Dup(a, b)) | (Dup(a, b), Package(id)) => {

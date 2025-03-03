@@ -268,13 +268,14 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
 
             (Type::Break(_), Type::Break(_)) => from,
             (Type::Continue(_), Type::Continue(_)) => from,
-            (Type::SendType(_, _, a), Type::SendType(l, n, b)) => {
-
-                self.cast(from.tree.with_type(*a.clone()), *b.clone()).tree.with_type(Type::SendType(l.clone(), n.clone(), b.clone()))
-            }
-            (Type::ReceiveType(_, _, a), Type::ReceiveType(l, n, b)) => {
-                self.cast(from.tree.with_type(*a.clone()), *b.clone()).tree.with_type(Type::ReceiveType(l.clone(), n.clone(), b.clone()))
-            }
+            (Type::SendType(_, _, a), Type::SendType(l, n, b)) => self
+                .cast(from.tree.with_type(*a.clone()), *b.clone())
+                .tree
+                .with_type(Type::SendType(l.clone(), n.clone(), b.clone())),
+            (Type::ReceiveType(_, _, a), Type::ReceiveType(l, n, b)) => self
+                .cast(from.tree.with_type(*a.clone()), *b.clone())
+                .tree
+                .with_type(Type::ReceiveType(l.clone(), n.clone(), b.clone())),
             (Type::Name(_, name, args), to) => {
                 let ty = self.dereference_type_def(name, args);
                 self.cast(from.tree.with_type(ty), to.clone())
@@ -324,12 +325,6 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
         }
     }
     fn compile_process(&mut self, proc: &Process<Loc, Name, Type<Loc, Name>>) {
-        {
-            let mut s = String::new();
-            proc.pretty(&mut s, 1);
-            println!("Compile process: {}", s);
-            self.show_state();
-        }
         match proc {
             Process::Let(_, key, _, _, value, rest) => {
                 let value = self.compile_expression(value);
