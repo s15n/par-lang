@@ -402,9 +402,19 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                         return Ok(false);
                     }
                 }
+                for (branch, _) in branches2 {
+                    if branches1.get(branch).is_none() {
+                        return Ok(false);
+                    }
+                }
                 true
             }
             (Self::Choice(_, branches1), Self::Choice(_, branches2)) => {
+                for (branch, _) in branches1 {
+                    if branches2.get(branch).is_none() {
+                        return Ok(false);
+                    }
+                }
                 for (branch, t2) in branches2 {
                     let Some(t1) = branches1.get(branch) else {
                         return Ok(false);
@@ -890,7 +900,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
 #[derive(Clone, Debug)]
 pub struct Context<Loc, Name> {
     type_defs: TypeDefs<Loc, Name>,
-    declarations: Arc<Declarations<Loc, Name>>,
+    declarations: Declarations<Loc, Name>,
     variables: IndexMap<Name, Type<Loc, Name>>,
     loop_points: IndexMap<Option<Name>, (Name, Arc<IndexMap<Name, Type<Loc, Name>>>)>,
 }
@@ -902,7 +912,7 @@ where
 {
     pub fn new(
         globals_type_defs: Arc<IndexMap<Name, (Vec<Name>, Type<Loc, Name>)>>,
-        declarations: Arc<Declarations<Loc, Name>>,
+        declarations: Declarations<Loc, Name>,
     ) -> Self {
         Self {
             type_defs: TypeDefs {
@@ -918,7 +928,7 @@ where
     pub fn split(&self) -> Self {
         Self {
             type_defs: self.type_defs.clone(),
-            declarations: Arc::clone(&self.declarations),
+            declarations: self.declarations.clone(),
             variables: IndexMap::new(),
             loop_points: self.loop_points.clone(),
         }
@@ -953,6 +963,10 @@ where
         }
         self.variables.insert(name, typ);
         Ok(())
+    }
+
+    pub fn add_declaration(&mut self, name: Name, typ: Type<Loc, Name>) {
+        self.declarations.0.insert(name, Some(typ));
     }
 
     pub fn capture(
@@ -1468,11 +1482,10 @@ where
             }
 
             Command::Choose(chosen, process) => {
-                let (process, typ) = self.infer_process(process, subject)?;
-                (
-                    Command::Choose(chosen.clone(), process),
-                    Type::Choice(loc.clone(), IndexMap::from([(chosen.clone(), typ)])),
-                )
+                return Err(TypeError::TypeMustBeKnownAtThisPoint(
+                    loc.clone(),
+                    subject.clone(),
+                ))
             }
 
             Command::Match(branches, processes) => {
