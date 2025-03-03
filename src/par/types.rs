@@ -102,9 +102,9 @@ impl<Loc: ::core::cmp::PartialEq, Name: ::core::cmp::PartialEq + Eq + Hash> ::co
             (Type::Break(__self_0), Type::Break(__arg1_0)) => __self_0 == __arg1_0,
             (Type::Continue(__self_0), Type::Continue(__arg1_0)) => __self_0 == __arg1_0,
             (
-                Type::Recursive(__self_0, __self_1, __self_2),
-                Type::Recursive(__arg1_0, __arg1_1, __arg1_2),
-            ) => __self_0 == __arg1_0 && __self_1 == __arg1_1 && __self_2 == __arg1_2,
+                Type::Recursive(_, __self_1, __self_2),
+                Type::Recursive(_, __arg1_1, __arg1_2),
+            ) =>  __self_1 == __arg1_1 && __self_2 == __arg1_2,
             (
                 Type::Iterative(__self_0, __self_1, __self_2),
                 Type::Iterative(__arg1_0, __arg1_1, __arg1_2),
@@ -123,6 +123,12 @@ impl<Loc: ::core::cmp::PartialEq, Name: ::core::cmp::PartialEq + Eq + Hash> ::co
                 Type::ReceiveType(__self_0, __self_1, __self_2),
                 Type::ReceiveType(__arg1_0, __arg1_1, __arg1_2),
             ) => __self_0 == __arg1_0 && __self_1 == __arg1_1 && __self_2 == __arg1_2,
+            (Type::DualLoop(__self_0, __self_1), Type::DualLoop(__arg1_0, __arg1_1)) => {
+                __self_0 == __arg1_0 && __self_1 == __arg1_1
+            }
+            (Type::DualSelf(__self_0, __self_1), Type::DualSelf(__arg1_0, __arg1_1)) => {
+                __self_0 == __arg1_0 && __self_1 == __arg1_1
+            }
             _ => false,
         }
     }
