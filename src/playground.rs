@@ -386,8 +386,8 @@ impl Playground {
 
         egui::Frame::default()
             .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
-            .inner_margin(egui::Margin::same(4.0))
-            .outer_margin(egui::Margin::same(2.0))
+            .inner_margin(egui::Margin::same(4))
+            .outer_margin(egui::Margin::same(2))
             .show(ui, |ui| {
                 ui.horizontal_top(|ui| {
                     let mut to_the_side = Vec::new();

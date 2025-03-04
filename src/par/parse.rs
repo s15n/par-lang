@@ -188,6 +188,13 @@ fn parse_type(pairs: &mut Pairs<'_, Rule>) -> Result<Type<Loc, Name>, ParseError
             Ok(Type::Name(loc, name, args))
         }
 
+        Rule::typ_dual_name => {
+            let mut pairs = pair.into_inner();
+            let (_, name) = parse_name(&mut pairs)?;
+            let args = parse_type_args(&mut pairs)?;
+            Ok(Type::DualName(loc, name, args))
+        }
+
         Rule::typ_send => {
             let mut pairs = pair.into_inner();
             let arg = parse_type(&mut pairs)?;
@@ -299,6 +306,13 @@ fn parse_assignment(pairs: &mut Pairs<'_, Rule>) -> Result<Assignment<Loc, Name>
 
         Rule::assign_continue => Ok(Assignment::Continue(loc)),
 
+        Rule::assign_recv_type => {
+            let mut pairs = pair.into_inner();
+            let (_, parameter) = parse_name(&mut pairs)?;
+            let rest = parse_assignment(&mut pairs)?;
+            Ok(Assignment::ReceiveType(loc, parameter, Box::new(rest)))
+        }
+
         _ => unreachable!(),
     }
 }
@@ -330,7 +344,7 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Expression<Loc, Name>
 
         Rule::expr_fork => {
             let mut pairs = pair.into_inner();
-            let (_, name) = parse_name(&mut pairs)?;
+            let (loc, name) = parse_name(&mut pairs)?;
             let annotation = parse_annotation(&mut pairs)?;
             let process = parse_process(&mut pairs)?;
             Ok(Expression::Fork(loc, name, annotation, Box::new(process)))
@@ -532,7 +546,7 @@ fn parse_apply_branch(pairs: &mut Pairs<'_, Rule>) -> Result<ApplyBranch<Loc, Na
     match pair.as_rule() {
         Rule::apply_branch_then => {
             let mut pairs = pair.into_inner();
-            let (_, name) = parse_name(&mut pairs)?;
+            let (loc, name) = parse_name(&mut pairs)?;
             let expression = parse_expression(&mut pairs)?;
             Ok(ApplyBranch::Then(loc, name, expression))
         }
