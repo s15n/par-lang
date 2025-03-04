@@ -55,14 +55,14 @@ def red_forever = begin {
 }
 
 dec rgb : [Color] Color
-def rgb = [value: Color] value {
+def rgb = [value] value {
   .red!   => .red!
   .green! => .green!
   .blue!  => .blue!
 }
 
 dec swap : [Bool] Bool
-def swap = [bool: Bool] bool {
+def swap = [bool] bool {
   .true! => .false!
   .false! => .true!
 }
