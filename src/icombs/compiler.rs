@@ -118,9 +118,6 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
     ) -> (usize, Type<Loc, Name>) {
         let old_net = core::mem::take(&mut self.net);
         let mut tree = self.with_captures(&Captures::default(), |this| f(this));
-        if let Some(t) = typ {
-            tree = self.cast(tree, t.clone())
-        }
         self.net.ports.push_back(tree.tree);
 
         let id = self.id_to_package.len();
@@ -242,121 +239,12 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
             },
         )
     }
-    // cast an expression into another type.
-    fn cast(&mut self, from: TypedTree<Name>, to: Type<Loc, Name>) -> TypedTree<Name> {
-        if &from.ty == &to {
-            return from;
-        }
-        match (&from.ty, &to) {
-            (Type::Send(_, from_fst, from_snd), Type::Send(_, to_fst, to_snd)) => {
-                let (fst0, fst1) = self.create_typed_wire(from_fst.as_ref().clone());
-                let (snd0, snd1) = self.create_typed_wire(from_snd.as_ref().clone());
-                self.net.link(from.tree, Tree::c(fst1.tree, snd1.tree));
-                Tree::c(
-                    self.cast(fst0, to_fst.as_ref().clone()).tree,
-                    self.cast(snd0, to_snd.as_ref().clone()).tree,
-                )
-                .with_type(to)
-            }
-            (Type::Receive(_, from_fst, from_snd), Type::Receive(_, to_fst, to_snd)) => {
-                let (fst0, fst1) = self.create_typed_wire(from_fst.dual());
-                let (snd0, snd1) = self.create_typed_wire(from_snd.as_ref().clone());
-                self.net.link(from.tree, Tree::c(fst1.tree, snd1.tree));
-                Tree::c(
-                    self.cast(fst0, to_fst.dual()).tree,
-                    self.cast(snd0, to_snd.as_ref().clone()).tree,
-                )
-                .with_type(to)
-            }
-            (Type::Choice(_, from_choices), Type::Choice(_, to_choices)) => {
-                // to_choices <= from_choices
-                // Construct a choice object that, on each case,
-                // picks the correct choice from from_choicse
-                // the context is simply the from_choices object
-                let mut from_choices = from_choices.clone();
-                let mut to_choices = to_choices.clone();
-                from_choices.sort_keys();
-                to_choices.sort_keys();
-                let mut cases = vec![];
-                let out_of = from_choices.len();
-                for (k, to_ty) in to_choices {
-                    let from_ty = from_choices.get(&k).unwrap();
-                    let (x0, x1) = self.create_typed_wire(from_ty.clone());
-
-                    let index = from_choices
-                        .get_index_of(&k)
-                        .expect("Can't cast between these choices");
-                    cases.push((
-                        self.either_instance(x1.tree, index, out_of),
-                        self.cast(x0, to_ty).tree,
-                    ));
-                }
-                self.choice_instance(from.tree, cases).with_type(to)
-            }
-
-            (Type::Either(_, from_either), Type::Either(_, to_either)) => {
-                // from_either <= to_either
-                let mut from_either = from_either.clone();
-                let mut to_either = to_either.clone();
-                from_either.sort_keys();
-                to_either.sort_keys();
-
-                let (v0, v1) = self.create_typed_wire(to.clone());
-                let mut cases = vec![];
-                let out_of = to_either.len();
-                for (k, from_ty) in from_either {
-                    let to_ty = to_either.get(&k).unwrap();
-                    let (x0, x1) = self.create_typed_wire(from_ty.clone());
-
-                    let index = to_either
-                        .get_index_of(&k)
-                        .expect("Can't cast between these choices");
-                    let x0 = self.cast(x0, to_ty.clone()).tree;
-                    cases.push((self.either_instance(x0, index, out_of), x1.tree));
-                }
-                let either = self.choice_instance(v1.tree, cases);
-                self.net.link(from.tree, either);
-                v0
-            }
-
-            (Type::Break(_), Type::Break(_)) => from,
-            (Type::Continue(_), Type::Continue(_)) => from,
-            (Type::SendType(_, _, a), Type::SendType(l, n, b)) => self
-                .cast(from.tree.with_type(*a.clone()), *b.clone())
-                .tree
-                .with_type(Type::SendType(l.clone(), n.clone(), b.clone())),
-            (Type::ReceiveType(_, _, a), Type::ReceiveType(l, n, b)) => self
-                .cast(from.tree.with_type(*a.clone()), *b.clone())
-                .tree
-                .with_type(Type::ReceiveType(l.clone(), n.clone(), b.clone())),
-            (Type::Name(_, name, args), to) => {
-                let ty = self.program.dereference_type_def(name, args);
-                self.cast(from.tree.with_type(ty), to.clone())
-            }
-            (Type::DualName(_, name, args), to) => {
-                let ty = self.program.dereference_type_def(name, args).dual();
-                self.cast(from.tree.with_type(ty), to.clone())
-            }
-            (_, Type::Name(_, name, args)) => {
-                let ty = self.program.dereference_type_def(name, args);
-                self.cast(from, ty)
-            }
-            (_, Type::DualName(_, name, args)) => {
-                let ty = self.program.dereference_type_def(name, args).dual();
-                self.cast(from, ty)
-            }
-            (a, b) => todo!("Can't cast from {:?} to {:?}", a, b),
-        }
-    }
     fn compile_expression(
         &mut self,
         expr: &Expression<Loc, Name, Type<Loc, Name>>,
     ) -> TypedTree<Name> {
         match expr {
-            Expression::Reference(_, name, ty) => {
-                let inner = self.instantiate_variable(name);
-                self.cast(inner, ty.clone())
-            }
+            Expression::Reference(_, name, ty) => self.instantiate_variable(name),
             Expression::Fork(_, captures, name, _, typ, proc) => {
                 self.with_captures(captures, |this| {
                     let (v0, v1) = this.create_typed_wire(typ.clone());
@@ -455,7 +343,6 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
             // types get erased.
             Command::SendType(_, process) => {
                 let a = self.instantiate_variable(&name);
-                let a = self.cast(a, ty);
                 let Type::SendType(_, src_name, ret_type) = a.ty else {
                     unreachable!()
                 };
@@ -465,7 +352,6 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
             }
             Command::ReceiveType(_, process) => {
                 let a = self.instantiate_variable(&name);
-                let a = self.cast(a, ty);
                 let Type::ReceiveType(_, dest_name, ret_type) = a.ty else {
                     unreachable!()
                 };
@@ -480,12 +366,10 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 // free = (name < expr >)
                 // < process >
                 let a = self.instantiate_variable(&name);
-                let a = self.cast(a, ty);
                 let Type::Receive(_, arg_type, ret_type) = a.ty else {
                     unreachable!()
                 };
                 let expr = self.compile_expression(expr);
-                let expr = self.cast(expr, *arg_type);
 
                 let (v0, v1) = self.create_typed_wire(*ret_type);
                 self.bind_variable(&name, v0);
@@ -500,7 +384,6 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 // free = (name target)
                 // < process >
                 let a = self.instantiate_variable(&name);
-                let a = self.cast(a, ty);
                 let Type::Send(_, arg_type, ret_type) = a.ty else {
                     unreachable!()
                 };
@@ -514,7 +397,6 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
             }
             Command::Choose(chosen, process) => {
                 let a = self.instantiate_variable(&name);
-                let a = self.cast(a, ty);
 
                 println!("{:?}", a.ty);
                 let Type::Choice(_, branches) = self.normalize_type(a.ty) else {
