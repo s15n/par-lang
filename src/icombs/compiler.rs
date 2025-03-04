@@ -8,14 +8,14 @@ use crate::par::parse::Loc;
 use indexmap::IndexMap;
 use std::hash::Hash;
 
+use super::net::{Net, Tree};
+use crate::par::parse::Loc::External;
 use crate::par::{
     language::Internal,
     parse::{Name, Program},
     process::{Captures, Command, Expression, Process},
     types::Type,
 };
-use crate::par::parse::Loc::External;
-use super::net::{Net, Tree};
 
 type Prog<Name> = Program<Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>;
 
@@ -31,13 +31,21 @@ enum VariableKind {
 
 #[derive(Debug, Clone)]
 pub struct TypedTree<Name: Clone> {
-    tree: Tree,
-    ty: Type<Loc, Name>,
+    pub tree: Tree,
+    pub ty: Type<Loc, Name>,
+}
+
+impl<Name: Clone> Default for TypedTree<Name> {
+    fn default() -> Self {
+        Self {
+            tree: Tree::e(),
+            ty: Type::Break(Loc::default()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Var<Name:  Clone+ Debug+ Hash+ PartialEq+ Eq+ PartialOrd+ Ord>
-{
+pub enum Var<Name: Clone + Debug + Hash + PartialEq + Eq + PartialOrd + Ord> {
     Name(Name),
     Loop(Option<Name>),
 }
@@ -53,7 +61,7 @@ pub struct Compiler<'program, Name: Debug + Clone + Eq + Hash + Ord> {
 }
 
 impl Tree {
-    fn with_type<Name: Clone>(self, ty: Type<Loc, Name>) -> TypedTree<Name> {
+    pub(crate) fn with_type<Name: Clone>(self, ty: Type<Loc, Name>) -> TypedTree<Name> {
         TypedTree { tree: self, ty }
     }
 }
@@ -88,21 +96,28 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
             println!("{global:#?}");
         }
 
-        let (id,typ) = self.in_package(|this| {
-            let mut s = String::new();
-            global.pretty(&mut s, 0).unwrap();
-            this.compile_expression(global.as_ref())
-        }, typ, debug);
+        let (id, typ) = self.in_package(
+            |this| {
+                let mut s = String::new();
+                global.pretty(&mut s, 0).unwrap();
+                this.compile_expression(global.as_ref())
+            },
+            typ,
+            debug,
+        );
         self.global_name_to_id.insert(name.clone(), id);
 
         Some(Tree::Package(id).with_type(typ))
     }
 
-    fn in_package(&mut self, f: impl FnOnce(&mut Self)->TypedTree<Name>, typ: Option<&Type<Loc, Name>>, debug: bool) -> (usize, Type<Loc, Name>) {
+    fn in_package(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> TypedTree<Name>,
+        typ: Option<&Type<Loc, Name>>,
+        debug: bool,
+    ) -> (usize, Type<Loc, Name>) {
         let old_net = core::mem::take(&mut self.net);
-        let mut tree = self.with_captures(&Captures::default(), |this| {
-            f(this)
-        });
+        let mut tree = self.with_captures(&Captures::default(), |this| f(this));
         if let Some(t) = typ {
             tree = self.cast(tree, t.clone())
         }
@@ -196,7 +211,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                     )
                 }
             }
-        } else{
+        } else {
             panic!("unknown variable {:?}", var)
         }
     }
@@ -315,31 +330,23 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 .tree
                 .with_type(Type::ReceiveType(l.clone(), n.clone(), b.clone())),
             (Type::Name(_, name, args), to) => {
-                let ty = self.dereference_type_def(name, args);
+                let ty = self.program.dereference_type_def(name, args);
                 self.cast(from.tree.with_type(ty), to.clone())
             }
             (Type::DualName(_, name, args), to) => {
-                let ty = self.dereference_type_def(name, args).dual();
+                let ty = self.program.dereference_type_def(name, args).dual();
                 self.cast(from.tree.with_type(ty), to.clone())
             }
             (_, Type::Name(_, name, args)) => {
-                let ty = self.dereference_type_def(name, args);
+                let ty = self.program.dereference_type_def(name, args);
                 self.cast(from, ty)
             }
             (_, Type::DualName(_, name, args)) => {
-                let ty = self.dereference_type_def(name, args).dual();
+                let ty = self.program.dereference_type_def(name, args).dual();
                 self.cast(from, ty)
             }
             (a, b) => todo!("Can't cast from {:?} to {:?}", a, b),
         }
-    }
-    fn dereference_type_def(&mut self, name: &Name, args: &[Type<Loc, Name>]) -> Type<Loc, Name> {
-        let def = self.program.type_defs.get(name).unwrap();
-        let mut typ = def.1.clone();
-        for (src, tgt) in def.0.iter().zip(args) {
-            typ = typ.substitute(&src, tgt).unwrap();
-        }
-        typ
     }
     fn compile_expression(
         &mut self,
@@ -366,7 +373,8 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
         match proc {
             Process::Let(_, key, _, _, value, rest) => {
                 let value = self.compile_expression(value);
-                self.vars.insert(Var::Name(key.clone()), (value, VariableKind::Linear));
+                self.vars
+                    .insert(Var::Name(key.clone()), (value, VariableKind::Linear));
                 self.compile_process(rest);
             }
 
@@ -408,11 +416,11 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
     fn normalize_type(&mut self, ty: Type<Loc, Name>) -> Type<Loc, Name> {
         match ty {
             Type::Name(loc, name, args) => {
-                let ty = self.dereference_type_def(&name, &args);
+                let ty = self.program.dereference_type_def(&name, &args);
                 self.normalize_type(ty)
-            },
+            }
             Type::DualName(loc, name, args) => {
-                let ty = self.dereference_type_def(&name, &args).dual();
+                let ty = self.program.dereference_type_def(&name, &args).dual();
                 self.normalize_type(ty)
             }
             Type::Either(loc, mut index_map) => {
@@ -422,12 +430,12 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
             Type::Choice(loc, mut index_map) => {
                 index_map.sort_keys();
                 Type::Choice(loc, index_map)
-            },
+            }
             Type::Recursive(loc, name, body) => {
-                self.normalize_type(Type::expand_recursive(&name,&body))
-            },
-            Type::Iterative(loc,name,body) => {
-                self.normalize_type(Type::expand_iterative(&name,&body))
+                self.normalize_type(Type::expand_recursive(&name, &body))
+            }
+            Type::Iterative(loc, name, body) => {
+                self.normalize_type(Type::expand_iterative(&name, &body))
             }
             a => a,
         }
@@ -590,9 +598,15 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 self.compile_process(process);
             }
             Command::Begin(label, process) => {
-                let (def0,def1) = self.net.create_wire();
-                let prev = self.vars.insert(Var::Loop(label.clone()), (def0.with_type(Type::Break(External)), VariableKind::Replicable));
-                if let Some((prev_tree,_)) = prev {
+                let (def0, def1) = self.net.create_wire();
+                let prev = self.vars.insert(
+                    Var::Loop(label.clone()),
+                    (
+                        def0.with_type(Type::Break(External)),
+                        VariableKind::Replicable,
+                    ),
+                );
+                if let Some((prev_tree, _)) = prev {
                     self.net.link(prev_tree.tree, Tree::Era);
                 }
                 self.vars.sort_keys();
@@ -608,24 +622,29 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 }
                 let context_in = multiplex_trees(m_trees);
 
-                let (id,_) = self.in_package(|this| {
-                    let mut m_trees = vec![];
-                    for (name, (ty, kind)) in m_vars.iter().zip(m_tys.iter().zip(m_kind.iter())) {
-                        let (v0, v1) = this.net.create_wire();
-                        this.vars
-                            .insert(name.clone(), (v0.with_type(ty.clone()), kind.clone()));
-                        m_trees.push(v1);
-                    }
-                    println!("vars: {:?}", this.vars);
-                    this.compile_process(process);
-                    multiplex_trees(m_trees).with_type(Type::Break(External))
-                },None, true);
+                let (id, _) = self.in_package(
+                    |this| {
+                        let mut m_trees = vec![];
+                        for (name, (ty, kind)) in m_vars.iter().zip(m_tys.iter().zip(m_kind.iter()))
+                        {
+                            let (v0, v1) = this.net.create_wire();
+                            this.vars
+                                .insert(name.clone(), (v0.with_type(ty.clone()), kind.clone()));
+                            m_trees.push(v1);
+                        }
+                        println!("vars: {:?}", this.vars);
+                        this.compile_process(process);
+                        multiplex_trees(m_trees).with_type(Type::Break(External))
+                    },
+                    None,
+                    true,
+                );
                 self.net.link(def1, Tree::Package(id));
                 self.net.link(context_in, Tree::Package(id));
             }
             Command::Loop(label) => {
                 println!("loop vars: {:?}", self.vars);
-                let (tree,_) = self.use_var(&Var::Loop(label.clone()));
+                let (tree, _) = self.use_var(&Var::Loop(label.clone()));
                 self.vars.sort_keys();
                 let mut m_trees = vec![];
                 let mut m_tys = vec![];

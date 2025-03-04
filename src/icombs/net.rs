@@ -20,6 +20,7 @@ pub fn number_to_string(mut number: usize) -> String {
     }
     result
 }
+
 pub enum Tree {
     Con(Box<Tree>, Box<Tree>),
     Dup(Box<Tree>, Box<Tree>),
@@ -208,6 +209,7 @@ impl Net {
         self.freshen_variables(&mut tree);
         tree
     }
+    /// Returns whether a reduction was carried out
     pub fn reduce_one(&mut self) -> bool {
         if let Some((a, b)) = self.redexes.pop_front() {
             self.interact(a, b);

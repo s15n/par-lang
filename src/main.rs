@@ -5,6 +5,7 @@ pub mod icombs;
 mod interact;
 mod par;
 mod playground;
+mod readback;
 mod spawn;
 #[cfg(test)]
 mod tests;

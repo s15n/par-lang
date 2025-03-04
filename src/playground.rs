@@ -9,7 +9,11 @@ use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use indexmap::IndexMap;
 
 use crate::{
-    icombs::compile_file,
+    icombs::{
+        compile_file,
+        readback::{ReadbackResult, SharedState},
+        IcCompiled,
+    },
     interact::{Event, Handle, Request},
     par::{
         language::{CompileError, Internal},
@@ -18,6 +22,7 @@ use crate::{
         runtime::{self, Context, Operation},
         types::{self, Type, TypeError},
     },
+    readback::{prepare_type_for_readback, ReadbackState, ReadbackStateInner},
     spawn::TokioSpawn,
 };
 
@@ -29,6 +34,7 @@ pub struct Playground {
     editor_font_size: f32,
     show_compiled: bool,
     show_ic: bool,
+    readback_state: Option<crate::readback::ReadbackState<Internal<Name>>>,
 }
 
 #[derive(Clone)]
@@ -112,6 +118,9 @@ impl Compiled {
 
             match program.declarations.get(name) {
                 Some(Some(declaration)) => {
+                    new_program
+                        .declarations
+                        .insert(name.clone(), Some(declaration.clone()));
                     match context.check_expression(None, expression, declaration) {
                         Ok(e) => {
                             new_program.definitions.insert(name.clone(), e);
@@ -207,6 +216,7 @@ impl Playground {
             editor_font_size: 16.0,
             show_compiled: false,
             show_ic: false,
+            readback_state: Default::default(),
         })
     }
 }
@@ -258,6 +268,44 @@ impl Playground {
             fix_light_theme(ColorTheme::GITHUB_LIGHT)
         }
     }
+
+    fn readback(
+        readback_state: &mut Option<ReadbackState<Internal<Name>>>,
+        ui: &mut egui::Ui,
+        program: &Program<
+            Internal<Name>,
+            Arc<Expression<Loc, Internal<Name>, Type<Loc, Internal<Name>>>>,
+        >,
+        compiled: &IcCompiled,
+    ) {
+        for (internal_name, expression) in &program.definitions {
+            if let Internal::Original(name) = internal_name {
+                if ui.button(&name.string).clicked() {
+                    let q = &program.declarations;
+                    let ty = program
+                        .declarations
+                        .get(&Internal::Original(name.clone()))
+                        .unwrap()
+                        .as_ref()
+                        .unwrap();
+                    let mut net = compiled.create_net();
+                    let mut tree = compiled.get_with_name(&internal_name).unwrap();
+                    net.freshen_variables(&mut tree);
+                    let shared = SharedState::default();
+                    let ty = prepare_type_for_readback(program, ty.clone());
+                    let tree = tree.with_type(ty.clone());
+                    *readback_state = Some(ReadbackState {
+                        result: ReadbackResult::Halted(tree),
+                        inner: ReadbackStateInner {
+                            net: Some(net),
+                            shared,
+                            needs_further_readback: false,
+                        },
+                    })
+                }
+            }
+        }
+    }
     fn run(
         interact: &mut Option<Interact>,
         ui: &mut egui::Ui,
@@ -304,8 +352,7 @@ impl Playground {
                 }
 
                 if let Some(Ok(Compiled {
-                    program,
-                    ..
+                    program, checked, ..
                 })) = &mut self.compiled
                 {
                     ui.checkbox(
@@ -326,6 +373,29 @@ impl Playground {
                             Self::run(&mut self.interact, ui, program, self.compiled_code.clone());
                         },
                     );
+
+                    if let Ok(checked) = checked {
+                        if let Some(ic_compiled) = checked.ic_compiled.as_ref() {
+                            let a = checked.program.declarations.len();
+                            egui::menu::menu_custom_button(
+                                ui,
+                                egui::Button::new(
+                                    egui::RichText::new("Readback")
+                                        .strong()
+                                        .color(egui::Color32::BLACK),
+                                )
+                                .fill(green().lerp_to_gamma(egui::Color32::WHITE, 0.3)),
+                                |ui| {
+                                    Self::readback(
+                                        &mut self.readback_state,
+                                        ui,
+                                        &checked.program,
+                                        ic_compiled,
+                                    );
+                                },
+                            );
+                        }
+                    }
                 }
             });
 
@@ -364,6 +434,10 @@ impl Playground {
                                         .with_theme(theme)
                                         .with_numlines(true)
                                         .show(ui, &mut format!("{}", ic_compiled));
+                                }
+
+                                if let Some(rb) = &mut self.readback_state {
+                                    rb.show_readback(ui, &checked.program)
                                 }
                             }
                         } else if let Err(err) = checked {

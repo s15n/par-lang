@@ -40,3 +40,5 @@ define xor_tree = [tree: Tree] tree begin {
 
 declare main: Bool
 define main = xor_tree(tree)
+
+define id = [x: !] x
