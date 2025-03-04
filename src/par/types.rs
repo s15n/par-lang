@@ -1481,7 +1481,7 @@ where
                 )
             }
 
-            Command::Choose(chosen, process) => {
+            Command::Choose(_, _) => {
                 return Err(TypeError::TypeMustBeKnownAtThisPoint(
                     loc.clone(),
                     subject.clone(),
