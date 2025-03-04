@@ -80,13 +80,12 @@ def bools_forever =
       .true! => !
       .false! => !
     }
-    .next => do {
-      let pair: (Bool)(Bool)! = bool {
+    .next => {
+      let (output: Bool)(bool: Bool)! = bool {
         .true! => (.true!)(.false!)!
         .false! => (.false!)(.true!)!
-      }
-      pair[output][bool]?
-    } in (output) loop
+      } in (output) loop
+    }
   }
 
 dec zip: [List<Color>][Seq<Color>]List<(Color)(Color)!>
