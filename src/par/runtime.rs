@@ -299,6 +299,7 @@ where
                         }
 
                         Command::SendType(_, process) | Command::ReceiveType(_, process) => {
+                            self.put(loc, object_name.clone(), object)?;
                             current_process = Arc::clone(process);
                         }
                     }

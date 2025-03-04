@@ -16,9 +16,16 @@
 
 - 🧑‍💻 For a possible collaboration, reach me via e-mail in my [GitHub profile](https://github.com/faiface).
 
+### There is a type system now!
+
+The guide is not yet updated to describe the new type system. Check out this
+[live tutorial](https://youtu.be/UX-p1bq-hkU?si=8BLW71C_QVNR_bfk), which explains the type system, and
+also provides a gentler introduction to the language, compared to this guide.
+
 ## Table of Contents
 
 - [An experimental concurrent language with an interactive playground](#an-experimental-concurrent-language-with-an-interactive-playground)
+    - [There is a type system now!](#there-is-a-type-system-now)
   - [Table of Contents](#table-of-contents)
   - [Setting up](#setting-up)
 - [The Par language guide](#the-par-language-guide)

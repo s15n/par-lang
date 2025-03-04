@@ -2,7 +2,7 @@ WHITESPACE = _{ " " | "\t" | "\n" | "\r" | "," }
 COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
 keyword = {
-    "type" | "declare" | "define" |
+    "type" | "dec" | "def" |
     "chan" | "let" | "do" | "in" | "pass" | "begin" | "loop" | "telltypes" |
     "either" | "recursive" | "iterative" | "self"
 }
@@ -11,11 +11,12 @@ name = @{ !(keyword ~ !("_" | ASCII_ALPHANUMERIC)) ~ (ASCII_ALPHA ~ ("_" | ASCII
 
 program     = { SOI ~ (type_def | declaration | definition)* ~ EOI }
 type_def    = { "type" ~ name ~ type_params ~ "=" ~ typ }
-declaration = { "declare" ~ name ~ ":" ~ typ }
-definition  = { "define" ~ name ~ "=" ~ expression }
+declaration = { "dec" ~ name ~ ":" ~ typ }
+definition  = { "def" ~ name ~ "=" ~ expression }
 
-typ           = { typ_name | typ_send | typ_receive | typ_either | typ_choice | typ_break | typ_continue | typ_recursive | typ_iterative | typ_self | typ_loop | typ_send_type | typ_recv_type }
+typ           = { typ_name | typ_dual_name | typ_send | typ_receive | typ_either | typ_choice | typ_break | typ_continue | typ_recursive | typ_iterative | typ_self | typ_loop | typ_send_type | typ_recv_type }
 typ_name      = { name ~ type_args }
+typ_dual_name = { "chan" ~ name ~ type_args }
 typ_send      = { "(" ~ typ ~ ")" ~ typ }
 typ_receive   = { "[" ~ typ ~ "]" ~ typ }
 typ_either    = { "either" ~ "{" ~ ("." ~ name ~ typ)* ~ "}" }
@@ -32,11 +33,12 @@ typ_recv_type = { "[" ~ "type" ~ name ~ "]" ~ typ }
 type_params = { ("<" ~ name+ ~ ">")? }
 type_args   = { ("<" ~ typ+ ~ ">")? }
 
-annotation      = { (":" ~ typ)? }
-assignment      = { assign_name | assign_receive | assign_continue }
-assign_name     = { name ~ annotation }
-assign_receive  = { "[" ~ assignment ~ "]" ~ assignment }
-assign_continue = { "?" }
+annotation       = { (":" ~ typ)? }
+assignment       = { assign_name | assign_receive | assign_continue | assign_recv_type }
+assign_name      = { name ~ annotation }
+assign_receive   = { "[" ~ assignment ~ "]" ~ assignment }
+assign_continue  = { "?" }
+assign_recv_type = { "[" ~ "type" ~ name ~ "]" ~ assignment }
 
 expression = { expr_let | expr_do | expr_fork | application | construction | ("{" ~ expression ~ "}") }
 expr_let   = { "let" ~ assignment ~ "=" ~ expression ~ "in" ~ expression }
