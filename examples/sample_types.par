@@ -90,7 +90,7 @@ def bools_forever =
   }
 
 dec zip: [List<Color>][Seq<Color>]List<(Color)(Color)!>
-def zip = [list: List<Color>][seq: Seq<Color>] list begin {
+def zip = [list][seq] list begin {
   .empty! => do {
     seq.close?
   } in .empty!
