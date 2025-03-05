@@ -205,7 +205,7 @@ fn parse_type(pairs: &mut Pairs<'_, Rule>) -> Result<Type<Loc, Name>, ParseError
             let mut pairs = pair.into_inner();
 
             let args = parse_type_list(&mut pairs)?;
-            let mut then = parse_type(&mut pairs)?;;
+            let mut then = parse_type(&mut pairs)?;
             for arg in args.into_iter().rev() {
                 then = Type::Receive(loc.clone(), Box::new(arg), Box::new(then));
             }
@@ -435,11 +435,7 @@ fn parse_construct(pairs: &mut Pairs<'_, Rule>) -> Result<Construct<Loc, Name>, 
             let arguments = parse_expression_list(&mut pairs)?;
             let mut construct = parse_construct(&mut pairs)?;
             for argument in arguments.into_iter().rev() {
-                construct = Construct::Send(
-                    loc.clone(),
-                    Box::new(argument),
-                    Box::new(construct),
-                );
+                construct = Construct::Send(loc.clone(), Box::new(argument), Box::new(construct));
             }
 
             Ok(construct)
@@ -512,7 +508,9 @@ fn parse_construct(pairs: &mut Pairs<'_, Rule>) -> Result<Construct<Loc, Name>, 
     }
 }
 
-fn parse_expression_list(pairs: &mut Pairs<Rule>) -> Result<Vec<Expression<Loc,Name>>, ParseError> {
+fn parse_expression_list(
+    pairs: &mut Pairs<Rule>,
+) -> Result<Vec<Expression<Loc, Name>>, ParseError> {
     let mut pairs = pairs.next().unwrap().into_inner();
     let mut exprs = Vec::new();
     while let Some(pair) = pairs.next() {
