@@ -41,4 +41,7 @@ def xor_tree = [tree: Tree] tree begin {
 dec main: Bool
 def main = xor_tree(tree)
 
-def id = [x: !] x
+def id = {
+    true => !
+    false => !
+}

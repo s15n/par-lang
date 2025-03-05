@@ -6,6 +6,8 @@ use futures::{
     FutureExt, SinkExt, StreamExt,
 };
 use std::{
+    any::Any,
+    fmt::Debug,
     future::{poll_fn, Future},
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -24,14 +26,17 @@ use super::{compiler::TypedTree, Tree};
 #[derive(Default, Debug)]
 pub struct CoroState {
     executor: Mutex<futures::executor::LocalPool>,
-    net: Mutex<Option<super::net::Net>>,
+    pub(crate) net: Mutex<Option<super::net::Net>>,
     new_redex: Mutex<Vec<futures::channel::mpsc::Sender<()>>>,
     new_var: AtomicUsize,
 }
 
+struct WaitingReadbackExt(Tree);
+struct ReadbackExt(Sender<PortContents>);
+
 #[derive(Default, Clone, Debug)]
 pub struct SharedState {
-    shared: Arc<CoroState>,
+    pub(crate) shared: Arc<CoroState>,
 }
 
 #[derive(Debug)]
@@ -39,6 +44,9 @@ pub enum PortContents {
     Aux(Sender<PortContents>),
     AuxLazy(Sender<PortContents>),
     AuxLazyPicked(usize),
+
+    // Waiting :)
+    Waiting(Tree),
     // A tree, which should be readback further, if necessary
     Tree(Tree),
 }
@@ -47,22 +55,36 @@ impl SharedState {
     pub fn make_oneshot_ext_from_tx(&self, tx: Sender<PortContents>) -> Tree {
         let shared = self.shared.clone();
         Tree::ext(
-            move |net, tree, tx| {
-                let tx: Box<Sender<PortContents>> = tx.downcast().unwrap();
-                let res = match tree {
-                    Err(comm) => {
-                        tx.send(*comm.downcast().unwrap()).unwrap();
+            move |net, tree, ext| {
+                let ext: Box<ReadbackExt> = ext.downcast().unwrap();
+                let tx = ext.0;
+                match tree {
+                    Err(ext) => {
+                        if ext.is::<WaitingReadbackExt>() {
+                            let ext: Box<WaitingReadbackExt> = ext.downcast().unwrap();
+                            tx.send(PortContents::Waiting(ext.0)).unwrap();
+                        } else if ext.is::<ReadbackExt>() {
+                            tx.send(*ext.downcast().unwrap()).unwrap();
+                        } else {
+                            unreachable!()
+                        }
                     }
-                    Ok(Tree::Ext(f, other_tx)) => {
-                        println!("interacted with other readback");
-                        f(net, Err(Box::new(PortContents::Aux(*tx))), other_tx);
+                    Ok(Tree::Ext(f, ext)) => {
+                        if ext.is::<WaitingReadbackExt>() {
+                            let ext: Box<WaitingReadbackExt> = ext.downcast().unwrap();
+                            tx.send(PortContents::Waiting(ext.0)).unwrap();
+                        } else if ext.is::<ReadbackExt>() {
+                            f(net, Err(Box::new(PortContents::Aux(tx))), ext);
+                        } else {
+                            unreachable!()
+                        }
                     }
                     Ok(tree) => {
                         tx.send(PortContents::Tree(tree)).unwrap();
                     }
-                };
+                }
             },
-            tx,
+            ReadbackExt(tx),
         )
     }
     pub fn make_oneshot_ext(&self) -> (Tree, Receiver<PortContents>) {
@@ -86,11 +108,11 @@ impl SharedState {
         let (ext, rx) = self.make_oneshot_ext();
         self.add_redex(ext, tree).await;
         match rx.await.unwrap() {
-            PortContents::AuxLazyPicked(_) => unreachable!(),
             PortContents::Aux(sender) | PortContents::AuxLazy(sender) => {
                 self.make_oneshot_ext_from_tx(sender)
             }
             PortContents::Tree(tree) => tree,
+            _ => unreachable!(),
         }
     }
     pub async fn as_con(&self, tree: Tree) -> (Tree, Tree) {
@@ -181,16 +203,17 @@ impl SharedState {
         }
         (context, res)
     }
-    pub async fn read_with_type<Name: Clone + Ord + std::hash::Hash + 'static>(
+    pub async fn read_with_type<Name: Clone + Ord + std::hash::Hash + 'static + Debug>(
         &self,
         tree: TypedTree<Name>,
     ) -> ReadbackResult<Name> {
         let ty = tree.ty;
         let port = self.read_port(tree.tree).await;
         println!("Port: {port:?}");
+        println!("Ty: {ty:?}");
         self.as_with_type(port, ty).await
     }
-    pub fn as_with_type<Name: Clone + Ord + std::hash::Hash + 'static>(
+    pub fn as_with_type<Name: Clone + Ord + std::hash::Hash + 'static + Debug>(
         &self,
         port: PortContents,
         ty: Type<Loc, Name>,
@@ -198,36 +221,34 @@ impl SharedState {
         async move {
             let tree = match port {
                 PortContents::Aux(tx) => {
-                    println!("C");
                     let (tx_, rx) = channel();
                     tx.send(PortContents::AuxLazy(tx_)).unwrap();
                     return self.as_with_type(rx.await.unwrap(), ty).await;
                 }
                 PortContents::AuxLazy(tx) => {
-                    println!("B");
                     let var_id = self.shared.new_var.fetch_add(1, Ordering::AcqRel);
                     tx.send(PortContents::AuxLazyPicked(var_id)).unwrap();
                     return ReadbackResult::Variable(var_id);
                 }
                 PortContents::AuxLazyPicked(n) => {
-                    println!("A");
                     return ReadbackResult::Variable(n);
                 }
                 PortContents::Tree(tree) => tree,
+                PortContents::Waiting(tree) => return ReadbackResult::Waiting(tree.with_type(ty)),
             };
             match ty {
                 crate::par::types::Type::Send(_, from, to) => {
                     let (a, b) = self.as_par(tree).await;
                     ReadbackResult::Send(
-                        a.with_type(*from).into_readback_result_boxed(),
-                        b.with_type(*to).into_readback_result_boxed(),
+                        b.with_type(*from).into_readback_result_boxed(),
+                        a.with_type(*to).into_readback_result_boxed(),
                     )
                 }
                 crate::par::types::Type::Receive(_, from, to) => {
                     let (a, b) = self.as_par(tree).await;
                     ReadbackResult::Receive(
-                        a.with_type((*from).dual()).into_readback_result_boxed(),
-                        b.with_type(*to).into_readback_result_boxed(),
+                        b.with_type((*from).dual()).into_readback_result_boxed(),
+                        a.with_type(*to).into_readback_result_boxed(),
                     )
                 }
                 crate::par::types::Type::Either(_, mut variants) => {
@@ -276,6 +297,22 @@ impl SharedState {
         }
         .boxed_local()
     }
+    pub fn create_variable_ext(&self, tree: Tree) -> Tree {
+        use crate::icombs::net::Net;
+        fn f(net: &mut Net, tree: Result<Tree, Box<dyn Any>>, ext: Box<dyn Any>) {
+            match tree {
+                Ok(Tree::Ext(f, data)) => f(net, Err(ext), data),
+                Ok(a) => net.link(a, ext.downcast::<WaitingReadbackExt>().unwrap().0),
+                Err(other_ext) => {
+                    net.link(
+                        ext.downcast::<WaitingReadbackExt>().unwrap().0,
+                        other_ext.downcast::<WaitingReadbackExt>().unwrap().0,
+                    );
+                }
+            }
+        }
+        Tree::ext(f, WaitingReadbackExt(tree))
+    }
     pub fn spawn(&self, f: impl Future<Output = ()> + 'static) {
         use futures::task::SpawnExt;
         self.shared
@@ -297,10 +334,8 @@ impl SharedState {
             Box::pin(async move {
                 loop {
                     let mut binding = shared.net.lock().unwrap();
-                    println!("Reducing... :)");
                     let mut net = binding.as_mut().unwrap();
                     while net.reduce_one() {}
-                    println!("Reduced... :)");
                     drop(binding);
                     rx.next().await.unwrap();
                 }
@@ -332,6 +367,7 @@ pub enum ReadbackResult<Name: Clone> {
     Expand(Box<ReadbackResult<Name>>),
     Halted(TypedTree<Name>),
     Unsupported(TypedTree<Name>),
+    Waiting(TypedTree<Name>),
     Variable(usize),
 }
 

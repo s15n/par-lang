@@ -21,12 +21,21 @@ use crate::{
 use core::fmt::{Debug, Display};
 use std::{hash::Hash, sync::Arc};
 
+#[derive(Debug, Clone)]
+pub enum PathElement {
+    ParLeft,
+    ParRight,
+    TimesLeft,
+    TimesRight,
+}
+
 type Prog<Name> = Program<Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>;
 #[derive(Debug)]
 pub struct ReadbackStateInner {
     pub net: Option<crate::icombs::net::Net>,
     pub shared: SharedState,
     pub needs_further_readback: bool,
+    pub path: Vec<PathElement>,
 }
 
 impl Clone for ReadbackStateInner {
@@ -35,6 +44,7 @@ impl Clone for ReadbackStateInner {
             net: None,
             shared: self.shared.clone(),
             needs_further_readback: self.needs_further_readback,
+            path: self.path.clone(),
         }
     }
 }
@@ -74,7 +84,6 @@ impl ReadbackStateInner {
         res: &mut ReadbackResult<Name>,
         prog: &Prog<Name>,
     ) {
-        println!("{:?}", res);
         use ReadbackResult::*;
         let mut replace_by = None;
         match res {
@@ -86,15 +95,23 @@ impl ReadbackStateInner {
             }
             Send(arg, bod) => {
                 ui.code("(");
+                self.path.push(PathElement::TimesLeft);
                 self.show_readback(ui, arg, prog);
+                self.path.pop();
                 ui.code(")");
+                self.path.push(PathElement::TimesRight);
                 self.show_readback(ui, bod, prog);
+                self.path.pop();
             }
             Receive(arg, bod) => {
                 ui.code("[");
+                self.path.push(PathElement::ParLeft);
                 self.show_readback(ui, arg, prog);
+                self.path.pop();
                 ui.code("]");
+                self.path.push(PathElement::ParRight);
                 self.show_readback(ui, bod, prog);
+                self.path.pop();
             }
             Either(name, payload) => {
                 ui.code(format!(".{name}"));
@@ -117,6 +134,9 @@ impl ReadbackStateInner {
             Halted(tree) => {
                 self.needs_further_readback = true;
             }
+            Waiting(tree) => {
+                ui.code(format!("{}", tree.tree.show()));
+            }
             ref tree => {
                 ui.code(format!("{tree:?}"));
             }
@@ -124,6 +144,10 @@ impl ReadbackStateInner {
         if let Some(a) = replace_by {
             *res = a;
         }
+    }
+    pub fn with_path(mut self, e: PathElement) -> Self {
+        self.path.push(e);
+        self
     }
     pub fn carry_out_readback<
         'a,
@@ -135,7 +159,6 @@ impl ReadbackStateInner {
     ) -> LocalBoxFuture<'a, ()> {
         use futures::FutureExt;
         async move {
-            println!("RES: {res:?}");
             use ReadbackResult::*;
             let mut replace_by = None;
             match res {
@@ -143,27 +166,53 @@ impl ReadbackStateInner {
                 Continue => {}
                 Send(arg, bod) => {
                     futures::future::join(
-                        self.clone().carry_out_readback(arg, prog),
-                        self.clone().carry_out_readback(bod, prog),
+                        self.clone()
+                            .with_path(PathElement::TimesLeft)
+                            .carry_out_readback(arg, prog),
+                        self.clone()
+                            .with_path(PathElement::TimesRight)
+                            .carry_out_readback(bod, prog),
                     )
                     .await;
                 }
                 Receive(arg, bod) => {
                     futures::future::join(
-                        self.clone().carry_out_readback(arg, prog),
-                        self.clone().carry_out_readback(bod, prog),
+                        self.clone()
+                            .with_path(PathElement::ParLeft)
+                            .carry_out_readback(arg, prog),
+                        self.clone()
+                            .with_path(PathElement::ParRight)
+                            .carry_out_readback(bod, prog),
                     )
                     .await;
                 }
                 Either(name, payload) => {
                     self.carry_out_readback(payload, prog).await;
                 }
-                Choice(ctx, cases) => {}
+                Choice(ctx, cases) => {
+                    let (v0, v1) = self
+                        .shared
+                        .shared
+                        .net
+                        .lock()
+                        .unwrap()
+                        .as_mut()
+                        .unwrap()
+                        .create_wire();
+                    let mut ext0 = self.shared.create_variable_ext(v0);
+                    let ext1 = self.shared.create_variable_ext(v1);
+                    core::mem::swap(&mut ext0, ctx);
+                    println!("{:?} choice ", self.path);
+                    self.shared.add_redex(ext0, ext1).await;
+                }
                 Halted(tree) => {
                     let mut tree = core::mem::take(tree);
                     tree.ty = prepare_type_for_readback(prog, tree.ty);
                     self.needs_further_readback = true;
-                    let res = self.shared.read_with_type(tree).await;
+                    println!("Waiting for: {:?}", self.path);
+                    let mut res = self.shared.read_with_type(tree).await;
+                    self.carry_out_readback(&mut res, prog).await;
+                    println!("Finished: {:?}", self.path);
                     replace_by = Some(res);
                 }
                 _ => {}

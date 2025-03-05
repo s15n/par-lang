@@ -300,6 +300,7 @@ impl Playground {
                             net: Some(net),
                             shared,
                             needs_further_readback: false,
+                            path: vec![],
                         },
                     })
                 }
