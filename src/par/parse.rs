@@ -154,26 +154,23 @@ fn parse_name(pairs: &mut Pairs<'_, Rule>) -> Result<(Loc, Name), ParseError> {
 
 fn parse_type_params(pairs: &mut Pairs<'_, Rule>) -> Result<Vec<Name>, ParseError> {
     let mut pairs = pairs.next().unwrap().into_inner();
-
-    let mut params = Vec::new();
-    while let Some(pair) = pairs.next() {
-        let (_, param) = parse_name(&mut Pairs::single(pair))?;
-        params.push(param);
+    if let Some(pair) = pairs.next() {
+        let params = parse_name_list(&mut Pairs::single(pair))?;
+        Ok(params)
+    } else {
+        Ok(vec![])
     }
-
-    Ok(params)
 }
 
 fn parse_type_args(pairs: &mut Pairs<'_, Rule>) -> Result<Vec<Type<Loc, Name>>, ParseError> {
     let mut pairs = pairs.next().unwrap().into_inner();
 
-    let mut args = Vec::new();
-    while let Some(pair) = pairs.next() {
-        let arg = parse_type(&mut Pairs::single(pair))?;
-        args.push(arg);
+    if let Some(pair) = pairs.next() {
+        let args = parse_type_list(&mut Pairs::single(pair))?;
+        Ok(args)
+    } else {
+        Ok(vec![])
     }
-
-    Ok(args)
 }
 
 fn parse_type(pairs: &mut Pairs<'_, Rule>) -> Result<Type<Loc, Name>, ParseError> {
@@ -196,16 +193,23 @@ fn parse_type(pairs: &mut Pairs<'_, Rule>) -> Result<Type<Loc, Name>, ParseError
 
         Rule::typ_send => {
             let mut pairs = pair.into_inner();
-            let arg = parse_type(&mut pairs)?;
-            let then = parse_type(&mut pairs)?;
-            Ok(Type::Send(loc, Box::new(arg), Box::new(then)))
+            let args = parse_type_list(&mut pairs)?;
+            let mut then = parse_type(&mut pairs)?;
+            for arg in args.into_iter().rev() {
+                then = Type::Send(loc.clone(), Box::new(arg), Box::new(then));
+            }
+            Ok(then)
         }
 
         Rule::typ_receive => {
             let mut pairs = pair.into_inner();
-            let arg = parse_type(&mut pairs)?;
-            let then = parse_type(&mut pairs)?;
-            Ok(Type::Receive(loc, Box::new(arg), Box::new(then)))
+
+            let args = parse_type_list(&mut pairs)?;
+            let mut then = parse_type(&mut pairs)?;;
+            for arg in args.into_iter().rev() {
+                then = Type::Receive(loc.clone(), Box::new(arg), Box::new(then));
+            }
+            Ok(then)
         }
 
         Rule::typ_either => {
@@ -261,16 +265,22 @@ fn parse_type(pairs: &mut Pairs<'_, Rule>) -> Result<Type<Loc, Name>, ParseError
 
         Rule::typ_send_type => {
             let mut pairs = pair.into_inner();
-            let (_, name) = parse_name(&mut pairs)?;
-            let body = parse_type(&mut pairs)?;
-            Ok(Type::SendType(loc, name, Box::new(body)))
+            let names = parse_name_list(&mut pairs)?;
+            let mut body = parse_type(&mut pairs)?;
+            for name in names.into_iter().rev() {
+                body = Type::SendType(loc.clone(), name, Box::new(body));
+            }
+            Ok(body)
         }
 
         Rule::typ_recv_type => {
             let mut pairs = pair.into_inner();
-            let (_, name) = parse_name(&mut pairs)?;
-            let body = parse_type(&mut pairs)?;
-            Ok(Type::ReceiveType(loc, name, Box::new(body)))
+            let names = parse_name_list(&mut pairs)?;
+            let mut body = parse_type(&mut pairs)?;
+            for name in names.into_iter().rev() {
+                body = Type::ReceiveType(loc.clone(), name, Box::new(body));
+            }
+            Ok(body)
         }
 
         _ => unreachable!(),
@@ -286,16 +296,24 @@ fn parse_type_branch(pairs: &mut Pairs<'_, Rule>) -> Result<Type<Loc, Name>, Par
 
         Rule::typ_branch_receive => {
             let mut pairs = pair.into_inner();
-            let arg = parse_type(&mut pairs)?;
+            let args = parse_type_list(&mut pairs)?;
             let then = parse_type_branch(&mut pairs)?;
-            Ok(Type::Receive(loc, Box::new(arg), Box::new(then)))
+            let mut res = then;
+            for arg in args.into_iter().rev() {
+                res = Type::Receive(loc.clone(), Box::new(arg), Box::new(res));
+            }
+            Ok(res)
         }
 
         Rule::typ_branch_recv_type => {
             let mut pairs = pair.into_inner();
-            let (_, name) = parse_name(&mut pairs)?;
+            let names = parse_name_list(&mut pairs)?;
             let body = parse_type_branch(&mut pairs)?;
-            Ok(Type::ReceiveType(loc, name, Box::new(body)))
+            let mut res = body;
+            for name in names.into_iter().rev() {
+                res = Type::ReceiveType(loc.clone(), name, Box::new(res));
+            }
+            Ok(res)
         }
 
         _ => unreachable!(),
@@ -323,18 +341,26 @@ fn parse_pattern(pairs: &mut Pairs<'_, Rule>) -> Result<Pattern<Loc, Name>, Pars
 
         Rule::pattern_receive => {
             let mut pairs = pair.into_inner();
-            let first = parse_pattern(&mut pairs)?;
+            let patterns = parse_pattern_list(&mut pairs)?;
             let rest = parse_pattern(&mut pairs)?;
-            Ok(Pattern::Receive(loc, Box::new(first), Box::new(rest)))
+            let mut res = rest;
+            for pattern in patterns.into_iter().rev() {
+                res = Pattern::Receive(loc.clone(), Box::new(pattern), Box::new(res));
+            }
+            Ok(res)
         }
 
         Rule::pattern_continue => Ok(Pattern::Continue(loc)),
 
         Rule::pattern_recv_type => {
             let mut pairs = pair.into_inner();
-            let (_, parameter) = parse_name(&mut pairs)?;
+            let names = parse_name_list(&mut pairs)?;
             let rest = parse_pattern(&mut pairs)?;
-            Ok(Pattern::ReceiveType(loc, parameter, Box::new(rest)))
+            let mut res = rest;
+            for name in names.into_iter().rev() {
+                res = Pattern::ReceiveType(loc.clone(), name, Box::new(res));
+            }
+            Ok(res)
         }
 
         _ => unreachable!(),
@@ -405,20 +431,28 @@ fn parse_construct(pairs: &mut Pairs<'_, Rule>) -> Result<Construct<Loc, Name>, 
 
         Rule::cons_send => {
             let mut pairs = pair.into_inner();
-            let argument = parse_expression(&mut pairs)?;
-            let construct = parse_construct(&mut pairs)?;
-            Ok(Construct::Send(
-                loc,
-                Box::new(argument),
-                Box::new(construct),
-            ))
+
+            let arguments = parse_expression_list(&mut pairs)?;
+            let mut construct = parse_construct(&mut pairs)?;
+            for argument in arguments.into_iter().rev() {
+                construct = Construct::Send(
+                    loc.clone(),
+                    Box::new(argument),
+                    Box::new(construct),
+                );
+            }
+
+            Ok(construct)
         }
 
         Rule::cons_receive => {
             let mut pairs = pair.into_inner();
-            let pattern = parse_pattern(&mut pairs)?;
-            let construct = parse_construct(&mut pairs)?;
-            Ok(Construct::Receive(loc, pattern, Box::new(construct)))
+            let patterns = parse_pattern_list(&mut pairs)?;
+            let mut construct = parse_construct(&mut pairs)?;
+            for pattern in patterns.into_iter().rev() {
+                construct = Construct::Receive(loc.clone(), pattern, Box::new(construct));
+            }
+            Ok(construct)
         }
 
         Rule::cons_choose => {
@@ -456,20 +490,66 @@ fn parse_construct(pairs: &mut Pairs<'_, Rule>) -> Result<Construct<Loc, Name>, 
 
         Rule::cons_send_type => {
             let mut pairs = pair.into_inner();
-            let argument = parse_type(&mut pairs)?;
-            let construct = parse_construct(&mut pairs)?;
-            Ok(Construct::SendType(loc, argument, Box::new(construct)))
+            let names = parse_type_list(&mut pairs)?;
+            let mut construct = parse_construct(&mut pairs)?;
+            for name in names.into_iter().rev() {
+                construct = Construct::SendType(loc.clone(), name, Box::new(construct));
+            }
+            Ok(construct)
         }
 
         Rule::cons_recv_type => {
             let mut pairs = pair.into_inner();
-            let (_, parameter) = parse_name(&mut pairs)?;
-            let construct = parse_construct(&mut pairs)?;
-            Ok(Construct::ReceiveType(loc, parameter, Box::new(construct)))
+            let names = parse_name_list(&mut pairs)?;
+            let mut construct = parse_construct(&mut pairs)?;
+            for name in names.into_iter().rev() {
+                construct = Construct::ReceiveType(loc.clone(), name, Box::new(construct));
+            }
+            Ok(construct)
         }
 
         _ => unreachable!(),
     }
+}
+
+fn parse_expression_list(pairs: &mut Pairs<Rule>) -> Result<Vec<Expression<Loc,Name>>, ParseError> {
+    let mut pairs = pairs.next().unwrap().into_inner();
+    let mut exprs = Vec::new();
+    while let Some(pair) = pairs.next() {
+        let arg = parse_expression(&mut Pairs::single(pair))?;
+        exprs.push(arg);
+    }
+    Ok(exprs)
+}
+
+fn parse_name_list(pairs: &mut Pairs<Rule>) -> Result<Vec<Name>, ParseError> {
+    let mut pairs = pairs.next().unwrap().into_inner();
+    let mut names = Vec::new();
+    while let Some(pair) = pairs.next() {
+        let (_, name) = parse_name(&mut Pairs::single(pair))?;
+        names.push(name);
+    }
+    Ok(names)
+}
+
+fn parse_pattern_list(pairs: &mut Pairs<Rule>) -> Result<Vec<Pattern<Loc, Name>>, ParseError> {
+    let mut pairs = pairs.next().unwrap().into_inner();
+    let mut patterns = Vec::new();
+    while let Some(pair) = pairs.next() {
+        let pattern = parse_pattern(&mut Pairs::single(pair))?;
+        patterns.push(pattern);
+    }
+    Ok(patterns)
+}
+
+fn parse_type_list(pairs: &mut Pairs<Rule>) -> Result<Vec<Type<Loc, Name>>, ParseError> {
+    let mut pairs = pairs.next().unwrap().into_inner();
+    let mut types = Vec::new();
+    while let Some(pair) = pairs.next() {
+        let arg = parse_type(&mut Pairs::single(pair))?;
+        types.push(arg);
+    }
+    Ok(types)
 }
 
 fn parse_construct_branch(
@@ -487,20 +567,24 @@ fn parse_construct_branch(
 
         Rule::cons_branch_receive => {
             let mut pairs = pair.into_inner();
-            let pattern = parse_pattern(&mut pairs)?;
+            let patterns = parse_pattern_list(&mut pairs)?;
             let branch = parse_construct_branch(&mut pairs)?;
-            Ok(ConstructBranch::Receive(loc, pattern, Box::new(branch)))
+            let mut res = branch;
+            for pattern in patterns.into_iter().rev() {
+                res = ConstructBranch::Receive(loc.clone(), pattern, Box::new(res));
+            }
+            Ok(res)
         }
 
         Rule::cons_branch_recv_type => {
             let mut pairs = pair.into_inner();
-            let (_, parameter) = parse_name(&mut pairs)?;
+            let names = parse_name_list(&mut pairs)?;
             let branch = parse_construct_branch(&mut pairs)?;
-            Ok(ConstructBranch::ReceiveType(
-                loc,
-                parameter,
-                Box::new(branch),
-            ))
+            let mut res = branch;
+            for name in names.into_iter().rev() {
+                res = ConstructBranch::ReceiveType(loc.clone(), name, Box::new(res));
+            }
+            Ok(res)
         }
 
         _ => unreachable!(),
@@ -516,9 +600,12 @@ fn parse_apply(pairs: &mut Pairs<'_, Rule>) -> Result<Apply<Loc, Name>, ParseErr
 
         Rule::apply_send => {
             let mut pairs = pair.into_inner();
-            let argument = parse_expression(&mut pairs)?;
-            let then = parse_apply(&mut pairs)?;
-            Ok(Apply::Send(loc, Box::new(argument), Box::new(then)))
+            let arguments = parse_expression_list(&mut pairs)?;
+            let mut apply = parse_apply(&mut pairs)?;
+            for argument in arguments.into_iter().rev() {
+                apply = Apply::Send(loc.clone(), Box::new(argument), Box::new(apply));
+            }
+            Ok(apply)
         }
 
         Rule::apply_choose => {
@@ -554,9 +641,12 @@ fn parse_apply(pairs: &mut Pairs<'_, Rule>) -> Result<Apply<Loc, Name>, ParseErr
 
         Rule::apply_send_type => {
             let mut pairs = pair.into_inner();
-            let argument = parse_type(&mut pairs)?;
-            let then = parse_apply(&mut pairs)?;
-            Ok(Apply::SendType(loc, argument, Box::new(then)))
+            let types = parse_type_list(&mut pairs)?;
+            let mut apply = parse_apply(&mut pairs)?;
+            for typ in types.into_iter().rev() {
+                apply = Apply::SendType(loc.clone(), typ, Box::new(apply));
+            }
+            Ok(apply)
         }
 
         _ => unreachable!(),
@@ -577,9 +667,13 @@ fn parse_apply_branch(pairs: &mut Pairs<'_, Rule>) -> Result<ApplyBranch<Loc, Na
 
         Rule::apply_branch_receive => {
             let mut pairs = pair.into_inner();
-            let pattern = parse_pattern(&mut pairs)?;
+            let patterns = parse_pattern_list(&mut pairs)?;
             let branch = parse_apply_branch(&mut pairs)?;
-            Ok(ApplyBranch::Receive(loc, pattern, Box::new(branch)))
+            let mut res = branch;
+            for pattern in patterns.into_iter().rev() {
+                res = ApplyBranch::Receive(loc.clone(), pattern, Box::new(res));
+            }
+            Ok(res)
         }
 
         Rule::apply_branch_continue => {
@@ -590,9 +684,13 @@ fn parse_apply_branch(pairs: &mut Pairs<'_, Rule>) -> Result<ApplyBranch<Loc, Na
 
         Rule::apply_branch_recv_type => {
             let mut pairs = pair.into_inner();
-            let (_, parameter) = parse_name(&mut pairs)?;
+            let names = parse_name_list(&mut pairs)?;
             let branch = parse_apply_branch(&mut pairs)?;
-            Ok(ApplyBranch::ReceiveType(loc, parameter, Box::new(branch)))
+            let mut res = branch;
+            for name in names.into_iter().rev() {
+                res = ApplyBranch::ReceiveType(loc.clone(), name, Box::new(res));
+            }
+            Ok(res)
         }
 
         _ => unreachable!(),
@@ -657,16 +755,22 @@ fn parse_command(pairs: &mut Pairs<'_, Rule>) -> Result<Command<Loc, Name>, Pars
 
         Rule::cmd_send => {
             let mut pairs = pair.into_inner();
-            let argument = parse_expression(&mut pairs)?;
-            let command = parse_command(&mut pairs)?;
-            Ok(Command::Send(loc, Box::new(argument), Box::new(command)))
+            let arguments = parse_expression_list(&mut pairs)?;
+            let mut command = parse_command(&mut pairs)?;
+            for argument in arguments.into_iter().rev() {
+                command = Command::Send(loc.clone(), Box::new(argument), Box::new(command));
+            }
+            Ok(command)
         }
 
         Rule::cmd_receive => {
             let mut pairs = pair.into_inner();
-            let pattern = parse_pattern(&mut pairs)?;
-            let command = parse_command(&mut pairs)?;
-            Ok(Command::Receive(loc, pattern, Box::new(command)))
+            let patterns = parse_pattern_list(&mut pairs)?;
+            let mut command = parse_command(&mut pairs)?;
+            for pattern in patterns.into_iter().rev() {
+                command = Command::Receive(loc.clone(), pattern, Box::new(command));
+            }
+            Ok(command)
         }
 
         Rule::cmd_choose => {
@@ -713,16 +817,22 @@ fn parse_command(pairs: &mut Pairs<'_, Rule>) -> Result<Command<Loc, Name>, Pars
 
         Rule::cmd_send_type => {
             let mut pairs = pair.into_inner();
-            let argument = parse_type(&mut pairs)?;
-            let command = parse_command(&mut pairs)?;
-            Ok(Command::SendType(loc, argument, Box::new(command)))
+            let types = parse_type_list(&mut pairs)?;
+            let mut command = parse_command(&mut pairs)?;
+            for typ in types.into_iter().rev() {
+                command = Command::SendType(loc.clone(), typ, Box::new(command));
+            }
+            Ok(command)
         }
 
         Rule::cmd_recv_type => {
             let mut pairs = pair.into_inner();
-            let (_, parameter) = parse_name(&mut pairs)?;
-            let command = parse_command(&mut pairs)?;
-            Ok(Command::ReceiveType(loc, parameter, Box::new(command)))
+            let names = parse_name_list(&mut pairs)?;
+            let mut command = parse_command(&mut pairs)?;
+            for name in names.into_iter().rev() {
+                command = Command::ReceiveType(loc.clone(), name, Box::new(command));
+            }
+            Ok(command)
         }
 
         _ => unreachable!(),
@@ -758,9 +868,13 @@ fn parse_command_branch(
 
         Rule::cmd_branch_receive => {
             let mut pairs = pair.into_inner();
-            let pattern = parse_pattern(&mut pairs)?;
+            let patterns = parse_pattern_list(&mut pairs)?;
             let branch = parse_command_branch(&mut pairs)?;
-            Ok(CommandBranch::Receive(loc, pattern, Box::new(branch)))
+            let mut res = branch;
+            for pattern in patterns.into_iter().rev() {
+                res = CommandBranch::Receive(loc.clone(), pattern, Box::new(res));
+            }
+            Ok(res)
         }
 
         Rule::cmd_branch_continue => {
@@ -771,9 +885,13 @@ fn parse_command_branch(
 
         Rule::cmd_branch_recv_type => {
             let mut pairs = pair.into_inner();
-            let (_, parameter) = parse_name(&mut pairs)?;
+            let names = parse_name_list(&mut pairs)?;
             let branch = parse_command_branch(&mut pairs)?;
-            Ok(CommandBranch::ReceiveType(loc, parameter, Box::new(branch)))
+            let mut res = branch;
+            for name in names.into_iter().rev() {
+                res = CommandBranch::ReceiveType(loc.clone(), name, Box::new(res));
+            }
+            Ok(res)
         }
 
         _ => unreachable!(),
