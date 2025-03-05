@@ -1,6 +1,8 @@
 use std::{
     collections::BTreeSet,
     fmt::Write,
+    fs::File,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -21,6 +23,7 @@ use crate::{
 };
 
 pub struct Playground {
+    file_path: Option<PathBuf>,
     code: String,
     compiled: Option<Result<Compiled, Error>>,
     compiled_code: Arc<str>,
@@ -190,6 +193,7 @@ impl Playground {
         });
         let default_code = DEFAULT_CODE.to_string();
         Box::new(Self {
+            file_path: None,
             code: default_code.clone(),
             compiled: None,
             compiled_code: Arc::from(default_code),
@@ -219,6 +223,47 @@ impl eframe::App for Playground {
                             if ui.button(egui::RichText::new("+").monospace()).clicked() {
                                 self.editor_font_size = (self.editor_font_size + 1.0).min(320.0);
                             }
+
+                            ui.add_space(5.0);
+
+                            egui::menu::menu_custom_button(
+                                ui,
+                                egui::Button::new(egui::RichText::new("File").strong()),
+                                |ui| {
+                                    if ui.button(egui::RichText::new("Open...").strong()).clicked()
+                                    {
+                                        self.open_file();
+                                        ui.close_menu();
+                                    }
+
+                                    if let Some(path) = self.file_path.clone() {
+                                        if ui.button(egui::RichText::new("Save").strong()).clicked()
+                                        {
+                                            self.save_file(&path);
+                                            ui.close_menu();
+                                        }
+                                    }
+
+                                    if ui
+                                        .button(egui::RichText::new("Save as...").strong())
+                                        .clicked()
+                                    {
+                                        self.save_file_as();
+                                        ui.close_menu();
+                                    }
+                                },
+                            );
+
+                            ui.add_space(5.0);
+
+                            if let Some(file_name) =
+                                self.file_path.as_ref().and_then(|p| p.file_name())
+                            {
+                                ui.label(
+                                    egui::RichText::new(format!("{}", file_name.display()))
+                                        .strong(),
+                                );
+                            }
                         });
 
                         ui.separator();
@@ -240,6 +285,36 @@ impl eframe::App for Playground {
 }
 
 impl Playground {
+    fn open_file(&mut self) {
+        if let Some(path) = rfd::FileDialog::new().pick_file() {
+            if let Ok(file_content) = File::open(&path).and_then(|mut file| {
+                use std::io::Read;
+                let mut buf = String::new();
+                file.read_to_string(&mut buf)?;
+                Ok(buf)
+            }) {
+                self.file_path = Some(path);
+                self.code = file_content;
+            }
+        }
+    }
+
+    fn save_file_as(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_can_create_directories(true)
+            .save_file()
+        {
+            self.save_file(&path);
+        }
+    }
+
+    fn save_file(&mut self, path: &Path) {
+        let _ = File::create(&path).and_then(|mut file| {
+            use std::io::Write;
+            file.write_all(self.code.as_bytes())
+        });
+    }
+
     fn get_theme(&self, ui: &egui::Ui) -> ColorTheme {
         if ui.visuals().dark_mode {
             fix_dark_theme(ColorTheme::GITHUB_DARK)
@@ -247,6 +322,7 @@ impl Playground {
             fix_light_theme(ColorTheme::GITHUB_LIGHT)
         }
     }
+
     fn run(
         interact: &mut Option<Interact>,
         ui: &mut egui::Ui,
@@ -280,6 +356,7 @@ impl Playground {
             }
         });
     }
+
     fn recompile(&mut self) {
         self.compiled = stacker::grow(32 * 1024 * 1024, || {
             Some(Compiled::from_string(self.code.as_str()))
