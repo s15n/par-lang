@@ -12,7 +12,7 @@ type Seq<T> = iterative {
 }
 
 type Mapper<A, B> = iterative {
-  .close => !
+  .close    => !
   .apply(A) => (B) loop
 }
 
@@ -41,7 +41,7 @@ def mapSeq = [type A, B] [seq, mapper]
     } in (y) loop
   }
 
-dec listrgb: List<Color>
+dec listrgb : List<Color>
 def listrgb =
   .item(.red!)
   .item(.green!)
@@ -88,7 +88,7 @@ def bools_forever =
     }
   }
 
-dec zip: [List<Color>, Seq<Color>] List<(Color, Color)!>
+dec zip : [List<Color>, Seq<Color>] List<(Color, Color)!>
 def zip = [list, seq] list begin {
   .empty! => do {
     seq.close?
