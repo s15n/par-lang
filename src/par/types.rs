@@ -349,13 +349,13 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
         })
     }
 
-    pub fn check_subtype(
+    pub fn check_assignable(
         &self,
         loc: &Loc,
         u: &Type<Loc, Name>,
         type_defs: &TypeDefs<Loc, Name>,
     ) -> Result<(), TypeError<Loc, Name>> {
-        if !self.is_subtype_of(u, type_defs, &HashSet::new())? {
+        if !self.is_assignable_to(u, type_defs, &HashSet::new())? {
             return Err(TypeError::CannotAssignFromTo(
                 loc.clone(),
                 self.clone(),
@@ -365,7 +365,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
         Ok(())
     }
 
-    fn is_subtype_of(
+    fn is_assignable_to(
         &self,
         other: &Self,
         type_defs: &TypeDefs<Loc, Name>,
@@ -376,29 +376,31 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             (Self::DualVar(_, name1), Self::DualVar(_, name2)) => name1 == name2,
             (Self::Name(loc, name, args), t2) => type_defs
                 .get(loc, name, args)?
-                .is_subtype_of(t2, type_defs, ind)?,
+                .is_assignable_to(t2, type_defs, ind)?,
             (t1, Self::Name(loc, name, args)) => {
-                t1.is_subtype_of(&type_defs.get(loc, name, args)?, type_defs, ind)?
+                t1.is_assignable_to(&type_defs.get(loc, name, args)?, type_defs, ind)?
             }
             (Self::DualName(loc, name, args), t2) => type_defs
                 .get_dual(loc, name, args)?
-                .is_subtype_of(t2, type_defs, ind)?,
+                .is_assignable_to(t2, type_defs, ind)?,
             (t1, Self::DualName(loc, name, args)) => {
-                t1.is_subtype_of(&type_defs.get_dual(loc, name, args)?, type_defs, ind)?
+                t1.is_assignable_to(&type_defs.get_dual(loc, name, args)?, type_defs, ind)?
             }
 
             (Self::Send(_, t1, u1), Self::Send(_, t2, u2)) => {
-                t1.is_subtype_of(t2, type_defs, ind)? && u1.is_subtype_of(u2, type_defs, ind)?
+                t1.is_assignable_to(t2, type_defs, ind)?
+                    && u1.is_assignable_to(u2, type_defs, ind)?
             }
             (Self::Receive(_, t1, u1), Self::Receive(_, t2, u2)) => {
-                t2.is_subtype_of(t1, type_defs, ind)? && u1.is_subtype_of(u2, type_defs, ind)?
+                t2.is_assignable_to(t1, type_defs, ind)?
+                    && u1.is_assignable_to(u2, type_defs, ind)?
             }
             (Self::Either(_, branches1), Self::Either(_, branches2)) => {
                 for (branch, t1) in branches1 {
                     let Some(t2) = branches2.get(branch) else {
                         return Ok(false);
                     };
-                    if !t1.is_subtype_of(t2, type_defs, ind)? {
+                    if !t1.is_assignable_to(t2, type_defs, ind)? {
                         return Ok(false);
                     }
                 }
@@ -419,7 +421,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     let Some(t1) = branches1.get(branch) else {
                         return Ok(false);
                     };
-                    if !t1.is_subtype_of(t2, type_defs, ind)? {
+                    if !t1.is_assignable_to(t2, type_defs, ind)? {
                         return Ok(false);
                     }
                 }
@@ -434,10 +436,10 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     TypePoint::Self_(label1.clone()),
                     TypePoint::Self_(label2.clone()),
                 ));
-                body1.is_subtype_of(body2, type_defs, &ind)?
+                body1.is_assignable_to(body2, type_defs, &ind)?
             }
             (typ, Self::Recursive(_, label, body)) => {
-                typ.is_subtype_of(&Self::expand_recursive(label, body), type_defs, ind)?
+                typ.is_assignable_to(&Self::expand_recursive(label, body), type_defs, ind)?
             }
             (Self::Iterative(_, label1, body1), Self::Iterative(_, label2, body2)) => {
                 let mut ind = ind.clone();
@@ -445,10 +447,10 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     TypePoint::Loop(label1.clone()),
                     TypePoint::Loop(label2.clone()),
                 ));
-                body1.is_subtype_of(body2, type_defs, &ind)?
+                body1.is_assignable_to(body2, type_defs, &ind)?
             }
             (Self::Iterative(_, label, body), typ) => {
-                Self::expand_iterative(label, body).is_subtype_of(typ, type_defs, ind)?
+                Self::expand_iterative(label, body).is_assignable_to(typ, type_defs, ind)?
             }
 
             (Self::Self_(_, label1), Self::Self_(_, label2)) => ind.contains(&(
@@ -472,13 +474,13 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                 let body2 = body2
                     .clone()
                     .substitute(name2, &Type::Var(loc.clone(), name1.clone()))?;
-                body1.is_subtype_of(&body2, type_defs, ind)?
+                body1.is_assignable_to(&body2, type_defs, ind)?
             }
             (Self::ReceiveType(loc, name1, body1), Self::ReceiveType(_, name2, body2)) => {
                 let body2 = body2
                     .clone()
                     .substitute(name2, &Type::Var(loc.clone(), name1.clone()))?;
-                body1.is_subtype_of(&body2, type_defs, ind)?
+                body1.is_assignable_to(&body2, type_defs, ind)?
             }
 
             _ => false,
@@ -806,95 +808,6 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             ),
         }
     }
-
-    pub fn unify(
-        self,
-        other: Self,
-        type_defs: &TypeDefs<Loc, Name>,
-    ) -> Result<Self, TypeError<Loc, Name>> {
-        Ok(match (self, other) {
-            (Self::Var(loc, name1), Self::Var(_, name2)) if name1 == name2 => Self::Var(loc, name1),
-            (Self::DualVar(loc, name1), Self::DualVar(_, name2)) if name1 == name2 => {
-                Self::DualVar(loc, name1)
-            }
-            (Self::Name(loc, name, args), t2) => {
-                type_defs.get(&loc, &name, &args)?.unify(t2, type_defs)?
-            }
-            (t1, Self::Name(loc, name, args)) => {
-                t1.unify(type_defs.get(&loc, &name, &args)?, type_defs)?
-            }
-            (Self::DualName(loc, name, args), t2) => type_defs
-                .get_dual(&loc, &name, &args)?
-                .unify(t2, type_defs)?,
-            (t1, Self::DualName(loc, name, args)) => {
-                t1.unify(type_defs.get_dual(&loc, &name, &args)?, type_defs)?
-            }
-
-            (Self::Send(loc, t1, u1), Self::Send(_, t2, u2)) => Self::Send(
-                loc,
-                Box::new(t1.unify(*t2, type_defs)?),
-                Box::new(u1.unify(*u2, type_defs)?),
-            ),
-            (Self::Receive(loc, t1, u1), Self::Receive(_, t2, u2)) => Self::Receive(
-                loc,
-                Box::new(t1.unify(*t2, type_defs)?),
-                Box::new(u1.unify(*u2, type_defs)?),
-            ),
-            (Self::Either(loc, branches1), Self::Either(_, branches2)) => {
-                let mut branches = branches1;
-                for (branch, typ2) in branches2 {
-                    let typ = match branches.shift_remove(&branch) {
-                        Some(typ1) => typ1.unify(typ2, type_defs)?,
-                        None => typ2,
-                    };
-                    branches.insert(branch, typ);
-                }
-                Self::Either(loc, branches)
-            }
-            (Self::Choice(loc, branches1), Self::Choice(_, branches2)) => {
-                let mut branches = branches1;
-                for (branch, typ2) in branches2 {
-                    let typ = match branches.shift_remove(&branch) {
-                        Some(typ1) => typ1.unify(typ2, type_defs)?,
-                        None => typ2,
-                    };
-                    branches.insert(branch, typ);
-                }
-                Self::Choice(loc, branches)
-            }
-            (Self::Break(loc), Self::Break(_)) => Self::Break(loc),
-            (Self::Continue(loc), Self::Continue(_)) => Self::Continue(loc),
-
-            (Self::SendType(loc, name1, body1), Self::SendType(_, name2, body2)) => {
-                let body2 = body2.substitute(&name2, &Type::Var(loc.clone(), name1.clone()))?;
-                Self::SendType(loc, name1, Box::new(body1.unify(body2, type_defs)?))
-            }
-            (Self::ReceiveType(loc, name1, body1), Self::ReceiveType(_, name2, body2)) => {
-                let body2 = body2.substitute(&name2, &Type::Var(loc.clone(), name1.clone()))?;
-                Self::ReceiveType(loc, name1, Box::new(body1.unify(body2, type_defs)?))
-            }
-
-            (typ1, typ2) => return Err(TypeError::TypesCannotBeUnified(typ1, typ2)), //TODO: recursive & iterative
-        })
-    }
-
-    pub fn unify_vec(
-        loc: &Loc,
-        name: &Name,
-        mut types: Vec<Self>,
-        type_defs: &TypeDefs<Loc, Name>,
-    ) -> Result<Self, TypeError<Loc, Name>> {
-        let Some(mut typ) = types.pop() else {
-            return Err(TypeError::TypeMustBeKnownAtThisPoint(
-                loc.clone(),
-                name.clone(),
-            ));
-        };
-        while let Some(typ1) = types.pop() {
-            typ = typ1.unify(typ, type_defs)?;
-        }
-        Ok(typ)
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -1029,7 +942,7 @@ where
                     object,
                     &typ,
                     command,
-                    &mut |context, process| Ok((context.check_process(process)?, vec![])),
+                    &mut |context, process| Ok((context.check_process(process)?, None)),
                 )?;
 
                 Ok(Arc::new(Process::Do(
@@ -1059,11 +972,11 @@ where
         ) -> Result<
             (
                 Arc<Process<Loc, Name, Type<Loc, Name>>>,
-                Vec<Type<Loc, Name>>,
+                Option<Type<Loc, Name>>,
             ),
             TypeError<Loc, Name>,
         >,
-    ) -> Result<(Command<Loc, Name, Type<Loc, Name>>, Vec<Type<Loc, Name>>), TypeError<Loc, Name>>
+    ) -> Result<(Command<Loc, Name, Type<Loc, Name>>, Option<Type<Loc, Name>>), TypeError<Loc, Name>>
     {
         if let Type::Name(_, name, args) = typ {
             return self.check_command(
@@ -1114,7 +1027,7 @@ where
             Command::Link(expression) => {
                 let expression = self.check_expression(None, expression, &typ.dual())?;
                 self.cannot_have_obligations(loc)?;
-                (Command::Link(expression), vec![])
+                (Command::Link(expression), None)
             }
 
             Command::Send(argument, process) => {
@@ -1140,7 +1053,7 @@ where
                     ));
                 };
                 if let Some(annotated_type) = annotation {
-                    parameter_type.check_subtype(loc, annotated_type, &self.type_defs)?;
+                    parameter_type.check_assignable(loc, annotated_type, &self.type_defs)?;
                 }
                 self.put(loc, parameter.clone(), *parameter_type.clone())?;
                 self.put(loc, object.clone(), *then_type.clone())?;
@@ -1192,7 +1105,7 @@ where
 
                 let original_context = self.clone();
                 let mut typed_processes = Vec::new();
-                let mut inferred_types = Vec::new();
+                let mut inferred_type: Option<Type<Loc, Name>> = None;
 
                 for (branch, process) in branches.iter().zip(processes.iter()) {
                     *self = original_context.clone();
@@ -1205,14 +1118,28 @@ where
                         ));
                     };
                     self.put(loc, object.clone(), branch_type.clone())?;
-                    let (process, inferred_type) = analyze_process(self, process)?;
+                    let (process, inferred_in_branch) = analyze_process(self, process)?;
                     typed_processes.push(process);
-                    inferred_types.extend(inferred_type);
+
+                    match (inferred_type, inferred_in_branch) {
+                        (None, Some(t2)) => inferred_type = Some(t2),
+                        (Some(t1), Some(t2))
+                            if t1.is_assignable_to(&t2, &self.type_defs, &HashSet::new())? =>
+                        {
+                            inferred_type = Some(t2)
+                        }
+                        (Some(t1), Some(t2))
+                            if !t2.is_assignable_to(&t1, &self.type_defs, &HashSet::new())? =>
+                        {
+                            return Err(TypeError::TypesCannotBeUnified(t1, t2))
+                        }
+                        (t1, _) => inferred_type = t1,
+                    }
                 }
 
                 (
                     Command::Match(Arc::clone(branches), Box::from(typed_processes)),
-                    inferred_types,
+                    inferred_type,
                 )
             }
 
@@ -1225,7 +1152,7 @@ where
                     ));
                 };
                 self.cannot_have_obligations(loc)?;
-                (Command::Break, vec![])
+                (Command::Break, None)
             }
 
             Command::Continue(process) => {
@@ -1273,12 +1200,10 @@ where
                     object.clone(),
                     Type::expand_recursive(typ_label, typ_body),
                 )?;
-                let (process, inferred_types) = analyze_process(self, process)?;
+                let (process, inferred_type) = analyze_process(self, process)?;
 
-                let inferred_iterative = inferred_types
-                    .into_iter()
-                    .map(|body| Type::Iterative(loc.clone(), label.clone(), Box::new(body)))
-                    .collect();
+                let inferred_iterative = inferred_type
+                    .map(|body| Type::Iterative(loc.clone(), label.clone(), Box::new(body)));
 
                 (Command::Begin(label.clone(), process), inferred_iterative)
             }
@@ -1311,7 +1236,7 @@ where
                             var.clone(),
                         ));
                     };
-                    if !current_type.is_subtype_of(
+                    if !current_type.is_assignable_to(
                         type_at_begin,
                         &self.type_defs,
                         &HashSet::new(),
@@ -1328,10 +1253,7 @@ where
 
                 (
                     Command::Loop(label.clone()),
-                    inferred_loop
-                        .or(Some(Type::Loop(loc.clone(), label.clone())))
-                        .into_iter()
-                        .collect(),
+                    inferred_loop.or(Some(Type::Loop(loc.clone(), label.clone()))),
                 )
             }
 
@@ -1416,7 +1338,7 @@ where
                 }
                 let typ = self.get(loc, object)?;
 
-                let (command, inferred_types) = self.check_command(
+                let (command, inferred_type) = self.check_command(
                     Some(subject),
                     loc,
                     object,
@@ -1424,13 +1346,20 @@ where
                     command,
                     &mut |context, process| {
                         let (process, typ) = context.infer_process(process, subject)?;
-                        Ok((process, vec![typ]))
+                        Ok((process, Some(typ)))
                     },
                 )?;
 
+                let Some(inferred_type) = inferred_type else {
+                    return Err(TypeError::TypeMustBeKnownAtThisPoint(
+                        loc.clone(),
+                        subject.clone(),
+                    ));
+                };
+
                 Ok((
                     Arc::new(Process::Do(loc.clone(), object.clone(), typ, command)),
-                    Type::unify_vec(loc, object, inferred_types, &self.type_defs)?,
+                    inferred_type,
                 ))
             }
 
@@ -1546,7 +1475,7 @@ where
                             var.clone(),
                         ));
                     };
-                    if !current_type.is_subtype_of(
+                    if !current_type.is_assignable_to(
                         type_at_begin,
                         &self.type_defs,
                         &HashSet::new(),
@@ -1600,7 +1529,7 @@ where
                     ));
                 }
                 let typ = self.get(loc, name)?;
-                typ.check_subtype(loc, target_type, &self.type_defs)?;
+                typ.check_assignable(loc, target_type, &self.type_defs)?;
                 Ok(Arc::new(Expression::Reference(
                     loc.clone(),
                     name.clone(),
@@ -1612,7 +1541,7 @@ where
                 let target_dual = target_type.dual();
                 let typ = match annotation {
                     Some(annotated_type) => {
-                        annotated_type.check_subtype(loc, &target_dual, &self.type_defs)?;
+                        annotated_type.check_assignable(loc, &target_dual, &self.type_defs)?;
                         annotated_type.clone()
                     }
                     None => target_dual,
