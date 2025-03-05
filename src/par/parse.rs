@@ -188,11 +188,10 @@ fn parse_type(pairs: &mut Pairs<'_, Rule>) -> Result<Type<Loc, Name>, ParseError
             Ok(Type::Name(loc, name, args))
         }
 
-        Rule::typ_dual_name => {
+        Rule::typ_chan => {
             let mut pairs = pair.into_inner();
-            let (_, name) = parse_name(&mut pairs)?;
-            let args = parse_type_args(&mut pairs)?;
-            Ok(Type::DualName(loc, name, args))
+            let typ = parse_type(&mut pairs)?;
+            Ok(Type::Chan(loc, Box::new(typ)))
         }
 
         Rule::typ_send => {

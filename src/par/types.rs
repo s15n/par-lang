@@ -45,10 +45,11 @@ pub enum Operation<Loc, Name> {
 
 #[derive(Clone, Debug)]
 pub enum Type<Loc, Name> {
+    Chan(Loc, Box<Self>),
     Var(Loc, Name),
-    DualVar(Loc, Name),
+    //DualVar(Loc, Name),
     Name(Loc, Name, Vec<Type<Loc, Name>>),
-    DualName(Loc, Name, Vec<Type<Loc, Name>>),
+    //DualName(Loc, Name, Vec<Type<Loc, Name>>),
     Send(Loc, Box<Self>, Box<Self>),
     Receive(Loc, Box<Self>, Box<Self>),
     Either(Loc, IndexMap<Name, Self>),
@@ -58,9 +59,9 @@ pub enum Type<Loc, Name> {
     Recursive(Loc, Option<Name>, Box<Self>),
     Iterative(Loc, Option<Name>, Box<Self>),
     Self_(Loc, Option<Name>),
-    DualSelf(Loc, Option<Name>),
+    //DualSelf(Loc, Option<Name>),
     Loop(Loc, Option<Name>),
-    DualLoop(Loc, Option<Name>),
+    //DualLoop(Loc, Option<Name>),
     SendType(Loc, Name, Box<Self>),
     ReceiveType(Loc, Name, Box<Self>),
 }
@@ -130,7 +131,10 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> TypeDefs<Loc, Name> {
                     args.len(),
                 ));
             }
-            return Ok(Type::DualVar(loc.clone(), name.clone()));
+            return Ok(Type::Chan(
+                loc.clone(),
+                Box::new(Type::Var(loc.clone(), name.clone())),
+            ));
         }
         match self.globals.get(name) {
             Some((params, typ)) => {
@@ -142,7 +146,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> TypeDefs<Loc, Name> {
                         args.len(),
                     ));
                 }
-                let mut typ = typ.dual();
+                let mut typ = typ.dual(self)?;
                 for i in 0..params.len() {
                     typ = typ.substitute(&params[i], &args[i])?;
                 }
@@ -159,10 +163,9 @@ pub struct Declarations<Loc, Name>(pub IndexMap<Name, Option<Type<Loc, Name>>>);
 impl<Loc, Name> Type<Loc, Name> {
     pub fn get_loc(&self) -> &Loc {
         match self {
+            Self::Chan(loc, _) => loc,
             Self::Var(loc, _) => loc,
-            Self::DualVar(loc, _) => loc,
             Self::Name(loc, _, _) => loc,
-            Self::DualName(loc, _, _) => loc,
             Self::Send(loc, _, _) => loc,
             Self::Receive(loc, _, _) => loc,
             Self::Either(loc, _) => loc,
@@ -172,9 +175,7 @@ impl<Loc, Name> Type<Loc, Name> {
             Self::Recursive(loc, _, _) => loc,
             Self::Iterative(loc, _, _) => loc,
             Self::Self_(loc, _) => loc,
-            Self::DualSelf(loc, _) => loc,
             Self::Loop(loc, _) => loc,
-            Self::DualLoop(loc, _) => loc,
             Self::SendType(loc, _, _) => loc,
             Self::ReceiveType(loc, _, _) => loc,
         }
@@ -184,14 +185,9 @@ impl<Loc, Name> Type<Loc, Name> {
 impl<Loc, Name: Eq + Hash> Type<Loc, Name> {
     pub fn map_names<N: Eq + Hash>(self, f: &mut impl FnMut(Name) -> N) -> Type<Loc, N> {
         match self {
+            Self::Chan(loc, t) => Type::Chan(loc, Box::new(t.map_names(f))),
             Self::Var(loc, name) => Type::Var(loc, f(name)),
-            Self::DualVar(loc, name) => Type::DualVar(loc, f(name)),
             Self::Name(loc, name, args) => Type::Name(
-                loc,
-                f(name),
-                args.into_iter().map(|arg| arg.map_names(f)).collect(),
-            ),
-            Self::DualName(loc, name, args) => Type::DualName(
                 loc,
                 f(name),
                 args.into_iter().map(|arg| arg.map_names(f)).collect(),
@@ -225,9 +221,7 @@ impl<Loc, Name: Eq + Hash> Type<Loc, Name> {
                 Type::Iterative(loc, map_label(label, f), Box::new(body.map_names(f)))
             }
             Self::Self_(loc, label) => Type::Self_(loc, map_label(label, f)),
-            Self::DualSelf(loc, label) => Type::DualSelf(loc, map_label(label, f)),
             Self::Loop(loc, label) => Type::Loop(loc, map_label(label, f)),
-            Self::DualLoop(loc, label) => Type::DualLoop(loc, map_label(label, f)),
             Self::SendType(loc, name, body) => {
                 Type::SendType(loc, f(name), Box::new(body.map_names(f)))
             }
@@ -245,18 +239,12 @@ fn map_label<Name, N>(label: Option<Name>, f: &mut impl FnMut(Name) -> N) -> Opt
 impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
     pub fn substitute(self, var: &Name, typ: &Self) -> Result<Self, TypeError<Loc, Name>> {
         Ok(match self {
+            Self::Chan(loc, t) => Self::Chan(loc, Box::new(t.substitute(var, typ)?)),
             Self::Var(loc, name) => {
                 if &name == var {
                     typ.clone()
                 } else {
                     Self::Var(loc, name)
-                }
-            }
-            Self::DualVar(loc, name) => {
-                if &name == var {
-                    typ.dual()
-                } else {
-                    Self::DualVar(loc, name)
                 }
             }
             Self::Name(loc, name, args) if &name == var => {
@@ -271,24 +259,6 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                 typ.clone()
             }
             Self::Name(loc, name, args) => Self::Name(
-                loc,
-                name,
-                args.into_iter()
-                    .map(|arg| arg.substitute(var, typ))
-                    .collect::<Result<_, _>>()?,
-            ),
-            Self::DualName(loc, name, args) if &name == var => {
-                if !args.is_empty() {
-                    return Err(TypeError::WrongNumberOfTypeArgs(
-                        loc,
-                        var.clone(),
-                        0,
-                        args.len(),
-                    ));
-                }
-                typ.dual()
-            }
-            Self::DualName(loc, name, args) => Self::DualName(
                 loc,
                 name,
                 args.into_iter()
@@ -328,9 +298,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                 Self::Iterative(loc, label, Box::new(body.substitute(var, typ)?))
             }
             Self::Self_(loc, label) => Self::Self_(loc, label),
-            Self::DualSelf(loc, label) => Self::DualSelf(loc, label),
             Self::Loop(loc, label) => Self::Loop(loc, label),
-            Self::DualLoop(loc, label) => Self::DualLoop(loc, label),
 
             Self::SendType(loc, name, body) => {
                 if &name == var {
@@ -372,19 +340,24 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
         ind: &HashSet<(TypePoint<Name>, TypePoint<Name>)>,
     ) -> Result<bool, TypeError<Loc, Name>> {
         Ok(match (self, other) {
+            (Self::Chan(_, box dual_t1), Self::Chan(_, box dual_t2)) => {
+                dual_t2.is_assignable_to(dual_t1, type_defs, ind)?
+            }
+            (Self::Chan(_, box dual_t1), t2) => match t2.dual(type_defs)? {
+                Self::Chan(_, _) => false,
+                dual_t2 => dual_t2.is_assignable_to(dual_t1, type_defs, ind)?,
+            },
+            (t1, Self::Chan(_, box dual_t2)) => match t1.dual(type_defs)? {
+                Self::Chan(_, _) => false,
+                dual_t1 => dual_t2.is_assignable_to(&dual_t1, type_defs, ind)?,
+            },
+
             (Self::Var(_, name1), Self::Var(_, name2)) => name1 == name2,
-            (Self::DualVar(_, name1), Self::DualVar(_, name2)) => name1 == name2,
             (Self::Name(loc, name, args), t2) => type_defs
                 .get(loc, name, args)?
                 .is_assignable_to(t2, type_defs, ind)?,
             (t1, Self::Name(loc, name, args)) => {
                 t1.is_assignable_to(&type_defs.get(loc, name, args)?, type_defs, ind)?
-            }
-            (Self::DualName(loc, name, args), t2) => type_defs
-                .get_dual(loc, name, args)?
-                .is_assignable_to(t2, type_defs, ind)?,
-            (t1, Self::DualName(loc, name, args)) => {
-                t1.is_assignable_to(&type_defs.get_dual(loc, name, args)?, type_defs, ind)?
             }
 
             (Self::Send(_, t1, u1), Self::Send(_, t2, u2)) => {
@@ -438,9 +411,11 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                 ));
                 body1.is_assignable_to(body2, type_defs, &ind)?
             }
-            (typ, Self::Recursive(_, label, body)) => {
-                typ.is_assignable_to(&Self::expand_recursive(label, body), type_defs, ind)?
-            }
+            (typ, Self::Recursive(_, label, body)) => typ.is_assignable_to(
+                &Self::expand_recursive(label, body, type_defs)?,
+                type_defs,
+                ind,
+            )?,
             (Self::Iterative(_, label1, body1), Self::Iterative(_, label2, body2)) => {
                 let mut ind = ind.clone();
                 ind.insert((
@@ -450,22 +425,15 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                 body1.is_assignable_to(body2, type_defs, &ind)?
             }
             (Self::Iterative(_, label, body), typ) => {
-                Self::expand_iterative(label, body).is_assignable_to(typ, type_defs, ind)?
+                Self::expand_iterative(label, body, type_defs)?
+                    .is_assignable_to(typ, type_defs, ind)?
             }
 
             (Self::Self_(_, label1), Self::Self_(_, label2)) => ind.contains(&(
                 TypePoint::Self_(label1.clone()),
                 TypePoint::Self_(label2.clone()),
             )),
-            (Self::DualSelf(_, label1), Self::DualSelf(_, label2)) => ind.contains(&(
-                TypePoint::Self_(label1.clone()),
-                TypePoint::Self_(label2.clone()),
-            )),
             (Self::Loop(_, label1), Self::Loop(_, label2)) => ind.contains(&(
-                TypePoint::Loop(label1.clone()),
-                TypePoint::Loop(label2.clone()),
-            )),
-            (Self::DualLoop(_, label1), Self::DualLoop(_, label2)) => ind.contains(&(
                 TypePoint::Loop(label1.clone()),
                 TypePoint::Loop(label2.clone()),
             )),
@@ -487,28 +455,34 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
         })
     }
 
-    pub fn dual(&self) -> Self {
-        match self {
-            Self::Var(loc, name) => Self::DualVar(loc.clone(), name.clone()),
-            Self::DualVar(loc, name) => Self::Var(loc.clone(), name.clone()),
-            Self::Name(loc, name, args) => Self::DualName(loc.clone(), name.clone(), args.clone()),
-            Self::DualName(loc, name, args) => Self::Name(loc.clone(), name.clone(), args.clone()),
+    pub fn dual(&self, type_defs: &TypeDefs<Loc, Name>) -> Result<Self, TypeError<Loc, Name>> {
+        Ok(match self {
+            Self::Chan(_, box t) => t.clone(),
 
-            Self::Send(loc, t, u) => Self::Receive(loc.clone(), t.clone(), Box::new(u.dual())),
-            Self::Receive(loc, t, u) => Self::Send(loc.clone(), t.clone(), Box::new(u.dual())),
+            Self::Var(loc, name) => {
+                Self::Chan(loc.clone(), Box::new(Self::Var(loc.clone(), name.clone())))
+            }
+            Self::Name(loc, name, args) => type_defs.get_dual(loc, name, args)?,
+
+            Self::Send(loc, t, u) => {
+                Self::Receive(loc.clone(), t.clone(), Box::new(u.dual(type_defs)?))
+            }
+            Self::Receive(loc, t, u) => {
+                Self::Send(loc.clone(), t.clone(), Box::new(u.dual(type_defs)?))
+            }
             Self::Either(loc, branches) => Self::Choice(
                 loc.clone(),
                 branches
                     .iter()
-                    .map(|(branch, t)| (branch.clone(), t.dual()))
-                    .collect(),
+                    .map(|(branch, t)| Ok((branch.clone(), t.dual(type_defs)?)))
+                    .collect::<Result<_, _>>()?,
             ),
             Self::Choice(loc, branches) => Self::Either(
                 loc.clone(),
                 branches
                     .iter()
-                    .map(|(branch, t)| (branch.clone(), t.dual()))
-                    .collect(),
+                    .map(|(branch, t)| Ok((branch.clone(), t.dual(type_defs)?)))
+                    .collect::<Result<_, _>>()?,
             ),
             Self::Break(loc) => Self::Continue(loc.clone()),
             Self::Continue(loc) => Self::Break(loc.clone()),
@@ -516,39 +490,35 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             Self::Recursive(loc, label, t) => Self::Iterative(
                 loc.clone(),
                 label.clone(),
-                Box::new(t.dual().flip_self_loop(true, label)),
+                Box::new(t.dual(type_defs)?.flip_self_loop(true, label)),
             ),
             Self::Iterative(loc, label, t) => Self::Recursive(
                 loc.clone(),
                 label.clone(),
-                Box::new(t.dual().flip_self_loop(false, label)),
+                Box::new(t.dual(type_defs)?.flip_self_loop(false, label)),
             ),
-            Self::Self_(loc, label) => Self::DualSelf(loc.clone(), label.clone()),
-            Self::DualSelf(loc, label) => Self::Self_(loc.clone(), label.clone()),
-            Self::Loop(loc, label) => Self::DualLoop(loc.clone(), label.clone()),
-            Self::DualLoop(loc, label) => Self::Loop(loc.clone(), label.clone()),
+            Self::Self_(loc, label) => Self::Chan(
+                loc.clone(),
+                Box::new(Self::Self_(loc.clone(), label.clone())),
+            ),
+            Self::Loop(loc, label) => Self::Chan(
+                loc.clone(),
+                Box::new(Self::Loop(loc.clone(), label.clone())),
+            ),
 
             Self::SendType(loc, name, t) => {
-                Self::ReceiveType(loc.clone(), name.clone(), Box::new(t.dual()))
+                Self::ReceiveType(loc.clone(), name.clone(), Box::new(t.dual(type_defs)?))
             }
             Self::ReceiveType(loc, name, t) => {
-                Self::SendType(loc.clone(), name.clone(), Box::new(t.dual()))
+                Self::SendType(loc.clone(), name.clone(), Box::new(t.dual(type_defs)?))
             }
-        }
+        })
     }
 
     fn flip_self_loop(self, recursive: bool, label: &Option<Name>) -> Self {
         match self {
             Self::Var(loc, name) => Self::Var(loc, name),
-            Self::DualVar(loc, name) => Self::DualVar(loc, name),
             Self::Name(loc, name, args) => Self::Name(
-                loc.clone(),
-                name.clone(),
-                args.into_iter()
-                    .map(|arg| arg.flip_self_loop(recursive, label))
-                    .collect(),
-            ),
-            Self::DualName(loc, name, args) => Self::DualName(
                 loc.clone(),
                 name.clone(),
                 args.into_iter()
@@ -599,30 +569,30 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             }
             Self::Self_(loc, label1) => {
                 if recursive && &label1 == label {
-                    Self::DualLoop(loc, label1)
+                    Self::Chan(loc.clone(), Box::new(Self::Loop(loc, label1)))
                 } else {
                     Self::Self_(loc, label1)
                 }
             }
-            Self::DualSelf(loc, label1) => {
+            Self::Chan(loc1, box Self::Self_(loc2, label1)) => {
                 if recursive && &label1 == label {
-                    Self::Loop(loc, label1)
+                    Self::Loop(loc2, label1)
                 } else {
-                    Self::DualSelf(loc, label1)
+                    Self::Chan(loc1, Box::new(Self::Self_(loc2, label1)))
                 }
             }
             Self::Loop(loc, label1) => {
                 if !recursive && &label1 == label {
-                    Self::DualSelf(loc, label1)
+                    Self::Chan(loc.clone(), Box::new(Self::Self_(loc, label1)))
                 } else {
                     Self::Loop(loc, label1)
                 }
             }
-            Self::DualLoop(loc, label1) => {
+            Self::Chan(loc1, box Self::Loop(loc2, label1)) => {
                 if !recursive && &label1 == label {
-                    Self::Self_(loc, label1)
+                    Self::Self_(loc2, label1)
                 } else {
-                    Self::DualLoop(loc, label1)
+                    Self::Chan(loc1, Box::new(Self::Loop(loc2, label1)))
                 }
             }
 
@@ -636,42 +606,61 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                 name.clone(),
                 Box::new(t.flip_self_loop(recursive, label)),
             ),
+
+            Self::Chan(loc, box t) => Self::Chan(loc, Box::new(t.flip_self_loop(recursive, label))),
         }
     }
 
-    pub fn expand_recursive(label: &Option<Name>, body: &Self) -> Self {
-        body.clone().expand_recursive_helper(label, body)
+    pub fn expand_recursive(
+        label: &Option<Name>,
+        body: &Self,
+        type_defs: &TypeDefs<Loc, Name>,
+    ) -> Result<Self, TypeError<Loc, Name>> {
+        body.clone().expand_recursive_helper(label, body, type_defs)
     }
 
-    fn expand_recursive_helper(self, top_label: &Option<Name>, top_body: &Self) -> Self {
-        match self {
+    fn expand_recursive_helper(
+        self,
+        top_label: &Option<Name>,
+        top_body: &Self,
+        type_defs: &TypeDefs<Loc, Name>,
+    ) -> Result<Self, TypeError<Loc, Name>> {
+        Ok(match self {
             Self::Var(loc, name) => Self::Var(loc, name),
-            Self::DualVar(loc, name) => Self::DualVar(loc, name),
             Self::Name(loc, name, args) => Self::Name(loc, name, args),
-            Self::DualName(loc, name, args) => Self::DualName(loc, name, args),
             Self::Send(loc, t, u) => Self::Send(
                 loc,
-                Box::new(t.expand_recursive_helper(top_label, top_body)),
-                Box::new(u.expand_recursive_helper(top_label, top_body)),
+                Box::new(t.expand_recursive_helper(top_label, top_body, type_defs)?),
+                Box::new(u.expand_recursive_helper(top_label, top_body, type_defs)?),
             ),
             Self::Receive(loc, t, u) => Self::Receive(
                 loc,
-                Box::new(t.expand_recursive_helper(top_label, top_body)),
-                Box::new(u.expand_recursive_helper(top_label, top_body)),
+                Box::new(t.expand_recursive_helper(top_label, top_body, type_defs)?),
+                Box::new(u.expand_recursive_helper(top_label, top_body, type_defs)?),
             ),
             Self::Either(loc, branches) => Self::Either(
                 loc,
                 branches
                     .into_iter()
-                    .map(|(branch, typ)| (branch, typ.expand_recursive_helper(top_label, top_body)))
-                    .collect(),
+                    .map(|(branch, typ)| {
+                        Ok((
+                            branch,
+                            typ.expand_recursive_helper(top_label, top_body, type_defs)?,
+                        ))
+                    })
+                    .collect::<Result<_, _>>()?,
             ),
             Self::Choice(loc, branches) => Self::Choice(
                 loc,
                 branches
                     .into_iter()
-                    .map(|(branch, typ)| (branch, typ.expand_recursive_helper(top_label, top_body)))
-                    .collect(),
+                    .map(|(branch, typ)| {
+                        Ok((
+                            branch,
+                            typ.expand_recursive_helper(top_label, top_body, type_defs)?,
+                        ))
+                    })
+                    .collect::<Result<_, _>>()?,
             ),
             Self::Break(loc) => Self::Break(loc),
             Self::Continue(loc) => Self::Continue(loc),
@@ -682,14 +671,14 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     Self::Recursive(
                         loc,
                         label,
-                        Box::new(t.expand_recursive_helper(top_label, top_body)),
+                        Box::new(t.expand_recursive_helper(top_label, top_body, type_defs)?),
                     )
                 }
             }
             Self::Iterative(loc, label, t) => Self::Iterative(
                 loc,
                 label,
-                Box::new(t.expand_recursive_helper(top_label, top_body)),
+                Box::new(t.expand_recursive_helper(top_label, top_body, type_defs)?),
             ),
             Self::Self_(loc, label) => {
                 if &label == top_label {
@@ -698,72 +687,93 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     Self::Self_(loc, label)
                 }
             }
-            Self::DualSelf(loc, label) => {
+            Self::Chan(loc1, box Self::Self_(loc2, label)) => {
                 if &label == top_label {
                     Self::Iterative(
-                        loc,
+                        loc2,
                         label.clone(),
-                        Box::new(top_body.dual().flip_self_loop(true, &label)),
+                        Box::new(top_body.dual(type_defs)?.flip_self_loop(true, &label)),
                     )
                 } else {
-                    Self::DualSelf(loc, label)
+                    Self::Chan(loc1, Box::new(Self::Self_(loc2, label)))
                 }
             }
             Self::Loop(loc, label) => Self::Loop(loc, label),
-            Self::DualLoop(loc, label) => Self::DualLoop(loc, label),
             Self::SendType(loc, name, t) => Self::SendType(
                 loc,
                 name,
-                Box::new(t.expand_recursive_helper(top_label, top_body)),
+                Box::new(t.expand_recursive_helper(top_label, top_body, type_defs)?),
             ),
             Self::ReceiveType(loc, name, t) => Self::ReceiveType(
                 loc,
                 name,
-                Box::new(t.expand_recursive_helper(top_label, top_body)),
+                Box::new(t.expand_recursive_helper(top_label, top_body, type_defs)?),
             ),
-        }
+
+            Self::Chan(loc, t) => Self::Chan(
+                loc,
+                Box::new(t.expand_recursive_helper(top_label, top_body, type_defs)?),
+            ),
+        })
     }
 
-    pub fn expand_iterative(label: &Option<Name>, body: &Self) -> Self {
-        body.clone().expand_iterative_helper(label, body)
+    pub fn expand_iterative(
+        label: &Option<Name>,
+        body: &Self,
+        type_defs: &TypeDefs<Loc, Name>,
+    ) -> Result<Self, TypeError<Loc, Name>> {
+        body.clone().expand_iterative_helper(label, body, type_defs)
     }
 
-    fn expand_iterative_helper(self, top_label: &Option<Name>, top_body: &Self) -> Self {
-        match self {
+    fn expand_iterative_helper(
+        self,
+        top_label: &Option<Name>,
+        top_body: &Self,
+        type_defs: &TypeDefs<Loc, Name>,
+    ) -> Result<Self, TypeError<Loc, Name>> {
+        Ok(match self {
             Self::Var(loc, name) => Self::Var(loc, name),
-            Self::DualVar(loc, name) => Self::DualVar(loc, name),
             Self::Name(loc, name, args) => Self::Name(loc, name, args),
-            Self::DualName(loc, name, args) => Self::DualName(loc, name, args),
             Self::Send(loc, t, u) => Self::Send(
                 loc,
-                Box::new(t.expand_iterative_helper(top_label, top_body)),
-                Box::new(u.expand_iterative_helper(top_label, top_body)),
+                Box::new(t.expand_iterative_helper(top_label, top_body, type_defs)?),
+                Box::new(u.expand_iterative_helper(top_label, top_body, type_defs)?),
             ),
             Self::Receive(loc, t, u) => Self::Receive(
                 loc,
-                Box::new(t.expand_iterative_helper(top_label, top_body)),
-                Box::new(u.expand_iterative_helper(top_label, top_body)),
+                Box::new(t.expand_iterative_helper(top_label, top_body, type_defs)?),
+                Box::new(u.expand_iterative_helper(top_label, top_body, type_defs)?),
             ),
             Self::Either(loc, branches) => Self::Either(
                 loc,
                 branches
                     .into_iter()
-                    .map(|(branch, typ)| (branch, typ.expand_iterative_helper(top_label, top_body)))
-                    .collect(),
+                    .map(|(branch, typ)| {
+                        Ok((
+                            branch,
+                            typ.expand_iterative_helper(top_label, top_body, type_defs)?,
+                        ))
+                    })
+                    .collect::<Result<_, _>>()?,
             ),
             Self::Choice(loc, branches) => Self::Choice(
                 loc,
                 branches
                     .into_iter()
-                    .map(|(branch, typ)| (branch, typ.expand_iterative_helper(top_label, top_body)))
-                    .collect(),
+                    .map(|(branch, typ)| {
+                        Ok((
+                            branch,
+                            typ.expand_iterative_helper(top_label, top_body, type_defs)?,
+                        ))
+                    })
+                    .collect::<Result<_, _>>()?,
             ),
             Self::Break(loc) => Self::Break(loc),
             Self::Continue(loc) => Self::Continue(loc),
             Self::Recursive(loc, label, t) => Self::Recursive(
                 loc,
                 label,
-                Box::new(t.expand_iterative_helper(top_label, top_body)),
+                Box::new(t.expand_iterative_helper(top_label, top_body, type_defs)?),
             ),
             Self::Iterative(loc, label, t) => {
                 if &label == top_label {
@@ -772,12 +782,11 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     Self::Iterative(
                         loc,
                         label,
-                        Box::new(t.expand_iterative_helper(top_label, top_body)),
+                        Box::new(t.expand_iterative_helper(top_label, top_body, type_defs)?),
                     )
                 }
             }
             Self::Self_(loc, label) => Self::Self_(loc, label),
-            Self::DualSelf(loc, label) => Self::DualSelf(loc, label),
             Self::Loop(loc, label) => {
                 if &label == top_label {
                     Self::Iterative(loc, label, Box::new(top_body.clone()))
@@ -785,28 +794,33 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     Self::Loop(loc, label)
                 }
             }
-            Self::DualLoop(loc, label) => {
+            Self::Chan(loc1, box Self::Loop(loc2, label)) => {
                 if &label == top_label {
                     Self::Recursive(
-                        loc,
+                        loc2,
                         label.clone(),
-                        Box::new(top_body.dual().flip_self_loop(false, &label)),
+                        Box::new(top_body.dual(type_defs)?.flip_self_loop(false, &label)),
                     )
                 } else {
-                    Self::Loop(loc, label)
+                    Self::Chan(loc1, Box::new(Self::Loop(loc2, label)))
                 }
             }
             Self::SendType(loc, name, t) => Self::SendType(
                 loc,
                 name,
-                Box::new(t.expand_iterative_helper(top_label, top_body)),
+                Box::new(t.expand_iterative_helper(top_label, top_body, type_defs)?),
             ),
             Self::ReceiveType(loc, name, t) => Self::ReceiveType(
                 loc,
                 name,
-                Box::new(t.expand_iterative_helper(top_label, top_body)),
+                Box::new(t.expand_iterative_helper(top_label, top_body, type_defs)?),
             ),
-        }
+
+            Self::Chan(loc, t) => Self::Chan(
+                loc,
+                Box::new(t.expand_iterative_helper(top_label, top_body, type_defs)?),
+            ),
+        })
     }
 }
 
@@ -988,7 +1002,7 @@ where
                 analyze_process,
             );
         }
-        if let Type::DualName(_, name, args) = typ {
+        if let Type::Chan(_, box Type::Name(_, name, args)) = typ {
             return self.check_command(
                 inference_subject,
                 loc,
@@ -1004,7 +1018,7 @@ where
                     inference_subject,
                     loc,
                     object,
-                    &Type::expand_iterative(top_label, body),
+                    &Type::expand_iterative(top_label, body, &self.type_defs)?,
                     command,
                     analyze_process,
                 );
@@ -1016,16 +1030,32 @@ where
                     inference_subject,
                     loc,
                     object,
-                    &Type::expand_recursive(top_label, body),
+                    &Type::expand_recursive(top_label, body, &self.type_defs)?,
                     command,
                     analyze_process,
                 );
             }
         }
+        if let Type::Chan(_, box dual_typ) = typ {
+            match dual_typ.dual(&self.type_defs)? {
+                Type::Chan(_, _) => {}
+                typ => {
+                    return self.check_command(
+                        inference_subject,
+                        loc,
+                        object,
+                        &typ,
+                        command,
+                        analyze_process,
+                    )
+                }
+            }
+        }
 
         Ok(match command {
             Command::Link(expression) => {
-                let expression = self.check_expression(None, expression, &typ.dual())?;
+                let expression =
+                    self.check_expression(None, expression, &typ.dual(&self.type_defs)?)?;
                 self.cannot_have_obligations(loc)?;
                 (Command::Link(expression), None)
             }
@@ -1198,7 +1228,7 @@ where
                 self.put(
                     loc,
                     object.clone(),
-                    Type::expand_recursive(typ_label, typ_body),
+                    Type::expand_recursive(typ_label, typ_body, &self.type_defs)?,
                 )?;
                 let (process, inferred_type) = analyze_process(self, process)?;
 
@@ -1216,7 +1246,7 @@ where
                         typ.clone(),
                     ));
                 };
-                let expanded = Type::expand_recursive(typ_label, typ_body);
+                let expanded = Type::expand_recursive(typ_label, typ_body, &self.type_defs)?;
 
                 let Some((driver, variables)) = self.loop_points.get(label).cloned() else {
                     return Err(TypeError::NoSuchLoopPoint(loc.clone(), label.clone()));
@@ -1378,7 +1408,7 @@ where
         Ok(match command {
             Command::Link(expression) => {
                 let (expression, typ) = self.infer_expression(Some(subject), expression)?;
-                (Command::Link(expression), typ.dual())
+                (Command::Link(expression), typ.dual(&self.type_defs)?)
             }
 
             Command::Send(argument, process) => {
@@ -1538,7 +1568,7 @@ where
             }
 
             Expression::Fork(loc, captures, channel, annotation, (), process) => {
-                let target_dual = target_type.dual();
+                let target_dual = target_type.dual(&self.type_defs)?;
                 let typ = match annotation {
                     Some(annotated_type) => {
                         annotated_type.check_assignable(loc, &target_dual, &self.type_defs)?;
@@ -1597,7 +1627,7 @@ where
                     }
                     None => context.infer_process(process, channel)?,
                 };
-                let dual = typ.dual();
+                let dual = typ.dual(&self.type_defs)?;
                 Ok((
                     Arc::new(Expression::Fork(
                         loc.clone(),
@@ -1627,21 +1657,13 @@ where
 impl<Loc, Name: Display> Type<Loc, Name> {
     pub fn pretty(&self, f: &mut impl Write, indent: usize) -> fmt::Result {
         match self {
+            Self::Chan(_, body) => {
+                write!(f, "chan ")?;
+                body.pretty(f, indent)
+            }
             Self::Var(_, name) => write!(f, "{}", name),
-            Self::DualVar(_, name) => write!(f, "chan {}", name),
             Self::Name(_, name, args) => {
                 write!(f, "{}", name)?;
-                if !args.is_empty() {
-                    write!(f, "<")?;
-                    for arg in args {
-                        arg.pretty(f, indent)?;
-                    }
-                    write!(f, ">")?
-                }
-                Ok(())
-            }
-            Self::DualName(_, name, args) => {
-                write!(f, "chan {}", name)?;
                 if !args.is_empty() {
                     write!(f, "<")?;
                     for arg in args {
@@ -1714,23 +1736,9 @@ impl<Loc, Name: Display> Type<Loc, Name> {
                 }
                 Ok(())
             }
-            Self::DualSelf(_, label) => {
-                write!(f, "chan self")?;
-                if let Some(label) = label {
-                    write!(f, " @{}", label)?;
-                }
-                Ok(())
-            }
 
             Self::Loop(_, label) => {
                 write!(f, "loop")?;
-                if let Some(label) = label {
-                    write!(f, " @{}", label)?;
-                }
-                Ok(())
-            }
-            Self::DualLoop(_, label) => {
-                write!(f, "chan loop")?;
                 if let Some(label) = label {
                     write!(f, " @{}", label)?;
                 }
