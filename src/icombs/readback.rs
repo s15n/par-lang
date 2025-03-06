@@ -23,7 +23,7 @@ use crate::par::{
 
 use super::{compiler::TypedTree, Tree};
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct CoroState {
     executor: Mutex<futures::executor::LocalPool>,
     pub(crate) net: Mutex<Option<super::net::Net>>,
@@ -31,7 +31,19 @@ pub struct CoroState {
     new_var: AtomicUsize,
 }
 
-struct WaitingReadbackExt(Tree);
+impl Debug for CoroState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CoroState")
+            .field("executor", &self.executor)
+            .field("net", &self.net)
+            .field("new_redex", &self.new_redex)
+            .field("new_var", &self.new_var)
+            .finish_non_exhaustive()
+    }
+}
+
+struct WaitingOutsideExt(Tree, async_watch::Receiver<bool>);
+struct WaitingInsideExt(Tree, async_watch::Sender<bool>);
 struct ReadbackExt(Sender<PortContents>);
 
 #[derive(Default, Clone, Debug)]
@@ -46,33 +58,34 @@ pub enum PortContents {
     AuxLazyPicked(usize),
 
     // Waiting :)
-    Waiting(Tree),
+    Waiting(Tree, async_watch::Receiver<bool>),
     // A tree, which should be readback further, if necessary
     Tree(Tree),
 }
 
 impl SharedState {
-    pub fn make_oneshot_ext_from_tx(&self, tx: Sender<PortContents>) -> Tree {
-        let shared = self.shared.clone();
+    pub fn make_oneshot_ext_from_tx(tx: Sender<PortContents>) -> Tree {
         Tree::ext(
             move |net, tree, ext| {
                 let ext: Box<ReadbackExt> = ext.downcast().unwrap();
                 let tx = ext.0;
                 match tree {
                     Err(ext) => {
-                        if ext.is::<WaitingReadbackExt>() {
-                            let ext: Box<WaitingReadbackExt> = ext.downcast().unwrap();
-                            tx.send(PortContents::Waiting(ext.0)).unwrap();
-                        } else if ext.is::<ReadbackExt>() {
+                        if ext.is::<WaitingOutsideExt>() {
+                            let ext: Box<WaitingOutsideExt> = ext.downcast().unwrap();
+                            tx.send(PortContents::Waiting(ext.0, ext.1)).unwrap();
+                        } else if ext.is::<PortContents>() {
                             tx.send(*ext.downcast().unwrap()).unwrap();
                         } else {
                             unreachable!()
                         }
                     }
                     Ok(Tree::Ext(f, ext)) => {
-                        if ext.is::<WaitingReadbackExt>() {
-                            let ext: Box<WaitingReadbackExt> = ext.downcast().unwrap();
-                            tx.send(PortContents::Waiting(ext.0)).unwrap();
+                        if ext.is::<WaitingOutsideExt>() {
+                            let ext: Box<WaitingOutsideExt> = ext.downcast().unwrap();
+                            tx.send(PortContents::Waiting(ext.0, ext.1)).unwrap();
+                        } else if ext.is::<WaitingInsideExt>() {
+                            f(net, Ok(Self::make_oneshot_ext_from_tx(tx)), ext);
                         } else if ext.is::<ReadbackExt>() {
                             f(net, Err(Box::new(PortContents::Aux(tx))), ext);
                         } else {
@@ -89,7 +102,7 @@ impl SharedState {
     }
     pub fn make_oneshot_ext(&self) -> (Tree, Receiver<PortContents>) {
         let (tx, rx) = channel();
-        let tree = self.make_oneshot_ext_from_tx(tx);
+        let tree = Self::make_oneshot_ext_from_tx(tx);
         (tree, rx)
     }
     // this is async because it will only work when ran under an async context.
@@ -109,7 +122,7 @@ impl SharedState {
         self.add_redex(ext, tree).await;
         match rx.await.unwrap() {
             PortContents::Aux(sender) | PortContents::AuxLazy(sender) => {
-                self.make_oneshot_ext_from_tx(sender)
+                Self::make_oneshot_ext_from_tx(sender)
             }
             PortContents::Tree(tree) => tree,
             _ => unreachable!(),
@@ -234,7 +247,9 @@ impl SharedState {
                     return ReadbackResult::Variable(n);
                 }
                 PortContents::Tree(tree) => tree,
-                PortContents::Waiting(tree) => return ReadbackResult::Waiting(tree.with_type(ty)),
+                PortContents::Waiting(tree, rx) => {
+                    return ReadbackResult::Waiting(tree.with_type(ty), rx)
+                }
             };
             match ty {
                 crate::par::types::Type::Send(_, from, to) => {
@@ -297,21 +312,57 @@ impl SharedState {
         }
         .boxed_local()
     }
-    pub fn create_variable_ext(&self, tree: Tree) -> Tree {
+    // returns outside and inside
+    pub fn create_waiting_ext(&self) -> (Tree, Tree) {
         use crate::icombs::net::Net;
-        fn f(net: &mut Net, tree: Result<Tree, Box<dyn Any>>, ext: Box<dyn Any>) {
+        let (v0, v1) = self
+            .shared
+            .net
+            .lock()
+            .as_mut()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .create_wire();
+        let (tx, rx) = async_watch::channel(false);
+        fn inside_f(net: &mut Net, tree: Result<Tree, Box<dyn Any>>, ext: Box<dyn Any>) {
+            let mut ext = ext.downcast::<WaitingInsideExt>().unwrap();
             match tree {
-                Ok(Tree::Ext(f, data)) => f(net, Err(ext), data),
-                Ok(a) => net.link(a, ext.downcast::<WaitingReadbackExt>().unwrap().0),
-                Err(other_ext) => {
-                    net.link(
-                        ext.downcast::<WaitingReadbackExt>().unwrap().0,
-                        other_ext.downcast::<WaitingReadbackExt>().unwrap().0,
-                    );
+                Ok(tree) => {
+                    ext.1.send(true);
+                    net.link(tree, ext.0);
                 }
+                Err(_) => unreachable!(),
             }
         }
-        Tree::ext(f, WaitingReadbackExt(tree))
+        fn outside_f(net: &mut Net, tree: Result<Tree, Box<dyn Any>>, ext: Box<dyn Any>) {
+            let mut ext = ext.downcast::<WaitingOutsideExt>().unwrap();
+            match tree {
+                Ok(Tree::Ext(f, data)) => f(net, Err(ext), data),
+                Ok(Tree::Era) => {}
+                Ok(Tree::Con(a, b)) => {
+                    let (v0, v1) = net.create_wire();
+                    let (w0, w1) = net.create_wire();
+                    net.link(ext.0, Tree::c(v0, w0));
+                    net.link(
+                        *a,
+                        Tree::ext(outside_f, WaitingOutsideExt(v1, ext.1.clone())),
+                    );
+                    net.link(
+                        *b,
+                        Tree::ext(outside_f, WaitingOutsideExt(w1, ext.1.clone())),
+                    );
+                }
+                Ok(tree) => {
+                    net.link(tree, ext.0);
+                }
+                Err(_) => unreachable!(),
+            }
+        }
+        (
+            Tree::ext(outside_f, WaitingOutsideExt(v0, rx)),
+            Tree::ext(inside_f, WaitingInsideExt(v1, tx)),
+        )
     }
     pub fn spawn(&self, f: impl Future<Output = ()> + 'static) {
         use futures::task::SpawnExt;
@@ -367,7 +418,7 @@ pub enum ReadbackResult<Name: Clone> {
     Expand(Box<ReadbackResult<Name>>),
     Halted(TypedTree<Name>),
     Unsupported(TypedTree<Name>),
-    Waiting(TypedTree<Name>),
+    Waiting(TypedTree<Name>, async_watch::Receiver<bool>),
     Variable(usize),
 }
 

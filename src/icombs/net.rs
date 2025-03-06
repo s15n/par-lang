@@ -236,6 +236,20 @@ impl Net {
             _ => {}
         }
     }
+    pub fn substitute_ref(&self, tree: &Tree) -> Tree {
+        match tree {
+            Tree::Con(a, b) => Tree::c(self.substitute_ref(a), self.substitute_ref(b)),
+            Tree::Dup(a, b) => Tree::d(self.substitute_ref(a), self.substitute_ref(b)),
+            Tree::Var(id) => {
+                if let Some(Some(a)) = self.vars.get(id) {
+                    self.substitute_ref(&a)
+                } else {
+                    tree.clone()
+                }
+            }
+            _ => tree.clone(),
+        }
+    }
     pub fn normal(&mut self) {
         while self.reduce_one() {}
         // dereference all variables
@@ -333,5 +347,12 @@ impl Net {
             .unwrap();
         }
         s
+    }
+    pub fn is_active(&self, tree: &Tree) -> bool {
+        if let Tree::Var(_) = self.substitute_ref(tree) {
+            false
+        } else {
+            true
+        }
     }
 }

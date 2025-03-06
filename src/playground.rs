@@ -299,7 +299,7 @@ impl Playground {
                         inner: ReadbackStateInner {
                             net: Some(net),
                             shared,
-                            needs_further_readback: false,
+                            needs_further_readback: Default::default(),
                             path: vec![],
                         },
                     })

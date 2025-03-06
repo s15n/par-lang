@@ -12,3 +12,4 @@ egui_code_editor = "0.2.12"
 indexmap = "2.7.0"
 tokio = { version = "1.43.0", features = ["rt-multi-thread", "macros"] }
 stacker = "0.1.19"
+async-watch = "0.3.1"
