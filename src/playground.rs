@@ -9,11 +9,7 @@ use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use indexmap::IndexMap;
 
 use crate::{
-    icombs::{
-        compile_file,
-        readback::{ReadbackResult, SharedState},
-        IcCompiled,
-    },
+    icombs::{compile_file, IcCompiled},
     interact::{Event, Handle, Request},
     par::{
         language::{CompileError, Internal},
@@ -22,7 +18,7 @@ use crate::{
         runtime::{self, Context, Operation},
         types::{self, Type, TypeError},
     },
-    readback::{prepare_type_for_readback, ReadbackState, ReadbackStateInner},
+    readback::{prepare_type_for_readback, ReadbackState},
     spawn::TokioSpawn,
 };
 
@@ -162,8 +158,9 @@ impl Compiled {
 
 #[derive(Clone)]
 pub(crate) struct Checked {
-    pub(crate) program:
+    pub(crate) program: Arc<
         Program<Internal<Name>, Arc<Expression<Loc, Internal<Name>, Type<Loc, Internal<Name>>>>>,
+    >,
     pub(crate) ic_compiled: Option<crate::icombs::IcCompiled>,
 }
 
@@ -177,7 +174,7 @@ impl Checked {
         // attempt to compile to interaction combinators
         Checked {
             ic_compiled: Some(compile_file(&program)),
-            program,
+            program: Arc::new(program),
         }
     }
 }
@@ -272,9 +269,11 @@ impl Playground {
     fn readback(
         readback_state: &mut Option<ReadbackState<Internal<Name>>>,
         ui: &mut egui::Ui,
-        program: &Program<
-            Internal<Name>,
-            Arc<Expression<Loc, Internal<Name>, Type<Loc, Internal<Name>>>>,
+        program: Arc<
+            Program<
+                Internal<Name>,
+                Arc<Expression<Loc, Internal<Name>, Type<Loc, Internal<Name>>>>,
+            >,
         >,
         compiled: &IcCompiled,
     ) {
@@ -291,18 +290,14 @@ impl Playground {
                     let mut net = compiled.create_net();
                     let mut tree = compiled.get_with_name(&internal_name).unwrap();
                     net.freshen_variables(&mut tree);
-                    let shared = SharedState::default();
-                    let ty = prepare_type_for_readback(program, ty.clone());
+                    let ty = prepare_type_for_readback(&program, ty.clone());
                     let tree = tree.with_type(ty.clone());
-                    *readback_state = Some(ReadbackState {
-                        result: ReadbackResult::Halted(tree),
-                        inner: ReadbackStateInner {
-                            net: Some(net),
-                            shared,
-                            needs_further_readback: Default::default(),
-                            path: vec![],
-                        },
-                    })
+                    *readback_state = Some(ReadbackState::initialize(
+                        ui,
+                        net,
+                        tree,
+                        Arc::new(TokioSpawn),
+                    ));
                 }
             }
         }
@@ -390,7 +385,7 @@ impl Playground {
                                     Self::readback(
                                         &mut self.readback_state,
                                         ui,
-                                        &checked.program,
+                                        checked.program.clone(),
                                         ic_compiled,
                                     );
                                 },
@@ -438,7 +433,7 @@ impl Playground {
                                 }
 
                                 if let Some(rb) = &mut self.readback_state {
-                                    rb.show_readback(ui, &checked.program)
+                                    rb.show_readback(ui, checked.program.clone())
                                 }
                             }
                         } else if let Err(err) = checked {

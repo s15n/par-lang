@@ -1,19 +1,31 @@
-use eframe::egui::{self, Color32, RichText, Stroke};
+use eframe::egui::{self, Color32, RichText};
 use futures::{
-    channel::oneshot,
-    future::{join_all, LocalBoxFuture},
-    stream::FuturesUnordered,
+    channel::oneshot::{channel, Sender},
+    future::{join, BoxFuture},
+    task::{Spawn, SpawnExt},
+    FutureExt,
 };
+
+use crate::icombs::{net::number_to_string, Net};
+
+pub trait NameRequiredTraits:
+    Clone + Hash + Eq + core::fmt::Debug + Ord + Display + Send + Sync + 'static
+{
+}
+
+impl<T: Clone + Hash + Eq + core::fmt::Debug + Ord + Display + Send + Sync + 'static>
+    NameRequiredTraits for T
+{
+}
 
 use crate::{
     icombs::{
         compiler::TypedTree,
-        net::number_to_string,
         readback::{ReadbackResult, SharedState},
         Tree,
     },
     par::{
-        parse::{Loc, Name, Program},
+        parse::{Loc, Program},
         process::Expression,
         types::Type,
     },
@@ -22,247 +34,390 @@ use crate::{
 use core::fmt::{Debug, Display};
 use std::{
     hash::Hash,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{Arc, Mutex},
 };
 
-#[derive(Debug, Clone)]
-pub enum PathElement {
-    ParLeft,
-    ParRight,
-    TimesLeft,
-    TimesRight,
-}
-
-type Prog<Name> = Program<Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>;
-#[derive(Debug)]
+type Prog<Name> = Arc<Program<Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>>;
+#[derive(Clone)]
 pub struct ReadbackStateInner {
-    pub net: Option<crate::icombs::net::Net>,
     pub shared: SharedState,
-    pub needs_further_readback: Arc<AtomicBool>,
-    pub path: Vec<PathElement>,
+    pub spawner: Arc<dyn Spawn + Send + Sync>,
 }
 
-impl Clone for ReadbackStateInner {
-    fn clone(&self) -> Self {
+pub struct Handle<Name: NameRequiredTraits> {
+    refresh: Arc<dyn Fn() + Send + Sync>,
+    history: Vec<Event<Name>>,
+    end: Option<Request<Name>>,
+    net: Arc<Mutex<Net>>,
+}
+
+impl<Name: NameRequiredTraits> Handle<Name> {
+    fn child(&self) -> Self {
         Self {
-            net: None,
-            shared: self.shared.clone(),
-            needs_further_readback: self.needs_further_readback.clone(),
-            path: self.path.clone(),
+            refresh: self.refresh.clone(),
+            history: vec![],
+            end: None,
+            net: self.net.clone(),
         }
+    }
+    fn add_event(&mut self, ev: Event<Name>) {
+        self.history.push(ev);
+        (self.refresh)()
+    }
+    fn set_end(&mut self, end: Option<Request<Name>>) {
+        self.end = end;
+        (self.refresh)()
     }
 }
 
 #[derive(Debug)]
-pub struct ReadbackState<Name: Clone> {
-    pub result: ReadbackResult<Name>,
-    pub inner: ReadbackStateInner,
+enum Request<Name: NameRequiredTraits> {
+    Waiting,
+    Port(TypedTree<Name>),
+    Expand(TypedTree<Name>),
+    Variable(usize),
+    Choose(Tree, Vec<(Name, Tree, TypedTree<Name>)>),
 }
 
-impl<Name: Clone + Hash + Eq + core::fmt::Debug + Ord + Display + 'static> ReadbackState<Name> {
-    pub fn show_readback(&mut self, ui: &mut egui::Ui, prog: &Prog<Name>) {
-        use std::sync::atomic::Ordering;
-        let shared = self.inner.shared.clone();
+#[derive(Debug)]
+pub enum Event<Name: NameRequiredTraits> {
+    Send(Arc<Mutex<Handle<Name>>>),
+    Receive(Arc<Mutex<Handle<Name>>>),
+    Break,
+    Continue,
+    Either(Name),
+    Choose(Name),
+}
 
-        self.inner.set_needs_further_readback();
-        while self.inner.needs_further_readback.load(Ordering::Relaxed) {
-            self.inner
-                .needs_further_readback
-                .store(false, std::sync::atomic::Ordering::Release);
-            let mut net = core::mem::take(&mut self.inner.net).unwrap();
-            let fut = async {
-                self.inner.carry_out_readback(&mut self.result, prog).await;
-            };
-            shared.execute(&mut net, fut);
-            self.inner.net = Some(net);
+impl<Name: NameRequiredTraits> Debug for Handle<Name> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Handle").finish_non_exhaustive()
+    }
+}
+
+pub struct ReadbackState<Name: NameRequiredTraits> {
+    pub root: Arc<Mutex<Handle<Name>>>,
+    pub inner: ReadbackStateInner,
+    // it's OK that this is unused, because we only use it to drop it when we're dropped.
+    #[allow(unused)]
+    pub net_tx: Sender<()>,
+}
+
+impl<Name: NameRequiredTraits> ReadbackState<Name> {
+    pub fn show_readback(&mut self, ui: &mut egui::Ui, prog: Prog<Name>) {
+        self.inner.show_handle(ui, self.root.clone(), prog);
+    }
+    pub fn initialize(
+        ui: &mut egui::Ui,
+        net: Net,
+        tree: TypedTree<Name>,
+        spawner: Arc<dyn Spawn + Send + Sync>,
+    ) -> Self {
+        let ctx = ui.ctx().clone();
+        let handle = Handle {
+            refresh: Arc::new(move || {
+                ctx.request_repaint();
+            }),
+            history: vec![],
+            end: Some(Request::Port(tree)),
+            net: Arc::new(Mutex::new(net)),
+        };
+        let (net_tx, net_rx) = channel();
+        let shared = SharedState::with_net(handle.net.clone());
+        // the net_tx channel gets dropped when the readback state is dropped.
+        spawner.spawn(shared.create_net_reducer(net_rx)).unwrap();
+        Self {
+            root: Arc::new(Mutex::new(handle)),
+            net_tx: net_tx,
+            inner: ReadbackStateInner {
+                shared,
+                spawner: spawner,
+            },
         }
-
-        self.inner.show_readback(ui, &mut self.result, prog);
     }
 }
 // first, we render as deep as we can. Button clicks replace nodes by a Halt node
 // then, we read back, replacing Halt nodes with other nodes. This is the async part
 impl ReadbackStateInner {
-    pub fn set_needs_further_readback(&self) {
-        self.needs_further_readback
-            .store(true, std::sync::atomic::Ordering::Release);
-    }
-    pub fn show_readback<Name: Clone + Hash + Eq + core::fmt::Debug + Ord + Display + 'static>(
+    pub fn show_handle<Name: NameRequiredTraits>(
         &mut self,
         ui: &mut egui::Ui,
-        res: &mut ReadbackResult<Name>,
-        prog: &Prog<Name>,
+        handle: Arc<Mutex<Handle<Name>>>,
+        prog: Prog<Name>,
     ) {
-        use ReadbackResult::*;
         egui::Frame::default()
             .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
             .inner_margin(egui::Margin::same(4))
             .outer_margin(egui::Margin::same(2))
             .show(ui, |ui| {
-                let mut replace_by = None;
-                match res {
-                    Break => {
-                        ui.code("!");
-                    }
-                    Continue => {
-                        ui.code("?");
-                    }
-                    Send(arg, bod) => {
-                        ui.vertical(|ui| {
-                            self.path.push(PathElement::TimesLeft);
-                            self.show_readback(ui, arg, prog);
-                            self.path.pop();
-                            self.path.push(PathElement::TimesRight);
-                            self.show_readback(ui, bod, prog);
-                            self.path.pop();
-                        });
-                    }
-                    Receive(arg, bod) => {
-                        ui.horizontal(|ui| {
-                            self.path.push(PathElement::ParLeft);
-                            self.show_readback(ui, arg, prog);
-                            self.path.pop();
-                            self.path.push(PathElement::ParRight);
-                            self.show_readback(ui, bod, prog);
-                            self.path.pop();
-                        });
-                    }
-                    Either(name, payload) => {
-                        ui.code(format!(".{name}"));
-                        self.show_readback(ui, payload, prog);
-                    }
-                    Choice(ctx, cases) => {
-                        ui.vertical(|ui| {
-                            for (name, ctx_in, payload) in cases {
-                                if ui.button(format!("{name}")).clicked() {
-                                    use crate::icombs::net::Tree;
-                                    self.net.as_mut().unwrap().link(
-                                        core::mem::replace(ctx, Tree::e()),
-                                        core::mem::replace(ctx_in, Tree::e()),
+                ui.vertical(|ui| {
+                    for event in handle.lock().unwrap().history.iter_mut() {
+                        let prog = prog.clone();
+                        match event {
+                            Event::Send(handle) => {
+                                ui.horizontal(|ui| {
+                                    ui.label("+");
+                                    self.show_handle(ui, handle.clone(), prog);
+                                });
+                            }
+                            Event::Receive(handle) => {
+                                ui.horizontal(|ui| {
+                                    ui.label("-");
+                                    self.show_handle(ui, handle.clone(), prog);
+                                });
+                            }
+                            Event::Either(name) => {
+                                ui.horizontal(|ui| {
+                                    ui.label("+");
+                                    ui.label(
+                                        RichText::from(name.to_string())
+                                            .color(Color32::WHITE)
+                                            .strong(),
                                     );
-                                    let payload = core::mem::replace(
-                                        payload,
-                                        Box::new(ReadbackResult::Break),
+                                });
+                            }
+                            Event::Choose(name) => {
+                                ui.horizontal(|ui| {
+                                    ui.label("-");
+                                    ui.label(
+                                        RichText::from(name.to_string()).color(Color32::WHITE),
                                     );
-                                    replace_by = Some(*payload);
-                                    self.set_needs_further_readback();
-                                    break;
+                                });
+                            }
+                            Event::Break => {
+                                ui.horizontal(|ui| {
+                                    ui.label("+");
+                                    ui.label(RichText::from("!").color(Color32::WHITE).strong());
+                                });
+                            }
+                            Event::Continue => {
+                                ui.horizontal(|ui| {
+                                    ui.label("-");
+                                    ui.label(RichText::from("!").color(Color32::WHITE));
+                                });
+                            }
+                        }
+                    }
+                    let mut lock = handle.lock().unwrap();
+                    if let Some(end) = lock.end.as_mut() {
+                        match end {
+                            port @ Request::Port(..) => {
+                                let Request::Port(port) =
+                                    core::mem::replace(port, Request::Waiting)
+                                else {
+                                    unreachable!()
+                                };
+
+                                let shared = self.shared.clone();
+                                {
+                                    let handle = handle.clone();
+                                    let mut this = self.clone();
+                                    self.spawner
+                                        .spawn(async move {
+                                            let port = shared.read_with_type(port).await;
+                                            this.readback_result(handle, port, prog).await;
+                                        })
+                                        .unwrap();
+                                }
+                                (lock.refresh)()
+                            }
+                            Request::Waiting => {
+                                ui.label(RichText::from("waiting").italics());
+                            }
+                            Request::Choose(ctx, options) => {
+                                let mut chosen = None;
+                                ui.vertical(|ui| {
+                                    for (idx, (name, _, _)) in options.iter().enumerate() {
+                                        if ui
+                                            .button(
+                                                RichText::new(name.to_string())
+                                                    .color(Color32::WHITE),
+                                            )
+                                            .clicked()
+                                        {
+                                            chosen = Some(idx);
+                                        }
+                                    }
+                                });
+                                if let Some(chosen) = chosen {
+                                    let Some(Request::Choose(ctx, options)) =
+                                        core::mem::replace(&mut lock.end, Some(Request::Waiting))
+                                    else {
+                                        unreachable!()
+                                    };
+                                    let mut ctx = Some(ctx);
+                                    for (idx, (name, ctx_here, payload)) in
+                                        options.into_iter().enumerate()
+                                    {
+                                        let this = self.clone();
+                                        let handle = handle.clone();
+                                        let prog = prog.clone();
+                                        if idx == chosen {
+                                            lock.add_event(Event::Choose(name));
+                                            let ctx = ctx.take().unwrap();
+                                            self.spawner
+                                                .spawn(async move {
+                                                    let mut this2 = this.clone();
+                                                    join(
+                                                        this.shared.add_redex(ctx_here, ctx),
+                                                        this2.readback_result(
+                                                            handle,
+                                                            ReadbackResult::Halted(payload),
+                                                            prog,
+                                                        ),
+                                                    )
+                                                    .await;
+                                                })
+                                                .unwrap();
+                                        } else {
+                                            self.spawner
+                                                .spawn(async move {
+                                                    join(
+                                                        this.shared.add_redex(ctx_here, Tree::e()),
+                                                        this.shared
+                                                            .add_redex(payload.tree, Tree::e()),
+                                                    )
+                                                    .await;
+                                                })
+                                                .unwrap();
+                                        }
+                                    }
                                 }
                             }
-                        });
+                            Request::Expand(package) => {
+                                if ui
+                                    .button(
+                                        RichText::from("expand").italics().color(Color32::WHITE),
+                                    )
+                                    .clicked()
+                                {
+                                    let Some(Request::Expand(package)) =
+                                        core::mem::replace(&mut lock.end, Some(Request::Waiting))
+                                    else {
+                                        unreachable!()
+                                    };
+                                    let handle = handle.clone();
+                                    let this = self.clone();
+                                    self.spawner
+                                        .spawn(async move {
+                                            let tree = this.shared.expand_once(package.tree).await;
+                                            let mut lock = handle.lock().unwrap();
+                                            lock.end =
+                                                Some(Request::Port(tree.with_type(package.ty)));
+                                        })
+                                        .unwrap();
+                                }
+                            }
+                            Request::Variable(id) => {
+                                ui.horizontal(|ui| {
+                                    ui.label("Variable: ");
+                                    ui.label(
+                                        RichText::new(number_to_string(*id))
+                                            .color(Color32::WHITE)
+                                            .code(),
+                                    );
+                                });
+                            }
+                        }
                     }
-                    Variable(id) => {
-                        ui.label(RichText::from(number_to_string(*id)).italics());
-                    }
-                    Halted(tree) => {
-                        ui.label(RichText::from("working").italics());
-                        self.set_needs_further_readback();
-                    }
-                    Waiting(tree, rx) => {
-                        ui.label(RichText::from("waiting").italics());
-                    }
-                    ref tree => {
-                        ui.code(format!("{tree:?}"));
-                    }
-                }
-                if let Some(a) = replace_by {
-                    *res = a;
-                }
+                });
             });
     }
-    pub fn with_path(mut self, e: PathElement) -> Self {
-        self.path.push(e);
-        self
-    }
-    pub fn carry_out_readback<
-        'a,
-        Name: Clone + Hash + Eq + core::fmt::Debug + Ord + Display + 'static,
-    >(
-        &'a mut self,
-        res: &'a mut ReadbackResult<Name>,
-        prog: &'a Prog<Name>,
-    ) -> LocalBoxFuture<'a, ()> {
-        use futures::FutureExt;
+    pub fn readback_result<Name: NameRequiredTraits>(
+        &mut self,
+        handle: Arc<Mutex<Handle<Name>>>,
+        port: ReadbackResult<Name>,
+        prog: Prog<Name>,
+    ) -> BoxFuture<()> {
         async move {
-            use ReadbackResult::*;
-            let mut replace_by = None;
-            match res {
-                Break => {}
-                Continue => {}
-                Send(arg, bod) => {
-                    futures::future::join(
-                        self.clone()
-                            .with_path(PathElement::TimesLeft)
-                            .carry_out_readback(arg, prog),
-                        self.clone()
-                            .with_path(PathElement::TimesRight)
-                            .carry_out_readback(bod, prog),
+            let handle_2 = handle.clone();
+            match port {
+                ReadbackResult::Break => {
+                    let mut lock = handle_2.lock().unwrap();
+                    lock.add_event(Event::Break);
+                    lock.end = None;
+                }
+                ReadbackResult::Continue => {
+                    let mut lock = handle_2.lock().unwrap();
+                    lock.add_event(Event::Continue);
+                    lock.end = None;
+                }
+                ReadbackResult::Send(lft, rgt) => {
+                    let child = {
+                        let mut lock = handle_2.lock().unwrap();
+                        let child = Arc::new(Mutex::new(lock.child()));
+                        lock.add_event(Event::Send(child.clone()));
+                        child
+                    };
+                    let mut this = self.clone();
+                    join(
+                        self.readback_result(child, *lft, prog.clone()),
+                        this.readback_result(handle, *rgt, prog),
                     )
                     .await;
                 }
-                Receive(arg, bod) => {
-                    futures::future::join(
-                        self.clone()
-                            .with_path(PathElement::ParLeft)
-                            .carry_out_readback(arg, prog),
-                        self.clone()
-                            .with_path(PathElement::ParRight)
-                            .carry_out_readback(bod, prog),
+                ReadbackResult::Receive(lft, rgt) => {
+                    let child = {
+                        let mut lock = handle_2.lock().unwrap();
+                        let child = Arc::new(Mutex::new(lock.child()));
+                        lock.add_event(Event::Receive(child.clone()));
+                        child
+                    };
+                    let mut this = self.clone();
+                    join(
+                        self.readback_result(child, *lft, prog.clone()),
+                        this.readback_result(handle, *rgt, prog),
                     )
                     .await;
                 }
-                Either(name, payload) => {
-                    self.carry_out_readback(payload, prog).await;
-                }
-                Choice(ctx, cases) => {
-                    let (v0, v1) = self
-                        .shared
-                        .shared
-                        .net
-                        .lock()
-                        .unwrap()
-                        .as_mut()
-                        .unwrap()
-                        .create_wire();
-                    let (ext1, mut ext0) = self.shared.create_waiting_ext();
-                    core::mem::swap(&mut ext0, ctx);
-                    println!("{:?} choice ", self.path);
-                    self.shared.add_redex(ext0, ext1).await;
-                }
-                Halted(tree) => {
-                    let mut tree = core::mem::take(tree);
-                    tree.ty = prepare_type_for_readback(prog, tree.ty);
-                    self.set_needs_further_readback();
-                    println!("Waiting for: {:?}", self.path);
-                    let mut res = self.shared.read_with_type(tree).await;
-                    self.carry_out_readback(&mut res, prog).await;
-                    println!("Finished: {:?}", self.path);
-                    replace_by = Some(res);
-                }
-                Waiting(tree, rx) => {
-                    if *rx.borrow() == true {
-                        self.set_needs_further_readback();
-                        replace_by = Some(ReadbackResult::Halted(core::mem::take(tree)));
+                ReadbackResult::Either(name, payload) => {
+                    {
+                        let mut lock = handle_2.lock().unwrap();
+                        lock.add_event(Event::Either(name));
                     }
+                    self.readback_result(handle, *payload, prog).await;
                 }
-                _ => {}
-            }
-            if let Some(a) = replace_by {
-                *res = a;
+                ReadbackResult::Choice(ctx_in, options) => {
+                    let mut lock = handle_2.lock().unwrap();
+                    lock.set_end(Some(Request::Choose(ctx_in, options)));
+                }
+                ReadbackResult::Expand(package) => {
+                    let mut lock = handle_2.lock().unwrap();
+                    lock.set_end(Some(Request::Expand(package)));
+                }
+                ReadbackResult::Halted(mut tree) => {
+                    let mut this = self.clone();
+                    self.spawner
+                        .spawn(async move {
+                            tree.ty = prepare_type_for_readback(&prog, tree.ty);
+                            let res = this.shared.read_with_type(tree).await;
+                            this.readback_result(handle, res, prog).await;
+                        })
+                        .unwrap();
+                }
+                ReadbackResult::Variable(id) => {
+                    let mut lock = handle_2.lock().unwrap();
+                    lock.set_end(Some(Request::Variable(id)));
+                }
+                e => {
+                    eprintln!("Don't know how to read back: {e:?}");
+                }
             }
         }
-        .boxed_local()
+        .boxed()
     }
 }
-pub fn prepare_type_for_readback<Name: Clone + Eq + Hash + std::fmt::Debug>(
+pub fn prepare_type_for_readback<Name: NameRequiredTraits>(
     program: &Program<Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>,
-    ty: Type<Loc, Name>,
+    mut ty: Type<Loc, Name>,
 ) -> Type<Loc, Name> {
-    match ty {
-        Type::Name(_, name, args) => program.dereference_type_def(&name, &args),
-        Type::DualName(_, name, args) => program.dereference_type_def(&name, &args).dual(),
-        Type::Recursive(_, label, body) => Type::expand_recursive(&label, &*body),
-        Type::Iterative(_, label, body) => Type::expand_iterative(&label, &*body),
-        ty => ty,
+    loop {
+        ty = match ty {
+            Type::Name(_, name, args) => program.dereference_type_def(&name, &args),
+            Type::DualName(_, name, args) => program.dereference_type_def(&name, &args).dual(),
+            Type::Recursive(_, label, body) => Type::expand_recursive(&label, &*body),
+            Type::Iterative(_, label, body) => Type::expand_iterative(&label, &*body),
+            ty => break ty,
+        };
     }
 }

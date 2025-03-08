@@ -28,8 +28,15 @@ pub enum Tree {
     Var(usize),
     Package(usize),
     Ext(
-        Box<dyn FnOnce(&mut Net, Result<Tree, Box<dyn Any>>, Box<dyn Any>)>,
-        Box<dyn Any>,
+        Box<
+            dyn FnOnce(
+                    &mut Net,
+                    Result<Tree, Box<dyn Any + Send + Sync>>,
+                    Box<dyn Any + Send + Sync>,
+                ) + Send
+                + Sync,
+        >,
+        Box<dyn Any + Send + Sync>,
     ),
 }
 
@@ -44,8 +51,11 @@ impl Tree {
         Tree::Era
     }
     pub fn ext(
-        f: impl FnOnce(&mut Net, Result<Tree, Box<dyn Any>>, Box<dyn Any>) + 'static,
-        a: impl Any,
+        f: impl FnOnce(&mut Net, Result<Tree, Box<dyn Any + Send + Sync>>, Box<dyn Any + Send + Sync>)
+            + 'static
+            + Send
+            + Sync,
+        a: impl Any + Send + Sync,
     ) -> Tree {
         Tree::Ext(Box::new(f), Box::new(a))
     }
@@ -259,7 +269,14 @@ impl Net {
     }
     pub fn link(&mut self, a: Tree, b: Tree) {
         if let Tree::Var(id) = a {
-            match self.vars.remove(&id).unwrap() {
+            match self.vars.remove(&id).unwrap_or_else(||{
+                panic!("A variable, with id {id}, was linked to more than twice\n\
+                    This is an internal Par bug, which can be caused by many things, such as incorrectly cloning `Tree`s\n\
+                    This happened while linking\n\
+                    \t{a:?}\nand\n\t{b:?}",
+                )
+
+            }) {
                 Some(a) => {
                     self.link(a, b);
                 }

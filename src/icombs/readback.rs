@@ -1,32 +1,25 @@
 use futures::{
     channel::oneshot::{channel, Receiver, Sender},
-    executor::LocalPool,
-    future::{Either, LocalBoxFuture},
-    task::{LocalSpawnExt, SpawnExt},
+    future::{select, BoxFuture, Either},
     FutureExt, SinkExt, StreamExt,
 };
 use std::{
     any::Any,
     fmt::Debug,
-    future::{poll_fn, Future},
+    future::Future,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     },
-    task::{Context, RawWakerVTable, Waker},
 };
 
-use crate::par::{
-    parse::{Loc, Name},
-    types::Type,
-};
+use crate::par::{parse::Loc, types::Type};
 
-use super::{compiler::TypedTree, Tree};
+use super::{compiler::TypedTree, Net, Tree};
 
 #[derive(Default)]
 pub struct CoroState {
-    executor: Mutex<futures::executor::LocalPool>,
-    pub(crate) net: Mutex<Option<super::net::Net>>,
+    pub(crate) net: Arc<Mutex<Net>>,
     new_redex: Mutex<Vec<futures::channel::mpsc::Sender<()>>>,
     new_var: AtomicUsize,
 }
@@ -34,7 +27,6 @@ pub struct CoroState {
 impl Debug for CoroState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CoroState")
-            .field("executor", &self.executor)
             .field("net", &self.net)
             .field("new_redex", &self.new_redex)
             .field("new_var", &self.new_var)
@@ -63,7 +55,31 @@ pub enum PortContents {
     Tree(Tree),
 }
 
+fn do_copy(
+    net: &mut Net,
+    root: Tree,
+    a: Tree,
+    b: Tree,
+    cons: fn(Tree, Tree) -> Tree,
+    build: impl Fn(Tree) -> Tree,
+) {
+    let (v0, v1) = net.create_wire();
+    let (w0, w1) = net.create_wire();
+    net.link(root, cons(v0, w0));
+    net.link(a, build(v1));
+    net.link(b, build(w1));
+}
+
 impl SharedState {
+    pub fn with_net(net: Arc<Mutex<Net>>) -> Self {
+        Self {
+            shared: Arc::new(CoroState {
+                net,
+                new_redex: Default::default(),
+                new_var: Default::default(),
+            }),
+        }
+    }
     pub fn make_oneshot_ext_from_tx(tx: Sender<PortContents>) -> Tree {
         Tree::ext(
             move |net, tree, ext| {
@@ -105,12 +121,50 @@ impl SharedState {
         let tree = Self::make_oneshot_ext_from_tx(tx);
         (tree, rx)
     }
+    pub async fn expand_once(&self, tree: Tree) -> Tree {
+        struct ExpandOnceExt(Tree);
+
+        fn expand_once_f(
+            net: &mut Net,
+            tree: Result<Tree, Box<dyn Any + Send + Sync>>,
+            ext: Box<dyn Any + Send + Sync>,
+        ) {
+            let ext = ext.downcast::<ExpandOnceExt>().unwrap();
+            match tree {
+                Ok(Tree::Ext(f, data)) => f(net, Err(ext), data),
+                Ok(Tree::Era) => net.link(ext.0, Tree::e()),
+                Ok(Tree::Con(a, b)) => {
+                    do_copy(net, ext.0, *a, *b, Tree::c, |w| {
+                        Tree::ext(expand_once_f, ExpandOnceExt(w))
+                    });
+                }
+                Ok(Tree::Dup(a, b)) => {
+                    do_copy(net, ext.0, *a, *b, Tree::d, |w| {
+                        Tree::ext(expand_once_f, ExpandOnceExt(w))
+                    });
+                }
+                Ok(Tree::Package(id)) => {
+                    let package = net.dereference_package(id);
+                    net.link(package, ext.0);
+                }
+                Ok(tree) => {
+                    net.link(tree, ext.0);
+                }
+                Err(_) => unreachable!(),
+            }
+        }
+        let (v0, v1) = self.shared.net.lock().unwrap().create_wire();
+        self.add_redex(tree, Tree::ext(expand_once_f, ExpandOnceExt(v1)))
+            .await;
+        v0
+    }
     // this is async because it will only work when ran under an async context.
     pub async fn add_redex(&self, a: Tree, b: Tree) {
-        for i in self.shared.new_redex.lock().unwrap().iter_mut() {
+        self.shared.net.lock().unwrap().link(a, b);
+        let notify_tgts = self.shared.new_redex.lock().unwrap().clone();
+        for mut i in notify_tgts {
             let _ = i.send(()).await;
         }
-        self.shared.net.lock().unwrap().as_mut().unwrap().link(a, b)
     }
     pub async fn read_port(&self, tree: Tree) -> PortContents {
         let (ext, rx) = self.make_oneshot_ext();
@@ -130,23 +184,22 @@ impl SharedState {
     }
     pub async fn as_con(&self, tree: Tree) -> (Tree, Tree) {
         match tree {
-            Tree::Con(a, b) => ((*a, *b)),
+            Tree::Con(a, b) => (*a, *b),
             other => {
                 // eta expand
-                let mut binding = self.shared.net.lock().unwrap();
-                let net = binding.as_mut().unwrap();
-                let (v0, v1) = net.create_wire();
-                let (w0, w1) = net.create_wire();
-                drop(binding);
+                let ((v0, v1), (w0, w1)) = {
+                    let mut net = self.shared.net.lock().unwrap();
+                    (net.create_wire(), net.create_wire())
+                };
                 self.add_redex(other, Tree::c(v0, w0)).await;
-                ((v1, w1))
+                (v1, w1)
             }
         }
     }
     pub async fn as_era(&self, tree: Tree) -> () {
         match tree {
             Tree::Era => (),
-            other => todo!(),
+            _ => todo!("TODO: Eta-reduce trees that are eta-equivalent to erasers"),
         }
     }
     /// Eagerly read back a CON node.
@@ -165,7 +218,7 @@ impl SharedState {
     pub async fn as_times(&self, tree: Tree) -> (Tree, Tree) {
         self.as_con(tree).await
     }
-    pub fn flatten_multiplexed(&self, tree: Tree, len: usize) -> LocalBoxFuture<Vec<Tree>> {
+    pub fn flatten_multiplexed(&self, tree: Tree, len: usize) -> BoxFuture<Vec<Tree>> {
         use futures::future::FutureExt;
         async move {
             if len == 0 {
@@ -184,19 +237,19 @@ impl SharedState {
                 .concat()
             }
         }
-        .boxed_local()
+        .boxed()
     }
     pub async fn as_either<Name>(&self, tree: Tree, variants: Vec<Name>) -> (Name, Tree) {
         // TODO: we might have to eta-reduce `context` here
         // because it's possible that it's link to the context variable in the variant is eta-expnded
         // A less brittle solution is to make this interact with a `choice`
-        let (context, possibilities) = self.as_con(tree).await;
+        let (_context, possibilities) = self.as_con(tree).await;
         let possibilities = self
             .flatten_multiplexed(possibilities, variants.len())
             .await;
         let mut name_payload = None;
         for (possible, name) in possibilities.into_iter().zip(variants) {
-            if let Tree::Con(a, b) = self.read_port_as_tree(possible).await {
+            if let Tree::Con(_ctx, b) = self.read_port_as_tree(possible).await {
                 name_payload = Some((name, *b));
             }
         }
@@ -216,21 +269,19 @@ impl SharedState {
         }
         (context, res)
     }
-    pub async fn read_with_type<Name: Clone + Ord + std::hash::Hash + 'static + Debug>(
+    pub async fn read_with_type<Name: Clone + Ord + std::hash::Hash + 'static + Debug + Send>(
         &self,
         tree: TypedTree<Name>,
     ) -> ReadbackResult<Name> {
         let ty = tree.ty;
         let port = self.read_port(tree.tree).await;
-        println!("Port: {port:?}");
-        println!("Ty: {ty:?}");
         self.as_with_type(port, ty).await
     }
-    pub fn as_with_type<Name: Clone + Ord + std::hash::Hash + 'static + Debug>(
+    pub fn as_with_type<Name: Clone + Ord + std::hash::Hash + 'static + Debug + Send>(
         &self,
         port: PortContents,
         ty: Type<Loc, Name>,
-    ) -> LocalBoxFuture<ReadbackResult<Name>> {
+    ) -> BoxFuture<ReadbackResult<Name>> {
         async move {
             let tree = match port {
                 PortContents::Aux(tx) => {
@@ -245,6 +296,9 @@ impl SharedState {
                 }
                 PortContents::AuxLazyPicked(n) => {
                     return ReadbackResult::Variable(n);
+                }
+                PortContents::Tree(Tree::Package(id)) => {
+                    return ReadbackResult::Expand(Tree::Package(id).with_type(ty));
                 }
                 PortContents::Tree(tree) => tree,
                 PortContents::Waiting(tree, rx) => {
@@ -291,8 +345,7 @@ impl SharedState {
                                 (
                                     name.clone(),
                                     b,
-                                    c.with_type(variants.get(&name).unwrap().clone())
-                                        .into_readback_result_boxed(),
+                                    c.with_type(variants.get(&name).unwrap().clone()),
                                 )
                             })
                             .collect(),
@@ -310,53 +363,55 @@ impl SharedState {
                 ty => ReadbackResult::Unsupported(tree.with_type(ty)),
             }
         }
-        .boxed_local()
+        .boxed()
     }
     // returns outside and inside
     pub fn create_waiting_ext(&self) -> (Tree, Tree) {
         use crate::icombs::net::Net;
-        let (v0, v1) = self
-            .shared
-            .net
-            .lock()
-            .as_mut()
-            .unwrap()
-            .as_mut()
-            .unwrap()
-            .create_wire();
+        let (v0, v1) = self.shared.net.lock().as_mut().unwrap().create_wire();
         let (tx, rx) = async_watch::channel(false);
-        fn inside_f(net: &mut Net, tree: Result<Tree, Box<dyn Any>>, ext: Box<dyn Any>) {
-            let mut ext = ext.downcast::<WaitingInsideExt>().unwrap();
+        fn inside_f(
+            net: &mut Net,
+            tree: Result<Tree, Box<dyn Any + Send + Sync>>,
+            ext: Box<dyn Any + Send + Sync>,
+        ) {
+            let ext = ext.downcast::<WaitingInsideExt>().unwrap();
             match tree {
                 Ok(tree) => {
-                    ext.1.send(true);
+                    let _ = ext.1.send(true);
                     net.link(tree, ext.0);
                 }
                 Err(_) => unreachable!(),
             }
         }
-        fn outside_f(net: &mut Net, tree: Result<Tree, Box<dyn Any>>, ext: Box<dyn Any>) {
-            let mut ext = ext.downcast::<WaitingOutsideExt>().unwrap();
+        fn outside_f(
+            net: &mut Net,
+            tree: Result<Tree, Box<dyn Any + Send + Sync>>,
+            ext: Box<dyn Any + Send + Sync>,
+        ) {
+            let ext = ext.downcast::<WaitingOutsideExt>().unwrap();
             match tree {
                 Ok(Tree::Ext(f, data)) => f(net, Err(ext), data),
-                Ok(Tree::Era) => {}
+                Ok(Tree::Era) => net.link(ext.0, Tree::e()),
                 Ok(Tree::Con(a, b)) => {
-                    let (v0, v1) = net.create_wire();
-                    let (w0, w1) = net.create_wire();
-                    net.link(ext.0, Tree::c(v0, w0));
-                    net.link(
-                        *a,
-                        Tree::ext(outside_f, WaitingOutsideExt(v1, ext.1.clone())),
-                    );
-                    net.link(
-                        *b,
-                        Tree::ext(outside_f, WaitingOutsideExt(w1, ext.1.clone())),
-                    );
+                    do_copy(net, ext.0, *a, *b, Tree::c, |w| {
+                        Tree::ext(outside_f, WaitingOutsideExt(w, ext.1.clone()))
+                    });
+                }
+                Ok(Tree::Dup(a, b)) => {
+                    do_copy(net, ext.0, *a, *b, Tree::d, |w| {
+                        Tree::ext(outside_f, WaitingOutsideExt(w, ext.1.clone()))
+                    });
                 }
                 Ok(tree) => {
                     net.link(tree, ext.0);
                 }
-                Err(_) => unreachable!(),
+                Err(ext2) => {
+                    if ext2.is::<WaitingOutsideExt>() {
+                    } else {
+                        unreachable!()
+                    }
+                }
             }
         }
         (
@@ -364,45 +419,30 @@ impl SharedState {
             Tree::ext(inside_f, WaitingInsideExt(v1, tx)),
         )
     }
-    pub fn spawn(&self, f: impl Future<Output = ()> + 'static) {
-        use futures::task::SpawnExt;
-        self.shared
-            .executor
-            .lock()
-            .unwrap()
-            .spawner()
-            .spawn_local(f)
-            .unwrap()
-    }
-    pub fn execute<T>(&self, net: &mut super::net::Net, f: impl Future<Output = T>) -> T {
-        *self.shared.net.lock().unwrap() = Some(core::mem::take(net));
+    pub fn create_net_reducer(
+        &self,
+        mut drop_channel: Receiver<()>,
+    ) -> impl Future<Output = ()> + Send + Sync {
         let (tx, mut rx) = futures::channel::mpsc::channel(16);
         self.shared.new_redex.lock().unwrap().push(tx);
         let shared = self.shared.clone();
-
-        let local_future = futures::future::select(
-            Box::pin(f),
-            Box::pin(async move {
-                loop {
-                    let mut binding = shared.net.lock().unwrap();
-                    let mut net = binding.as_mut().unwrap();
+        async move {
+            loop {
+                {
+                    let mut net = shared.net.lock().unwrap();
                     while net.reduce_one() {}
-                    drop(binding);
-                    rx.next().await.unwrap();
                 }
-            }),
-        );
-
-        let local_result = self.shared.executor.lock().unwrap().run_until(local_future);
-        let return_value = match local_result {
-            Either::Left((a, _)) => a,
-            Either::Right(((), left_fut)) => {
-                self.shared.executor.lock().unwrap().run_until(left_fut)
+                match select(drop_channel, rx.next()).await {
+                    Either::Left(_) => {
+                        return;
+                    }
+                    Either::Right((a, b)) => {
+                        a.unwrap();
+                        drop_channel = b;
+                    }
+                }
             }
-        };
-
-        *net = self.shared.net.lock().unwrap().take().unwrap();
-        return_value
+        }
     }
 }
 
@@ -414,8 +454,8 @@ pub enum ReadbackResult<Name: Clone> {
     Send(Box<ReadbackResult<Name>>, Box<ReadbackResult<Name>>),
     Receive(Box<ReadbackResult<Name>>, Box<ReadbackResult<Name>>),
     Either(Name, Box<ReadbackResult<Name>>),
-    Choice(Tree, Vec<(Name, Tree, Box<ReadbackResult<Name>>)>),
-    Expand(Box<ReadbackResult<Name>>),
+    Choice(Tree, Vec<(Name, Tree, TypedTree<Name>)>),
+    Expand(TypedTree<Name>),
     Halted(TypedTree<Name>),
     Unsupported(TypedTree<Name>),
     Waiting(TypedTree<Name>, async_watch::Receiver<bool>),

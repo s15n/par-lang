@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeSet,
     fmt::{Debug, Display},
     sync::Arc,
 };
@@ -55,7 +54,7 @@ pub struct Compiler<'program, Name: Debug + Clone + Eq + Hash + Ord> {
     vars: IndexMap<Var<Name>, (TypedTree<Name>, VariableKind)>,
     program: &'program Prog<Name>,
     global_name_to_id: IndexMap<Name, usize>,
-    type_variables: BTreeSet<Name>,
+    type_variables: Vec<Name>,
     id_to_ty: Vec<Type<Loc, Name>>,
     id_to_package: Vec<Tree>,
 }
@@ -91,7 +90,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
             Some(Some(typ)) => Some(typ),
             _ => None,
         };
-        let debug = name.to_string() == "t_3";
+        let debug = false;
         if debug {
             println!("{global:#?}");
         }
@@ -117,7 +116,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
         debug: bool,
     ) -> (usize, Type<Loc, Name>) {
         let old_net = core::mem::take(&mut self.net);
-        let mut tree = self.with_captures(&Captures::default(), |this| f(this));
+        let tree = self.with_captures(&Captures::default(), |this| f(this));
         self.net.ports.push_back(tree.tree);
 
         let id = self.id_to_package.len();
@@ -249,9 +248,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 self.with_captures(captures, |this| {
                     let (v0, v1) = this.create_typed_wire(typ.clone());
                     this.bind_variable(name, v0);
-                    //println!("Pre-fork: name = {}", this.net.show_tree(&v1.tree));
                     this.compile_process(proc);
-                    //println!("Post-fork: name = {}", this.net.show_tree(&v1.tree));
                     v1
                 })
             }
@@ -303,11 +300,11 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
     }
     fn normalize_type(&mut self, ty: Type<Loc, Name>) -> Type<Loc, Name> {
         match ty {
-            Type::Name(loc, name, args) => {
+            Type::Name(_, name, args) => {
                 let ty = self.program.dereference_type_def(&name, &args);
                 self.normalize_type(ty)
             }
-            Type::DualName(loc, name, args) => {
+            Type::DualName(_, name, args) => {
                 let ty = self.program.dereference_type_def(&name, &args).dual();
                 self.normalize_type(ty)
             }
@@ -319,10 +316,10 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 index_map.sort_keys();
                 Type::Choice(loc, index_map)
             }
-            Type::Recursive(loc, name, body) => {
+            Type::Recursive(_, name, body) => {
                 self.normalize_type(Type::expand_recursive(&name, &body))
             }
-            Type::Iterative(loc, name, body) => {
+            Type::Iterative(_, name, body) => {
                 self.normalize_type(Type::expand_iterative(&name, &body))
             }
             a => a,
@@ -343,6 +340,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
             // types get erased.
             Command::SendType(_, process) => {
                 let a = self.instantiate_variable(&name);
+                // TODO: Track type variables?
                 let Type::SendType(_, src_name, ret_type) = a.ty else {
                     unreachable!()
                 };
@@ -398,7 +396,6 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
             Command::Choose(chosen, process) => {
                 let a = self.instantiate_variable(&name);
 
-                println!("{:?}", a.ty);
                 let Type::Choice(_, branches) = self.normalize_type(a.ty) else {
                     unreachable!()
                 };
@@ -407,9 +404,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 };
                 let branch_index = branches.get_index_of(chosen).unwrap();
                 let (v0, v1) = self.create_typed_wire(branch_type.clone());
-                println!("{}.{}", branch_index, branches.len());
                 let choosing_tree = self.either_instance(v1.tree, branch_index, branches.len());
-                println!("{}", choosing_tree.show());
                 self.net.link(choosing_tree, a.tree);
                 self.bind_variable(&name, v0);
                 self.compile_process(process);
@@ -459,8 +454,6 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 }
                 let t = self.choice_instance(context_in, branches);
 
-                println!("{:?}", old_tree);
-                println!("{:?}", t);
                 self.net.link(old_tree.tree, t);
             }
             Command::Break => {
@@ -497,10 +490,10 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 let mut m_vars = vec![];
                 let mut m_kind = vec![];
                 for (k, (v, kind)) in core::mem::take(&mut self.vars) {
-                    m_vars.push(k.clone());
-                    m_trees.push(v.tree.clone());
-                    m_tys.push(v.ty.clone());
-                    m_kind.push(kind.clone());
+                    m_vars.push(k);
+                    m_trees.push(v.tree);
+                    m_tys.push(v.ty);
+                    m_kind.push(kind);
                 }
                 let context_in = multiplex_trees(m_trees);
 
@@ -514,7 +507,6 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                                 .insert(name.clone(), (v0.with_type(ty.clone()), kind.clone()));
                             m_trees.push(v1);
                         }
-                        println!("vars: {:?}", this.vars);
                         this.compile_process(process);
                         multiplex_trees(m_trees).with_type(Type::Break(External))
                     },
@@ -525,7 +517,6 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 self.net.link(context_in, Tree::Package(id));
             }
             Command::Loop(label) => {
-                println!("loop vars: {:?}", self.vars);
                 let (tree, _) = self.use_var(&Var::Loop(label.clone()));
                 self.vars.sort_keys();
                 let mut m_trees = vec![];
@@ -533,10 +524,10 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 let mut m_vars = vec![];
                 let mut m_kind = vec![];
                 for (k, (v, kind)) in core::mem::take(&mut self.vars) {
-                    m_vars.push(k.clone());
-                    m_trees.push(v.tree.clone());
-                    m_tys.push(v.ty.clone());
-                    m_kind.push(kind.clone());
+                    m_vars.push(k);
+                    m_trees.push(v.tree);
+                    m_tys.push(v.ty);
+                    m_kind.push(kind);
                 }
                 let context_in = multiplex_trees(m_trees);
                 self.net.link(tree.tree, context_in);
@@ -552,7 +543,7 @@ pub fn compile_file(program: &Prog<Internal<Name>>) -> IcCompiled {
         global_name_to_id: Default::default(),
         id_to_package: Default::default(),
         id_to_ty: Default::default(),
-        type_variables: BTreeSet::default(),
+        type_variables: Default::default(),
         program,
     };
     for k in compiler.program.definitions.clone().keys() {
