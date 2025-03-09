@@ -19,7 +19,7 @@ name_list = { name  ~ ("," ~ name )* ~ ","? }
 typ_list = { typ  ~ ("," ~ typ )* ~ ","? }
 pattern_list = { pattern  ~ ("," ~ pattern )* ~ ","? }
 
-typ           = { typ_name | typ_send | typ_receive | typ_either | typ_choice | typ_break | typ_continue | typ_recursive | typ_iterative | typ_self | typ_loop | typ_send_type | typ_recv_type }
+typ           = { typ_name | typ_chan | typ_send | typ_receive | typ_either | typ_choice | typ_break | typ_continue | typ_recursive | typ_iterative | typ_self | typ_loop | typ_send_type | typ_recv_type }
 typ_name      = { name ~ type_args }
 typ_chan      = { "chan" ~ typ }
 typ_send      = { "(" ~ typ_list ~ ")" ~ typ }
