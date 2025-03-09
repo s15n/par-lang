@@ -101,11 +101,22 @@ pub struct ReadbackState<Name: NameRequiredTraits> {
     // it's OK that this is unused, because we only use it to drop it when we're dropped.
     #[allow(unused)]
     pub net_tx: Sender<()>,
+    pub show_net: bool,
 }
 
 impl<Name: NameRequiredTraits> ReadbackState<Name> {
     pub fn show_readback(&mut self, ui: &mut egui::Ui, prog: Prog<Name>) {
-        self.inner.show_handle(ui, self.root.clone(), prog);
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.show_net, "Show net");
+            });
+            ui.horizontal(|ui| {
+                self.inner.show_handle(ui, self.root.clone(), prog);
+                if self.show_net {
+                    ui.code(self.root.lock().unwrap().net.lock().unwrap().show());
+                };
+            });
+        });
     }
     pub fn initialize(
         ui: &mut egui::Ui,
@@ -129,6 +140,7 @@ impl<Name: NameRequiredTraits> ReadbackState<Name> {
         Self {
             root: Arc::new(Mutex::new(handle)),
             net_tx: net_tx,
+            show_net: false,
             inner: ReadbackStateInner {
                 shared,
                 spawner: spawner,

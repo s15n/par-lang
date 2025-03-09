@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::par::parse::Loc;
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use std::hash::Hash;
 
 use super::net::{Net, Tree};
@@ -54,7 +54,7 @@ pub struct Compiler<'program, Name: Debug + Clone + Eq + Hash + Ord> {
     vars: IndexMap<Var<Name>, (TypedTree<Name>, VariableKind)>,
     program: &'program Prog<Name>,
     global_name_to_id: IndexMap<Name, usize>,
-    type_variables: Vec<Name>,
+    type_variables: IndexSet<Name>,
     id_to_ty: Vec<Type<Loc, Name>>,
     id_to_package: Vec<Tree>,
 }
@@ -213,7 +213,6 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
     }
 
     fn use_name(&mut self, name: &Name) -> (TypedTree<Name>, VariableKind) {
-        self.show_state();
         if self.vars.contains_key(&Var::Name(name.clone())) {
             self.use_var(&Var::Name(name.clone()))
         } else if self.compile_global(name).is_some() {

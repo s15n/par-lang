@@ -239,10 +239,16 @@ impl SharedState {
         }
         .boxed()
     }
-    pub async fn as_either<Name>(&self, tree: Tree, variants: Vec<Name>) -> (Name, Tree) {
+    pub async fn as_either<Name: Debug + Clone>(
+        &self,
+        tree: Tree,
+        variants: Vec<Name>,
+    ) -> (Name, Tree) {
         // TODO: we might have to eta-reduce `context` here
         // because it's possible that it's link to the context variable in the variant is eta-expnded
         // A less brittle solution is to make this interact with a `choice`
+        let tree_s = self.shared.net.lock().unwrap().show_tree(&tree);
+        let variants_s = variants.clone();
         let (_context, possibilities) = self.as_con(tree).await;
         let possibilities = self
             .flatten_multiplexed(possibilities, variants.len())
@@ -253,7 +259,8 @@ impl SharedState {
                 name_payload = Some((name, *b));
             }
         }
-        name_payload.expect("couldn't readback either")
+        name_payload
+            .unwrap_or_else(|| panic!("Couldn't readback *either* {}; {:?}", tree_s, variants_s))
     }
     pub async fn as_choice<Name>(
         &self,
