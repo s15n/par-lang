@@ -47,9 +47,7 @@ pub enum Operation<Loc, Name> {
 pub enum Type<Loc, Name> {
     Chan(Loc, Box<Self>),
     Var(Loc, Name),
-    //DualVar(Loc, Name),
     Name(Loc, Name, Vec<Type<Loc, Name>>),
-    //DualName(Loc, Name, Vec<Type<Loc, Name>>),
     Send(Loc, Box<Self>, Box<Self>),
     Receive(Loc, Box<Self>, Box<Self>),
     Either(Loc, IndexMap<Name, Self>),
@@ -59,9 +57,7 @@ pub enum Type<Loc, Name> {
     Recursive(Loc, Option<Name>, Box<Self>),
     Iterative(Loc, Option<Name>, Box<Self>),
     Self_(Loc, Option<Name>),
-    //DualSelf(Loc, Option<Name>),
     Loop(Loc, Option<Name>),
-    //DualLoop(Loc, Option<Name>),
     SendType(Loc, Name, Box<Self>),
     ReceiveType(Loc, Name, Box<Self>),
 }
@@ -462,7 +458,13 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             Self::Var(loc, name) => {
                 Self::Chan(loc.clone(), Box::new(Self::Var(loc.clone(), name.clone())))
             }
-            Self::Name(loc, name, args) => type_defs.get_dual(loc, name, args)?,
+            Self::Name(loc, name, args) => match type_defs.get_dual(loc, name, args) {
+                Ok(dual) => dual,
+                Err(_) => Self::Chan(
+                    loc.clone(),
+                    Box::new(Self::Name(loc.clone(), name.clone(), args.clone())),
+                ),
+            },
 
             Self::Send(loc, t, u) => {
                 Self::Receive(loc.clone(), t.clone(), Box::new(u.dual(type_defs)?))
