@@ -1,139 +1,114 @@
-def listrgb =
-  .item(.red!)
-  .item(.green!)
-  .item(.blue!)
-  .empty!
-
-def rgb = [value] value {
-  red?   => .red!
-  green? => .green!
-  blue?  => .blue!
-}
-
-def zip = [list][seq] list begin {
-  empty? => do {
-    seq.close?
-  } in .empty!
-
-  item[x] xs => do {
-    seq.next[y]
-    let y = rgb(y)
-  } in .item((x)(y)!) xs loop
-}
-
-def zip_rgbs = zip(listrgb)
-
-def zip2 = [seq1][seq2] begin {
-  close => do {
-    seq1.close?
-    seq2.close?
-  } in !
-
-  next => do {
-    seq1.next[x]
-    seq2.next[y]
-  } in ((x)(y)!) loop
-}
-
-def concat = [left][right] left begin {
-  empty?     => right
-  item[x] xs => .item(x) xs loop
-}
-
-def tree_of_colors =
-  .node
-    (.node
-      (.empty!)
-      (.red!)
-      (.empty!)!)
-    (.green!)
-    (.node
-      (.node
-        (.empty!)
-        (.yellow!)
-        (.empty!)!)
-      (.blue!)
-      (.empty!)!)!
-
-def flatten_process_syntax = chan caller {
-  caller[tree]
-
-  let caller = chan return {
-    tree begin {
-      empty? => {
-        return <> caller
-      }
-
-      node[left][value][right]? => {
-        let caller = chan return { left loop }
-        caller.item(value)
-        let caller = chan return { right loop }
-        return <> caller
-      }
-    }
-  }
-
-  caller.empty!
-}
+type Bool  = either { .true!, .false! }
+type Color = either { .red!, .green!, .blue! }
 
 type List<T> = recursive either {
   .empty!
   .item(T) self
 }
 
-type Tree<T> = recursive either {
-  .empty!
-  .node(self)(T)(self)!
+type Seq<T> = iterative {
+  .close => !
+  .next  => (T) loop
 }
 
-dec flatten : [type T] [Tree<T>] List<T>
-def flatten = [type T] [tree] chan yield {
-  let yield = tree begin {
-    empty? => yield
+type Mapper<A, B> = iterative {
+  .close    => !
+  .apply(A) => (B) loop
+}
 
-    node[left][value][right]? => do {
-      let yield = left loop
-      yield.item(value)
-    } in right loop
+dec mapList : [type A, B] [List<A>, Mapper<A, B>] List<B>
+def mapList = [type A, B] [list, mapper]
+  list begin {
+    .empty! => do {
+      mapper.close?
+    } in .empty!
+
+    .item(x) xs => do {
+      mapper.apply(x)[y]
+    } in .item(y) xs loop
   }
 
-  yield.empty!
+dec mapSeq : [type A, B] [Seq<A>, Mapper<A, B>] Seq<B>
+def mapSeq = [type A, B] [seq, mapper]
+  begin {
+    .close => do {
+      seq.close?
+      mapper.close?
+    } in !
+    .next => do {
+      seq.next[x]
+      mapper.apply(x)[y]
+    } in (y) loop
+  }
+
+dec listrgb : List<Color>
+def listrgb =
+  .item(.red!)
+  .item(.green!)
+  .item(.blue!)
+  .empty!
+
+dec red_forever : Seq<Color>
+def red_forever = begin {
+  .close => !
+  .next  => (.red!) loop
 }
 
-def flattened = flatten(tree_of_colors)
+dec rgb : [Color] Color
+def rgb = [value] value {
+  .red!   => .red!
+  .green! => .green!
+  .blue!  => .blue!
+}
+
+dec swap : [Bool] Bool
+def swap = [bool] bool {
+  .true! => .false!
+  .false! => .true!
+}
+
+dec true  : Bool
+dec false : Bool
 
 def true  = chan result { result.true! }
 def false = chan result { result.false! }
 
-def list_of_booleans = chan consumer {
-  consumer
-    .item(true)
-    .item(false)
-    .item(false)
-    .item(true)
-    .item(true)
-    .item(false)
-    .empty!
-}
-
-def reverse = chan caller {
-  caller[list]
-
-  let caller = chan return {
-    list begin {
-      empty? => {
-        return <> caller
-      }
-
-      item[value] => {
-        let caller = chan return { list loop }
-        caller.item(value)
-        return <> caller
-      }
+def bools_forever =
+  let bool: Bool = .true! in
+  begin {
+    .close => bool {
+      .true! => !
+      .false! => !
+    }
+    .next => {
+      let (output: Bool, bool: Bool)! = bool {
+        .true! => (.true!, .false!)!
+        .false! => (.false!, .true!)!
+      } in (output) loop
     }
   }
 
-  caller.empty!
+dec zip : [type T, U] [List<T>, Seq<U>] List<(T, U)!>
+def zip = [type T, U] [list, seq] list begin {
+  .empty! => do {
+    seq.close?
+  } in .empty!
+
+  .item(x) xs => do {
+    seq.next[y]
+  } in .item((x, y)!) xs loop
 }
 
-def reverse_bools = reverse(list_of_booleans)
+def zipped = zip(type Color, Color)(listrgb, red_forever)
+
+def zip2 = [type T, U] [seq1: Seq<T>, seq2: Seq<U>] begin {
+  .close => do {
+    seq1.close?
+    seq2.close?
+  } in !
+
+  .next => do {
+    seq1.next[x]
+    seq2.next[y]
+  } in ((x, y)!) loop
+}

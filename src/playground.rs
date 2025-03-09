@@ -784,4 +784,4 @@ fn blue() -> egui::Color32 {
     egui::Color32::from_hex("#118ab2").unwrap()
 }
 
-static DEFAULT_CODE: &str = include_str!("../examples/sample_types.par");
+static DEFAULT_CODE: &str = include_str!("../examples/sample.par");
