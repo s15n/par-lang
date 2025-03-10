@@ -62,7 +62,7 @@ hljs.registerLanguage("par", function(hljs) {
       keywords: {
           keyword: "type either rec iter begin loop self trait for impl let derive in chan do pass todo dec def",
           literal: "",
-          built_in: "Bool String List Option"
+          built_in: "Bool Nat List Option"
       },
       illegal: "",
       contains: [

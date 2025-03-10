@@ -12,14 +12,14 @@ At the heart of Par lies its type system, representing linear logic.
 > &nbsp;&nbsp; | [_ChoiceType_](#choice-types) \
 > &nbsp;&nbsp; | [_Unit_](#the-unit-type) \
 > &nbsp;&nbsp; | [_Bottom_](#the-bottom-type) \
-> &nbsp;&nbsp; | _RecursiveType_ \
-> &nbsp;&nbsp; | _IterativeType_ \
-> &nbsp;&nbsp; | _Self_ \
-> &nbsp;&nbsp; | _Loop_ \
+> &nbsp;&nbsp; | [_RecursiveType_](#recursive-types) \
+> &nbsp;&nbsp; | [_IterativeType_](#iterative-types) \
+> &nbsp;&nbsp; | [_Self_](#recursive-types) \
+> &nbsp;&nbsp; | [_Loop_](#iterative-types) \
 > &nbsp;&nbsp; | _ExistentialType_ \
-> &nbsp;&nbsp; | _UniversalType_ \
+> &nbsp;&nbsp; | _UniversalType_ <!--\
 > &nbsp;&nbsp; | _ReplicableType_ \
-> &nbsp;&nbsp; | _TaggedType_
+> &nbsp;&nbsp; | _TaggedType_ -->
 >
 > _TypeList_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; _Type_ (`,` _Type_)<sup>\*</sup> `,`<sup>?</sup>
@@ -67,6 +67,8 @@ Mathematically, `chan A` is \\(A^\perp\\) and therefore equivalent to patterns f
 - `chan chan T ≅ T`
 
 todo: Is this all correct?
+
+A more elaborate example can be seen [here](https://github.com/faiface/par-lang/blob/main/examples/flatten.par)
 
 ## Tuple Types
 
@@ -139,7 +141,12 @@ let no_bool: TwoOrNone<Bool> = .none!
 let both_bools: TwoOrNone<Bool> = .two(.true!, .false!)!
 ```
 
-Mathematically, `either { .a A, .b B }` is \\(A \oplus B\\). For session types, it means "select from `A` or `B`". 
+Mathematically, `either { .a A, .b B }` is \\(A \oplus B\\). For session types, it means "select from `A` or `B`".
+An empty either type `either {}` is therefore \\(\mathbf{0}\\). There is a function from it to every type:
+```par
+def absurd: [type T] [either {}] T = [type T] [x] x {}
+```
+This function can never be called though.
 
 Either types are often used as [recursive] types.
 
@@ -215,7 +222,12 @@ def main = do {
 ```
 todo: Is this a good example?
 
-Mathematically, `{ .a => A, .b => B }` is \\(A \mathbin{\\&} B\\). For session types, it means "offer a choice of `A` or `B`". 
+Mathematically, `{ .a => A, .b => B }` is \\(A \mathbin{\\&} B\\). For session types, it means "offer a choice of `A` or `B`".
+An empty choice `{}` is therefore \\(\top\\) and has exactly one value, `{}`. There is a function to it from every type:
+```par
+def terminate: [type T] [T] {} = [type T] [x] {}
+```
+The result of this function can never be used though (todo: correct?).
 
 Choice types are often used as [iterative] types.
 
@@ -232,7 +244,7 @@ Every value of a type `A` corresponds to a function `[!] A`:
 ```par
 def select: [type T] [T] [!] T = [type T] [x] [!] x
 // uncurrying makes this clear
-// [T] [!] T ≅ [T, !] T ≅ [(T) !] T ≅ [T] T
+// [T] [!] T = [T, !] T ≅ [(T) !] T ≅ [T] T
 
 def extract: [type T] [[!] T] T = [type T] [f] f(!)
 ```
@@ -271,3 +283,134 @@ let reverse = do {
 ```
 
 Mathematically, `?` is \\(\bot\\), the unit for \\(⅋\\). So \\(\bot \mathbin{⅋} A = \mathbf{1} \multimap A \cong A\\) (as seen before for the [unit](#the-unit-type) type).
+
+todo: are `!` and `?` Rust's `()` and `!` or is that `{}` and `either {}`?
+
+## Recursive Types
+
+> **<sup>Syntax</sup>**\
+> _RecursiveType_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; `rec` [_LoopLabel_]<sup>?</sup> _Type_
+>
+> _Self_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; `self` [_LoopLabel_]<sup>?</sup>
+
+todo: General, mathematical, constraints
+
+A recursive type can be used within itself via `self`
+
+Recursive types are mostly used in conjunction with either types:
+```par
+type List<T> = rec either {
+  .empty!
+  .item(T) self
+}
+```
+
+Values of recursive types terminate (todo: correct?)
+```par
+// a simple List
+let l: List<Bool> = .item(.true!).item(.false!).empty!
+```
+
+## Iterative Types
+
+> **<sup>Syntax</sup>**\
+> _IterativeType_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; `iter` [_LoopLabel_]<sup>?</sup> _Type_
+>
+> _Loop_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; `loop` [_LoopLabel_]<sup>?</sup>
+
+todo: General, mathematical, constraints
+
+An iterative type can be used within itself via `loop`
+
+Iterative types are mostly used in conjunction with choice types, for example:
+```par
+type Repl<T> = iter {
+  .copy => (loop, loop)!
+  .drop => !
+  .unwrap => T
+}
+```
+
+Here we construct
+```par
+?type Bool = either { .true!, .false! }
+?type Nat = rec either { .zero!, .succ self }
+?type List<T> = rec either { .empty!, .item(T) self }
+?
+// construct a list of Repl<Bool>
+// i.e. a value of a recursive type
+dec repeat : [Nat, Repl<Bool>] List<Bool>
+def repeat = [n, b] n begin {
+  .zero! => do { b.drop? } in .empty!
+  .succ pred => let (b, c)! = b.copy in .item(c.unwrap) pred loop
+}
+
+// construct a value of the iterative Repl<Bool>
+dec repl_bool : [Bool] Repl<Bool>
+def repl_bool = [b] begin {
+  .copy => b {
+    .true! => (let b: Bool = .true! in loop, let b: Bool = .true! in loop)!
+    .false! => (let b: Bool = .false! in loop, let b: Bool = .false! in loop)!
+  }
+  .drop => b {
+    .true! => !
+    .false! => !
+  }
+  .unwrap => b
+}
+?
+?def main = repeat(.succ.succ.succ.zero!, repl_bool(.true!))
+```
+
+Values of iterative types may be infinite (todo: correct?)
+```par
+type Inf<T> = iter (T) loop
+
+def infinite_bools: Inf<Bool> = begin (.true!) loop
+```
+
+## Existential Types
+
+> **<sup>Syntax</sup>**\
+> _ExistentialType_ : `(` `type` [_ID_List_] `)` _Type_
+
+Having multiple types between the `()` is just syntax sugar:
+```par
+type T = (type A, B) X
+// is equivalent to
+type T = (type A) (type B) X
+```
+
+Existential types mirror tuple types but they're qualified over types rather than values.
+They are used to obscure their underlying type.
+```par
+?type Bool  = either { .true!, .false! }
+?type Nat = recursive either { .zero!, .succ self }
+?
+type Any = (type T) T
+
+?def main = chan user {
+// create values of the existential Any type
+// note that both have exactly the same type!
+let any1: Any = (type Bool) .true!
+let any2: Any = (type Nat) .succ.zero!
+?
+?user(any1)
+?user(any2)
+?user!
+?}
+```
+
+The qualifying types and values can both be extracted from a value of such a type:
+```par
+let any: Any = ...
+let (type X) x = any
+let y: X = x
+```
+todo: This doesn't work in Par currently. Is this intended?
+
+## Universal Types
