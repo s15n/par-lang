@@ -24,7 +24,10 @@ At the heart of Par lies its type system, representing linear logic.
 > _TypeList_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; _Type_ (`,` _Type_)<sup>\*</sup> `,`<sup>?</sup>
 >
-> _Constructor_ :\
+> _TypeArguments_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; `<` _TypeList_ `>`
+>
+> _Label_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; `.` [_ID_]
 
 ## Named Types
@@ -110,7 +113,7 @@ Mathematically, `[A] B` is a [linear](./linearity.md) function \\(A \multimap B\
 ## Either Types
 
 > **<sup>Syntax</sup>**\
-> _EitherType_ : `either` `{` (_Constructor_ _Type_ `,`<sup>?</sup>)<sup>\*</sup> `}`
+> _EitherType_ : `either` `{` (_Label_ _Type_ `,`<sup>?</sup>)<sup>\*</sup> `}`
 
 An either type is a classical sum type aka. tagged union. Every value of such a type consists of a label (called "constructor") and a value of the type corresponding to the label (its "payload").
 
@@ -150,13 +153,14 @@ Either types are often used as [recursive](#recursive-types) types.
 
 > **<sup>Syntax</sup>**\
 > _ChoiceType_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `{` (_Constructor_ (`(` _ReceiverList_ `)`)<sup>\*</sup> `=>` _Type_ `,`<sup>?</sup>)<sup>\*</sup> `}`
+> &nbsp;&nbsp; &nbsp;&nbsp; `{` (_Label_ (`(` _ReceiverList_ `)`)<sup>\*</sup> `=>` _Type_ `,`<sup>?</sup>)<sup>\*</sup> `}`
 >
 > _ReceiverList_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; _TypeList_ \
 > &nbsp;&nbsp; | `type` [_ID_List_]
 
-A choice type is dual to an [either](#either-types) type. Constructing a value of an either type is "making a choice" and similarly, destructing such a value looks exactly like constructing a value of a choice type. 
+A choice type is dual to an [either](#either-types) type. Constructing a value of an either type is "making a choice" and similarly, destructing such a value looks exactly like constructing a value of a choice type.
+It consists of several "destructors".
 
 ```par
 // choice of two
@@ -288,8 +292,6 @@ Mathematically, `?` is \\(\bot\\), the unit for \\(â…‹\\). So \\(\bot \mathbin{â
 > _Self_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; `self` [_LoopLabel_]<sup>?</sup>
 
-todo: General, mathematical, constraints
-
 A recursive type can be used within itself via `self`
 
 Recursive types are mostly used in conjunction with either types:
@@ -299,11 +301,44 @@ type List<T> = rec either {
   .item(T) self
 }
 ```
+<!--// another way of defining a recursive type is the following:
+// Node is not recursive
+type Node<Next> = either {
+  .base!
+  .step Next
+}
+// Defining the recursive type
+type Rec = rec Node<self>
+
+// We have the following subtyping relation:
+// Node<rec Node<self>> <: rec Node<self>-->
 
 Values of recursive types terminate (todo: correct?)
 ```par
 // a simple List
 let l: List<Bool> = .item(.true!).item(.false!).empty!
+```
+Mathematically, a recursive either type represents an inductive type.
+Constructors without `self` are the base cases while those with `self` represent
+inductive steps.
+
+A function from a recursive type is defined using induction:
+```par
+// recursive (inductive) type representing
+// the natural numbers
+type Nat = rec either { 
+  .zero!, 
+  .succ self
+}
+
+dec is_even : [Nat] Bool
+// induction over n (marked by applying begin-loop)
+def is_even = [n] n begin {
+  // base case(s)
+  .zero! => .true!
+  // inductive step(s)
+  .succ pred => not(pred loop)
+}
 ```
 
 ## Iterative Types
@@ -328,7 +363,8 @@ type Repl<T> = iter {
 }
 ```
 
-Here we construct
+<!--Here we construct a value of an iterative type. Note the similarity
+between this and destructing a recursive type.
 ```par
 ?type Bool = either { .true!, .false! }
 ?type Nat = rec either { .zero!, .succ self }
@@ -336,6 +372,9 @@ Here we construct
 ?
 // construct a list of Repl<Bool>
 // i.e. a value of a recursive type
+//
+// at the same time, destruct a value
+// of the recursive type Nat
 dec repeat : [Nat, Repl<Bool>] List<Bool>
 def repeat = [n, b] n begin {
   .zero! => do { b.drop? } in .empty!
@@ -357,13 +396,55 @@ def repl_bool = [b] begin {
 }
 ?
 ?def main = repeat(.succ.succ.succ.zero!, repl_bool(.true!))
-```
+```-->
 
 Values of iterative types may be infinite (todo: correct?)
 ```par
 type Inf<T> = iter (T) loop
 
 def infinite_bools: Inf<Bool> = begin (.true!) loop
+```
+This infinite value can be constructed but there is now way of fully destructing (so: using) it.
+
+Mathematically, an iterative choice type represents a coinductive type.
+Destructors without `loop` break the iteration, while those containing `loop` yields and continues.
+
+A function to an iterative type is defined using coinduction (iteration):
+<!--```par
+// iterative (coinductive) type representing
+// an infinite stream
+type Stream<T> = iter either { 
+  .close!, 
+  .next(T) loop
+}
+
+dec alternate_true_false : [Nat] Bool
+// induction over n (marked by applying begin-loop to n)
+def is_even = [n] n begin {
+  // base case(s)
+  .zero! => .true!
+  // inductive step(s)
+  .succ pred => not(pred loop)
+}
+```-->
+```par
+// construct a value of the iterative Repl<Bool>
+dec repl_bool : [Bool] Repl<Bool>
+// coinduction (marked by an independent begin-loop)
+def repl_bool = [b] begin {
+  // yield "(b, b)" and continue (coinductive step)
+  .copy => b {
+    .true! => (let b: Bool = .true! in loop, let b: Bool = .true! in loop)!
+    .false! => (let b: Bool = .false! in loop, let b: Bool = .false! in loop)!
+  }
+  // break !
+  .drop => b {
+    .true! => !
+    .false! => !
+  }
+  // break b
+  .unwrap => b
+}
 ```
 
 ## Existential Types
@@ -406,8 +487,37 @@ let y: X = x
 ```
 todo: This doesn't work in Par currently. Is this intended?
 
+Mathematically, `(type T) A` is \\(\exists\ T: A\\).
+
 ## Universal Types
 
+> **<sup>Syntax</sup>**\
+> _UniversalType_ : `[` `type` [_ID_List_] `]` _Type_
+
+Having multiple types between the `[]` is just syntax sugar:
+```par
+type T = [type A, B] X
+// is equivalent to
+type T = [type A] [type B] X
+```
+
+Existential types mirror function types but they're qualified over types rather than values.
+They're also similar to parameterized types.
+They are used to obscure their underlying type.
+```par
+type UnivEndo = [type T] [T] T
+type ParamEndo<T> = [T] T
+
+// a value of an universal type must be defined
+// for all types
+let id: UnivEndo = [type T] [x] x
+
+// a specialized version can be represented using
+// a parameterized type
+let id_bool: ParamEndo<Bool> = id(type Bool)
+```
+
+Mathematically, `[type T] A` is \\(\forall\ T: A\\).
 
 ## Channel Types
 
