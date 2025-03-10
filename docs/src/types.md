@@ -5,8 +5,7 @@ At the heart of Par lies its type system, representing linear logic.
 > **<sup>Syntax</sup>**\
 > _Type_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; [_NamedType_](#named-types) \
-> &nbsp;&nbsp; | [_ChannelType_](#channel-types) \
-> &nbsp;&nbsp; | [_TupleType_](#tuple-types) \
+> &nbsp;&nbsp; | [_PairType_](#pair-types) \
 > &nbsp;&nbsp; | [_FunctionType_](#function-types) \
 > &nbsp;&nbsp; | [_EitherType_](#either-types) \
 > &nbsp;&nbsp; | [_ChoiceType_](#choice-types) \
@@ -16,8 +15,9 @@ At the heart of Par lies its type system, representing linear logic.
 > &nbsp;&nbsp; | [_IterativeType_](#iterative-types) \
 > &nbsp;&nbsp; | [_Self_](#recursive-types) \
 > &nbsp;&nbsp; | [_Loop_](#iterative-types) \
-> &nbsp;&nbsp; | _ExistentialType_ \
-> &nbsp;&nbsp; | _UniversalType_ <!--\
+> &nbsp;&nbsp; | [_ExistentialType_](#existential-types) \
+> &nbsp;&nbsp; | [_UniversalType_](#universal-types) \
+> &nbsp;&nbsp; | [_ChannelType_](#channel-types) <!--\
 > &nbsp;&nbsp; | _ReplicableType_ \
 > &nbsp;&nbsp; | _TaggedType_ -->
 >
@@ -32,48 +32,18 @@ At the heart of Par lies its type system, representing linear logic.
 > **<sup>Syntax</sup>**\
 > _NamedType_ : [_ID_] [_TypeArguments_]<sup>?</sup>
 
-Defined via type aliases, named types can always be replaced with their underlying representation.
+Defined via type aliases, named types can always be replaced with their definition without changing meaning.
 
 ```par
-let x: Option<?> = .none!
+let x: Option<T> = .none!
 // is equivalent to
-let x: either { .none!, .some? } = .none!
+let x: either { .none!, .some T } = .none!
 ```
 
-## Channel Types
+## Pair Types
 
 > **<sup>Syntax</sup>**\
-> _ChannelType_ : `chan` _Type_
-
-`chan A` represents a channel accepting an `A`:
-```par
-def just_true: Bool = chan yield {
-  let c: chan Bool = yield
-  yield.true!
-}
-```
-
-Mathematically, `chan A` is \\(A^\perp\\) and therefore equivalent to patterns for type `A` (although those have dual syntax). We get for example:
-
-- `chan A ≅ [A]?`
-
-- `chan ! ≅ ?` and `chan ? ≅ !`
-
-- `chan (A) B ≅ [A] chan B` and `chan [A] B ≅ (A) chan B`
-
-- `chan either { .a A, .b B } ≅ { .a => chan A, .b => chan B }` and <br>
-  `chan { .a => A, .b => B } ≅ either { .a chan A, .b chan B }`
-
-- `chan chan T ≅ T`
-
-todo: Is this all correct?
-
-A more elaborate example can be seen [here](https://github.com/faiface/par-lang/blob/main/examples/flatten.par)
-
-## Tuple Types
-
-> **<sup>Syntax</sup>**\
-> _TupleType_ : `(` _TypeList_ `)` _Type_
+> _PairType_ : `(` _TypeList_ `)` _Type_
 
 Having multiple types between the `()` is just syntax sugar:
 ```par
@@ -84,12 +54,31 @@ type T = (A) (B) !
 
 `!` is the unit for tuples, i.e. `(A, B)!` and `(A) B` are equivalent.
 
-Values are created using [tuple expressions](./expressions.md#tuple-expressions):
+Values are created using [pair expressions](./expressions.md#tuple-expressions):
 ```par
 let a: A = ...
 let b: B = ...
 
 let pair: (A) B = (a) b
+```
+and they can be destructed using [pair patterns]() or [receive commands]():
+```par
+type ABC = { .a!, .b!, .c! }
+
+let triple: (ABC, ABC, ABC)! = (.a!, .b!, .c!)!
+
+// pattern matching
+let (first) rest = triple
+// first = .a!
+// rest = (.b!, .c!)!
+
+// commands
+do {
+  rest[second]
+  // after this command:
+  // rest = (.c!)! 
+  // second = .b!
+} in ...
 ```
 
 Mathematically, `(A) B` is \\(A \otimes B\\). For session types, it means "send `A` and continue as `B`".
@@ -109,6 +98,11 @@ type T = [A] [B] R
 Values are created using [function expressions](./expressions.md#function-expressions):
 ```par
 let id: [A] A = [a] a
+```
+and destructed by [calling]() the function:
+```par
+let a: A = ...
+let also_a = id(a) // call id
 ```
 
 Mathematically, `[A] B` is a [linear](./linearity.md) function \\(A \multimap B\\). For session types, it means "receive `A` and continue as `B`".
@@ -142,13 +136,15 @@ let both_bools: TwoOrNone<Bool> = .two(.true!, .false!)!
 ```
 
 Mathematically, `either { .a A, .b B }` is \\(A \oplus B\\). For session types, it means "select from `A` or `B`".
-An empty either type `either {}` is therefore \\(\mathbf{0}\\). There is a function from it to every type:
+An empty either type `either {}` is therefore \\(\mathbf{0}\\), the empty type.
+In Haskell, it's called `void` and in Rust it's `!` (not to be confused with the `!` in Par). 
+There is a function from it to every type:
 ```par
 def absurd: [type T] [either {}] T = [type T] [x] x {}
 ```
 This function can never be called though.
 
-Either types are often used as [recursive] types.
+Either types are often used as [recursive](#recursive-types) types.
 
 ## Choice Types
 
@@ -229,7 +225,7 @@ def terminate: [type T] [T] {} = [type T] [x] {}
 ```
 The result of this function can never be used though (todo: correct?).
 
-Choice types are often used as [iterative] types.
+Choice types are often used as [iterative](#iterative-types) types.
 
 ## The Unit Type
 
@@ -249,7 +245,8 @@ def select: [type T] [T] [!] T = [type T] [x] [!] x
 def extract: [type T] [[!] T] T = [type T] [f] f(!)
 ```
 
-A type `A` is called _droppable_, if there is a function `[A] !`.
+For some types there is a function `[A] !`. 
+Those can be destroyed without any transformation.
 ```par
 // Types constructed only from ! are droppable
 def drop_bool: [Bool] ! = [b] b {
@@ -257,12 +254,11 @@ def drop_bool: [Bool] ! = [b] b {
   .false! => !
 }
 
-// Replicables are droppable
-def drop_repl: [type T] [&T] ! = !
-
 // Functions are not droppable in general
 def drop_impossible: [[Bool] Bool] ! = todo
 ```
+<!--// Replicables are droppable
+def drop_repl: [type T] [&T] ! = !-->
 
 Mathematically, `!` is \\(\mathbf{1}\\), the unit for \\(\otimes\\).
 
@@ -271,9 +267,8 @@ Mathematically, `!` is \\(\mathbf{1}\\), the unit for \\(\otimes\\).
 > **<sup>Syntax</sup>**\
 > _Bottom_ : `?`
 
-Bottom is an empty type. In Haskell, it's `void`, in Rust it's (perhaps confusingly) `!`.
-
-`?` dual to `!`. It's mostly used in process syntax to destruct the unit:
+The bottom `?` is dual to the unit `!`. 
+It's mostly used in process syntax to destruct the unit:
 ```par
 let triple: (A, B, C)! = ...
 
@@ -283,8 +278,6 @@ let reverse = do {
 ```
 
 Mathematically, `?` is \\(\bot\\), the unit for \\(⅋\\). So \\(\bot \mathbin{⅋} A = \mathbf{1} \multimap A \cong A\\) (as seen before for the [unit](#the-unit-type) type).
-
-todo: are `!` and `?` Rust's `()` and `!` or is that `{}` and `either {}`?
 
 ## Recursive Types
 
@@ -414,3 +407,65 @@ let y: X = x
 todo: This doesn't work in Par currently. Is this intended?
 
 ## Universal Types
+
+
+## Channel Types
+
+> **<sup>Syntax</sup>**\
+> _ChannelType_ : `chan` _Type_
+
+`chan A` represents a channel accepting an `A`:
+```par
+def just_true: Bool = chan yield {
+  let c: chan Bool = yield
+  c.true!
+}
+```
+
+A more elaborate example can be seen [here](https://github.com/faiface/par-lang/blob/main/examples/flatten.par)
+
+A `chan A` can be linked with an `A`, annihilating both and ending the process.
+```par
+def just_true: Bool = chan yield {
+  let c: chan Bool = yield
+  let b: Bool = .true!
+  c <-> b
+}
+```
+Note that `b <-> c` would have been equally valid.
+
+Mathematically, `chan A` is \\(A^\perp\\), i.e. the dual type to `A`. Every type has a dual. We get for example:
+
+| type | dual |
+| ---- | ---- |
+| `T` | `chan T` |
+| `chan T` | `T` |
+| `(A) B` | `[A] chan B` |
+| `[A] B` | `(A) chan B` |
+| `either { .a A, .b B }` | `{ .a => chan A, .b => chan B }` |
+| `{ .a => A, .b => B }` | `either { .a chan A, .b chan B }` |
+| `!` | `?` |
+| `?` | `!` |
+| `rec T` | `iter chan T` |
+| `iter T` | `rec chan T` |
+| `self` | `loop` |
+| `loop` | `self` |
+| `(type T) A` | `[type T] chan A` |
+| `[type T] A` | `(type T) chan A` |
+
+Moreover, `chan A ≅ [A]?` is an isomorphism
+```par
+dec i : [type A] [chan A] [A]?
+def i = [type A] [ch] chan receive {
+  // receive is of type (A)!
+  receive[a]?
+  ch <-> a
+}
+
+dec j : [type A] [[A]?] chan A
+def j = [type A] [annihilate] chan a {
+  annihilate(a)!
+}
+```
+
+So the dual of a type can be used to destruct a value.

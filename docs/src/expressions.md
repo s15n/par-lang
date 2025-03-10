@@ -1,5 +1,7 @@
 # Expressions
 
+This page is not ready
+
 <!--"expression"
   ::=& #raw("let") "pattern" #raw("=") "expression" #raw("in") "expression" \
   |& #raw("do") #raw("{") "process"^? #raw("}") #raw("in") "expression" \
@@ -38,9 +40,9 @@ y = let x = 5 in x * x // 25
 
 ---
 
-## Tuple Expressions
+## Pair Expressions
 
-A tuple expression is of the form `(expr) expr`:
+A pair expression is of the form `(expr) expr`:
 ```par
 pair = (1) 0
 ```

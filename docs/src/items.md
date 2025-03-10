@@ -15,28 +15,14 @@
 > _Definition_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; `def` [_ID_] (`:` [_Type_])<sup>?</sup> `=` [_Expression_]
 
-<!--
-Alternatively:
-> _Definition_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `def` [_ID_] (`(` _DefPatternList_ `)`)<sup>\*</sup> `:` [_Type_] `=` [_Expression_]
->
-> _DefPatternList_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; _DefPattern_ (`,` _DefPattern_)<sup>\*</sup> `,`<sup>?</sup>
-> &nbsp;&nbsp; | `type` [_ID_List_]
->
-> _DefPattern_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; [_PatternNoTopAlt_] `:` [_Type_]
-
-todo: patterns left of `=`
--->
-
-`def` defines a replicable value usable throughout the file in which it was defined.
+`def` defines a global definition usable throughout the file in which it was defined.
+It can be used as many times as one desires, instantiating itself every time it's used.
 ```par
 // define a static value
-dec greeting : String
-def greeting = "Hello, World!"
+dec unit : !
+def unit = !
 // or all-in-one
-def greeting: String = "Hello, World!"
+def unit: ! = !
 
 // define a function
 def negate: [Bool] Bool = [b] b {
@@ -51,29 +37,6 @@ def pop = [type T] [list] list {
   .item(head) tail => (.some(head)) tail
 }
 ```
-<!--
-(or)
-```par
-// define a static value
-def greeting: String = "Hello, World!"
-
-// define a function
-def negate(b: Bool): Bool = b {
-  .true! => .false!
-  .false! => .true!
-}
-// equivalent to
-def negate2: [Bool] Bool = [b] negate(b)
-
-// define a function receiving types
-dec pop : [type T] [List<T>] (Option<T>) List<T>
-def pop(type T)(list: List<T>) = list {
-  .empty! => (.none!) .empty!
-  .item(head) tail => (.some(head)) tail
-}
-```
--->
-Note: In reality, `greeting` has the [replicable]() type `&String`, while `negate` also has a replicable type: `&[Bool] Bool`.
 
 ## Type Definitions
 
@@ -87,7 +50,7 @@ Note: In reality, `greeting` has the [replicable]() type `&String`, while `negat
 > _TypeParameter_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; [_ID_]
 
-A type definition defines a type alias. (Proposal: Automatically add a tag in some cases for either and choice types)
+A type definition defines a type alias, not a "new type". All types in Par are structural. <!--(Proposal: Automatically add a tag in some cases for either and choice types)-->
 ```par
 // simple type alias
 type Boolean = Bool

@@ -87,9 +87,6 @@ hljs.registerLanguage("par", function(hljs) {
           {
               className: "number",
               begin: /-?\b\d+\b/
-          },
-          {
-              begin: "=> \\! \\? \\| \\&"
           }
       ]
   }
