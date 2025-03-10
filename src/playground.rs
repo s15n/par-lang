@@ -6,7 +6,7 @@ use std::{
 
 use eframe::egui;
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 
 use crate::{
     icombs::{compile_file, IcCompiled},
@@ -290,13 +290,13 @@ impl Playground {
                     let mut net = compiled.create_net();
                     let mut tree = compiled.get_with_name(&internal_name).unwrap();
                     net.freshen_variables(&mut tree);
-                    let ty = prepare_type_for_readback(&program, ty.clone());
                     let tree = tree.with_type(ty.clone());
                     *readback_state = Some(ReadbackState::initialize(
                         ui,
                         net,
                         tree,
                         Arc::new(TokioSpawn),
+                        &program,
                     ));
                 }
             }

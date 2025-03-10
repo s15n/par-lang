@@ -48,3 +48,16 @@ def is_some = [option: Option<Bool>] option {
 
 dec main: Tree
 def main = .empty!
+
+dec quant: (type T) (T) (T) [T] [T] Bool
+def quant = (type Bool) (.true!) (.false!) [x] [y] x {
+    true? => y {
+        true? => .false!
+        false? => .true!
+    }
+    false? => y {
+        true? => .false!
+        false? => .true!
+    }
+
+}

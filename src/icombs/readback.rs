@@ -409,21 +409,21 @@ impl SharedState {
                 }
             };
             match ty {
-                crate::par::types::Type::Send(_, from, to) => {
+                Type::Send(_, from, to) => {
                     let (a, b) = self.as_par(tree).await;
                     ReadbackResult::Send(
                         b.with_type(*from).into_readback_result_boxed(),
                         a.with_type(*to).into_readback_result_boxed(),
                     )
                 }
-                crate::par::types::Type::Receive(_, from, to) => {
+                Type::Receive(_, from, to) => {
                     let (a, b) = self.as_par(tree).await;
                     ReadbackResult::Receive(
                         b.with_type((*from).dual()).into_readback_result_boxed(),
                         a.with_type(*to).into_readback_result_boxed(),
                     )
                 }
-                crate::par::types::Type::Either(_, mut variants) => {
+                Type::Either(_, mut variants) => {
                     variants.sort_keys();
                     let (name, payload) = self
                         .as_either(tree, variants.keys().cloned().collect())
@@ -435,7 +435,7 @@ impl SharedState {
                             .into_readback_result_boxed(),
                     )
                 }
-                crate::par::types::Type::Choice(_, mut variants) => {
+                Type::Choice(_, mut variants) => {
                     variants.sort_keys();
                     let (ctx, cases) = self
                         .as_choice(tree, variants.keys().cloned().collect())
@@ -454,14 +454,25 @@ impl SharedState {
                             .collect(),
                     )
                 }
+                Type::SendType(_, name, payload) => ReadbackResult::SendType(
+                    name,
+                    tree.with_type(*payload).into_readback_result_boxed(),
+                ),
+                Type::ReceiveType(_, name, payload) => ReadbackResult::ReceiveType(
+                    name,
+                    tree.with_type(*payload).into_readback_result_boxed(),
+                ),
 
-                crate::par::types::Type::Break(_) => {
+                Type::Break(_) => {
                     self.read_era(tree).await.unwrap();
                     ReadbackResult::Break
                 }
-                crate::par::types::Type::Continue(_) => {
+                Type::Continue(_) => {
                     self.read_era(tree).await.unwrap();
                     ReadbackResult::Continue
+                }
+                ty @ Type::Name(..) | ty @ Type::DualName(..) => {
+                    ReadbackResult::Named(tree.with_type(ty))
                 }
                 ty => ReadbackResult::Unsupported(tree.with_type(ty)),
             }
@@ -556,8 +567,11 @@ pub enum ReadbackResult<Name: Clone> {
     Continue,
     Send(Box<ReadbackResult<Name>>, Box<ReadbackResult<Name>>),
     Receive(Box<ReadbackResult<Name>>, Box<ReadbackResult<Name>>),
+    SendType(Name, Box<ReadbackResult<Name>>),
+    ReceiveType(Name, Box<ReadbackResult<Name>>),
     Either(Name, Box<ReadbackResult<Name>>),
     Choice(Tree, Vec<(Name, Tree, TypedTree<Name>)>),
+    Named(TypedTree<Name>),
     Expand(TypedTree<Name>),
     Halted(TypedTree<Name>),
     Unsupported(TypedTree<Name>),

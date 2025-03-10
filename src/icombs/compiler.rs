@@ -237,37 +237,6 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
             },
         )
     }
-    fn compile_expression(
-        &mut self,
-        expr: &Expression<Loc, Name, Type<Loc, Name>>,
-    ) -> TypedTree<Name> {
-        match expr {
-            Expression::Reference(_, name, ty) => self.instantiate_variable(name),
-            Expression::Fork(_, captures, name, _, typ, proc) => {
-                self.with_captures(captures, |this| {
-                    let (v0, v1) = this.create_typed_wire(typ.clone());
-                    this.bind_variable(name, v0);
-                    this.compile_process(proc);
-                    v1
-                })
-            }
-        }
-    }
-    fn compile_process(&mut self, proc: &Process<Loc, Name, Type<Loc, Name>>) {
-        match proc {
-            Process::Let(_, key, _, _, value, rest) => {
-                let value = self.compile_expression(value);
-                self.vars
-                    .insert(Var::Name(key.clone()), (value, VariableKind::Linear));
-                self.compile_process(rest);
-            }
-
-            Process::Do(_, name, target_ty, command) => {
-                self.compile_command(name.clone(), target_ty.clone(), command)
-            }
-            _ => todo!(),
-        }
-    }
     fn show_state(&mut self) {
         println!("Variables:");
         for (name, (value, kind)) in &self.vars {
@@ -299,13 +268,21 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
     }
     fn normalize_type(&mut self, ty: Type<Loc, Name>) -> Type<Loc, Name> {
         match ty {
-            Type::Name(_, name, args) => {
-                let ty = self.program.dereference_type_def(&name, &args);
-                self.normalize_type(ty)
+            Type::Name(loc, name, args) => {
+                if self.type_variables.contains(&name) {
+                    return Type::Name(loc, name, args);
+                } else {
+                    let ty = self.program.dereference_type_def(&name, &args);
+                    self.normalize_type(ty)
+                }
             }
-            Type::DualName(_, name, args) => {
-                let ty = self.program.dereference_type_def(&name, &args).dual();
-                self.normalize_type(ty)
+            Type::DualName(loc, name, args) => {
+                if self.type_variables.contains(&name) {
+                    return Type::DualName(loc, name, args);
+                } else {
+                    let ty = self.program.dereference_type_def(&name, &args).dual();
+                    self.normalize_type(ty)
+                }
             }
             Type::Either(loc, mut index_map) => {
                 index_map.sort_keys();
@@ -324,6 +301,38 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
             a => a,
         }
     }
+
+    fn compile_expression(
+        &mut self,
+        expr: &Expression<Loc, Name, Type<Loc, Name>>,
+    ) -> TypedTree<Name> {
+        match expr {
+            Expression::Reference(_, name, ty) => self.instantiate_variable(name),
+            Expression::Fork(_, captures, name, _, typ, proc) => {
+                self.with_captures(captures, |this| {
+                    let (v0, v1) = this.create_typed_wire(typ.clone());
+                    this.bind_variable(name, v0);
+                    this.compile_process(proc);
+                    v1
+                })
+            }
+        }
+    }
+    fn compile_process(&mut self, proc: &Process<Loc, Name, Type<Loc, Name>>) {
+        match proc {
+            Process::Let(_, key, _, _, value, rest) => {
+                let value = self.compile_expression(value);
+                self.vars
+                    .insert(Var::Name(key.clone()), (value, VariableKind::Linear));
+                self.compile_process(rest);
+            }
+
+            Process::Do(_, name, target_ty, command) => {
+                self.compile_command(name.clone(), target_ty.clone(), command)
+            }
+            _ => todo!(),
+        }
+    }
     fn compile_command(
         &mut self,
         name: Name,
@@ -337,24 +346,29 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 self.link_typed(a, b);
             }
             // types get erased.
-            Command::SendType(_, process) => {
+            Command::SendType(target_type, process) => {
                 let a = self.instantiate_variable(&name);
-                // TODO: Track type variables?
-                let Type::SendType(_, src_name, ret_type) = a.ty else {
-                    unreachable!()
+                let Type::ReceiveType(_, src_name, ret_type) = self.normalize_type(a.ty.clone())
+                else {
+                    panic!("Unexpected type for SendType: {:?}", a.ty);
                 };
-                self.bind_variable(&name, a.tree.with_type(*ret_type));
-
+                let ret_type = ret_type.substitute(&src_name, target_type).unwrap();
+                self.bind_variable(&name, a.tree.with_type(ret_type));
                 self.compile_process(process);
             }
             Command::ReceiveType(_, process) => {
                 let a = self.instantiate_variable(&name);
-                let Type::ReceiveType(_, dest_name, ret_type) = a.ty else {
-                    unreachable!()
+                let Type::SendType(_, dest_name, ret_type) = self.normalize_type(a.ty.clone())
+                else {
+                    panic!("Unexpected type for ReceiveType: {:?}", a.ty);
                 };
                 self.bind_variable(&name, a.tree.with_type(*ret_type));
 
+                let was_empty_before = self.type_variables.insert(dest_name.clone());
                 self.compile_process(process);
+                if was_empty_before {
+                    self.type_variables.swap_remove(&dest_name);
+                }
             }
             Command::Send(expr, process) => {
                 // < name(expr) process >
@@ -363,8 +377,8 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 // free = (name < expr >)
                 // < process >
                 let a = self.instantiate_variable(&name);
-                let Type::Receive(_, arg_type, ret_type) = a.ty else {
-                    unreachable!()
+                let Type::Receive(_, arg_type, ret_type) = self.normalize_type(a.ty.clone()) else {
+                    panic!("Unexpected type for Receive: {:?}", a.ty);
                 };
                 let expr = self.compile_expression(expr);
 
@@ -381,8 +395,8 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 // free = (name target)
                 // < process >
                 let a = self.instantiate_variable(&name);
-                let Type::Send(_, arg_type, ret_type) = a.ty else {
-                    unreachable!()
+                let Type::Send(_, arg_type, ret_type) = self.normalize_type(a.ty.clone()) else {
+                    panic!("Unexpected type for Receive: {:?}", a.ty);
                 };
                 let (v0, v1) = self.create_typed_wire(*arg_type);
                 let (w0, w1) = self.create_typed_wire(*ret_type);
@@ -395,8 +409,8 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
             Command::Choose(chosen, process) => {
                 let a = self.instantiate_variable(&name);
 
-                let Type::Choice(_, branches) = self.normalize_type(a.ty) else {
-                    unreachable!()
+                let Type::Choice(_, branches) = self.normalize_type(a.ty.clone()) else {
+                    panic!("Unexpected type for Choose: {:?}", a.ty);
                 };
                 let Some(branch_type) = branches.get(chosen) else {
                     unreachable!()
@@ -424,8 +438,8 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 let context_in = multiplex_trees(m_trees);
 
                 let mut branches = vec![];
-                let Type::Either(_, required_branches) = self.normalize_type(ty) else {
-                    unreachable!()
+                let Type::Either(_, required_branches) = self.normalize_type(ty.clone()) else {
+                    panic!("Unexpected type for Match: {:?}", ty);
                 };
                 let mut choice_and_process: Vec<_> = names.iter().zip(processes.iter()).collect();
                 choice_and_process.sort_by_key(|k| k.0);
