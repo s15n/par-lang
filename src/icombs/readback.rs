@@ -1,8 +1,10 @@
 use futures::{
     channel::oneshot::{channel, Receiver, Sender},
-    future::{select, BoxFuture, Either},
+    future::{join, select, BoxFuture, Either},
+    stream::FuturesUnordered,
     FutureExt, SinkExt, StreamExt,
 };
+use indexmap::IndexSet;
 use std::{
     any::Any,
     fmt::Debug,
@@ -22,6 +24,13 @@ pub struct CoroState {
     pub(crate) net: Arc<Mutex<Net>>,
     new_redex: Mutex<Vec<futures::channel::mpsc::Sender<()>>>,
     new_var: AtomicUsize,
+}
+
+fn unwrap_err_or<T, E>(value: Result<T, E>, default: E) -> E {
+    match value {
+        Ok(_) => default,
+        Err(e) => e,
+    }
 }
 
 impl Debug for CoroState {
@@ -178,6 +187,20 @@ impl SharedState {
             PortContents::Aux(sender) | PortContents::AuxLazy(sender) => {
                 Self::make_oneshot_ext_from_tx(sender)
             }
+            PortContents::Tree(Tree::Package(id)) => {
+                self.shared.net.lock().unwrap().dereference_package(id)
+            }
+            PortContents::Tree(tree) => tree,
+            _ => unreachable!(),
+        }
+    }
+    pub async fn read_port_as_maybe_var(&self, tree: Tree) -> Tree {
+        match self.read_port(tree).await {
+            PortContents::Aux(sender) | PortContents::AuxLazy(sender) => {
+                let (v0, v1) = self.shared.net.lock().unwrap().create_wire();
+                sender.send(PortContents::Tree(v0)).unwrap();
+                v1
+            }
             PortContents::Tree(tree) => tree,
             _ => unreachable!(),
         }
@@ -196,11 +219,60 @@ impl SharedState {
             }
         }
     }
-    pub async fn as_era(&self, tree: Tree) -> () {
-        match tree {
-            Tree::Era => (),
-            _ => todo!("TODO: Eta-reduce trees that are eta-equivalent to erasers"),
+    pub fn as_era_with_visited(
+        &self,
+        tree: Tree,
+        mut visited: IndexSet<usize>,
+    ) -> BoxFuture<Result<(), Tree>> {
+        async move {
+            match tree {
+                Tree::Era => Ok(()),
+                Tree::Con(a, b) => {
+                    let (a, b) = join(
+                        self.read_era_with_visited(*a, visited.clone()),
+                        self.read_era_with_visited(*b, visited.clone()),
+                    )
+                    .await;
+                    if a.is_ok() && b.is_ok() {
+                        Ok(())
+                    } else {
+                        Err(Tree::c(
+                            unwrap_err_or(a, Tree::Era),
+                            unwrap_err_or(b, Tree::Era),
+                        ))
+                    }
+                }
+                Tree::Dup(a, b) => {
+                    let (a, b) = join(
+                        self.read_era_with_visited(*a, visited.clone()),
+                        self.read_era_with_visited(*b, visited.clone()),
+                    )
+                    .await;
+                    if a.is_ok() && b.is_ok() {
+                        Ok(())
+                    } else {
+                        Err(Tree::d(
+                            unwrap_err_or(a, Tree::Era),
+                            unwrap_err_or(b, Tree::Era),
+                        ))
+                    }
+                }
+                Tree::Package(id) => {
+                    if visited.insert(id) {
+                        let tree = self.shared.net.lock().unwrap().dereference_package(id);
+                        self.as_era_with_visited(tree, visited).await
+                    } else {
+                        // already exists; return Ok, as infinite era trees are equivalent to eras
+                        Ok(())
+                    }
+                }
+                x => Err(x),
+            }
         }
+        .boxed()
+    }
+    pub async fn as_era(&self, tree: Tree) -> Result<(), Tree> {
+        self.as_era_with_visited(tree, Default::default()).await
     }
     /// Eagerly read back a CON node.
     /// If we don't get a CON node, eta-expand and return the readback of that.
@@ -208,9 +280,16 @@ impl SharedState {
         let tree = self.read_port_as_tree(tree).await;
         self.as_con(tree).await
     }
-    pub async fn read_era(&self, tree: Tree) -> () {
-        let tree = self.read_port_as_tree(tree).await;
-        self.as_era(tree).await
+    pub async fn read_era_with_visited(
+        &self,
+        tree: Tree,
+        visited: IndexSet<usize>,
+    ) -> Result<(), Tree> {
+        let tree = self.read_port_as_maybe_var(tree).await;
+        self.as_era_with_visited(tree, visited).await
+    }
+    pub async fn read_era(&self, tree: Tree) -> Result<(), Tree> {
+        self.read_era_with_visited(tree, Default::default()).await
     }
     pub async fn as_par(&self, tree: Tree) -> (Tree, Tree) {
         self.as_con(tree).await
@@ -222,7 +301,7 @@ impl SharedState {
         use futures::future::FutureExt;
         async move {
             if len == 0 {
-                self.read_era(tree).await;
+                self.read_era(tree).await.unwrap();
                 vec![]
             } else if len == 1 {
                 vec![tree]
@@ -239,28 +318,45 @@ impl SharedState {
         }
         .boxed()
     }
-    pub async fn as_either<Name: Debug + Clone>(
+    pub async fn as_either<Name: Debug + Send>(
         &self,
         tree: Tree,
         variants: Vec<Name>,
     ) -> (Name, Tree) {
-        // TODO: we might have to eta-reduce `context` here
-        // because it's possible that it's link to the context variable in the variant is eta-expnded
-        // A less brittle solution is to make this interact with a `choice`
-        let tree_s = self.shared.net.lock().unwrap().show_tree(&tree);
-        let variants_s = variants.clone();
-        let (_context, possibilities) = self.as_con(tree).await;
+        // TODO: This as_either function is weaker than it should be
+        // It will not detect some invalid Either instances, where the context wires are plugged in incorrectly
+        let (context, possibilities) = self.as_con(tree).await;
+        let ctx_fut = async move {
+            // we do a strict read of the context to ensure there's a readback node plugged in to the other side
+            self.read_era(context).await;
+        }
+        .boxed();
         let possibilities = self
             .flatten_multiplexed(possibilities, variants.len())
             .await;
-        let mut name_payload = None;
-        for (possible, name) in possibilities.into_iter().zip(variants) {
-            if let Tree::Con(_ctx, b) = self.read_port_as_tree(possible).await {
-                name_payload = Some((name, *b));
+        let payload_fut = possibilities
+            .into_iter()
+            .zip(variants)
+            .map(|(possible, name)| {
+                async move {
+                    if let Err(e) = self.read_era(possible).await {
+                        let (_, payload) = self.as_con(e).await;
+                        Some((name, payload))
+                    } else {
+                        None
+                    }
+                }
+                .boxed()
+            })
+            .collect::<FuturesUnordered<_>>()
+            .collect::<Vec<_>>();
+        let (_, payload) = join(ctx_fut, payload_fut).await;
+        for i in payload {
+            if let Some(i) = i {
+                return i;
             }
         }
-        name_payload
-            .unwrap_or_else(|| panic!("Couldn't readback *either* {}; {:?}", tree_s, variants_s))
+        todo!("Couldn't read -either-; all variants were erasers")
     }
     pub async fn as_choice<Name>(
         &self,
@@ -360,11 +456,11 @@ impl SharedState {
                 }
 
                 crate::par::types::Type::Break(_) => {
-                    self.read_era(tree).await;
+                    self.read_era(tree).await.unwrap();
                     ReadbackResult::Break
                 }
                 crate::par::types::Type::Continue(_) => {
-                    self.read_era(tree).await;
+                    self.read_era(tree).await.unwrap();
                     ReadbackResult::Continue
                 }
                 ty => ReadbackResult::Unsupported(tree.with_type(ty)),
