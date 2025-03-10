@@ -12,7 +12,7 @@ name = @{ !(keyword ~ !("_" | ASCII_ALPHANUMERIC)) ~ (ASCII_ALPHA ~ ("_" | ASCII
 program     = { SOI ~ (type_def | declaration | definition)* ~ EOI }
 type_def    = { "type" ~ name ~ type_params ~ "=" ~ typ }
 declaration = { "dec" ~ name ~ ":" ~ typ }
-definition  = { "def" ~ name ~ "=" ~ expression }
+definition  = { "def" ~ name ~ annotation ~ "=" ~ expression }
 
 expression_list = { expression  ~ ("," ~ expression )* ~ ","? }
 name_list = { name  ~ ("," ~ name )* ~ ","? }

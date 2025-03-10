@@ -124,6 +124,9 @@ pub fn parse_program(source: &str) -> Result<Program<Name, Expression<Loc, Name>
             Rule::definition => {
                 let mut pairs = pair.into_inner();
                 let (_, name) = parse_name(&mut pairs)?;
+                if let Some(typ) = parse_annotation(&mut pairs)? {
+                    declarations.insert(name.clone(), Some(typ));
+                }
                 let expression = parse_expression(&mut pairs)?;
                 declarations.entry(name.clone()).or_insert(None);
                 definitions.insert(name, expression);
