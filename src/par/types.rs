@@ -392,10 +392,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
 
             (Self::Recursive(_, label1, body1), Self::Recursive(_, label2, body2)) => {
                 let mut ind = ind.clone();
-                ind.insert((
-                    label1.clone(),
-                    label2.clone(),
-                ));
+                ind.insert((label1.clone(), label2.clone()));
                 body1.is_assignable_to(body2, type_defs, &ind)?
             }
             (typ, Self::Recursive(_, label, body)) => typ.is_assignable_to(
@@ -405,10 +402,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             )?,
             (Self::Iterative(_, label1, body1), Self::Iterative(_, label2, body2)) => {
                 let mut ind = ind.clone();
-                ind.insert((
-                    label1.clone(),
-                    label2.clone(),
-                ));
+                ind.insert((label1.clone(), label2.clone()));
                 body1.is_assignable_to(body2, type_defs, &ind)?
             }
             (Self::Iterative(_, label, body), typ) => {
@@ -416,22 +410,25 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     .is_assignable_to(typ, type_defs, ind)?
             }
 
-            (Self::Self_(_, label1), Self::Self_(_, label2)) => ind.contains(&(
-                label1.clone(),
-                label2.clone(),
-            )),
+            (Self::Self_(_, label1), Self::Self_(_, label2)) => {
+                ind.contains(&(label1.clone(), label2.clone()))
+            }
 
             (Self::SendType(loc, name1, body1), Self::SendType(_, name2, body2)) => {
                 let body2 = body2
                     .clone()
                     .substitute(name2, &Type::Var(loc.clone(), name1.clone()))?;
-                body1.is_assignable_to(&body2, type_defs, ind)?
+                let mut type_defs = type_defs.clone();
+                type_defs.vars.insert(name1.clone());
+                body1.is_assignable_to(&body2, &type_defs, ind)?
             }
             (Self::ReceiveType(loc, name1, body1), Self::ReceiveType(_, name2, body2)) => {
                 let body2 = body2
                     .clone()
                     .substitute(name2, &Type::Var(loc.clone(), name1.clone()))?;
-                body1.is_assignable_to(&body2, type_defs, ind)?
+                let mut type_defs = type_defs.clone();
+                type_defs.vars.insert(name1.clone());
+                body1.is_assignable_to(&body2, &type_defs, ind)?
             }
 
             _ => false,
@@ -506,9 +503,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             Self::Name(loc, name, args) => Self::Name(
                 loc.clone(),
                 name.clone(),
-                args.into_iter()
-                    .map(|arg| arg.chan_self(label))
-                    .collect(),
+                args.into_iter().map(|arg| arg.chan_self(label)).collect(),
             ),
 
             Self::Send(loc, t, u) => Self::Send(
@@ -567,16 +562,12 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                 }
             }
 
-            Self::SendType(loc, name, t) => Self::SendType(
-                loc.clone(),
-                name.clone(),
-                Box::new(t.chan_self(label)),
-            ),
-            Self::ReceiveType(loc, name, t) => Self::ReceiveType(
-                loc.clone(),
-                name.clone(),
-                Box::new(t.chan_self(label)),
-            ),
+            Self::SendType(loc, name, t) => {
+                Self::SendType(loc.clone(), name.clone(), Box::new(t.chan_self(label)))
+            }
+            Self::ReceiveType(loc, name, t) => {
+                Self::ReceiveType(loc.clone(), name.clone(), Box::new(t.chan_self(label)))
+            }
 
             Self::Chan(loc, box t) => Self::Chan(loc, Box::new(t.chan_self(label))),
         }
@@ -1285,7 +1276,7 @@ where
                 let then_type = then_type
                     .clone()
                     .substitute(type_name, &Type::Var(loc.clone(), parameter.clone()))?;
-                self.type_defs.vars.insert(type_name.clone());
+                self.type_defs.vars.insert(parameter.clone());
                 self.put(loc, object.clone(), then_type)?;
                 let (process, inferred_types) = analyze_process(self, process)?;
                 (
