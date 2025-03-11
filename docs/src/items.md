@@ -10,10 +10,10 @@
 
 > **<sup>Syntax</sup>**\
 > _Declaration_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `dec` [_ID_] `:` [_Type_]
+> &nbsp;&nbsp; &nbsp;&nbsp; `dec` [ID] `:` [_Type_]
 > 
 > _Definition_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `def` [_ID_] (`:` [_Type_])<sup>?</sup> `=` [_Expression_]
+> &nbsp;&nbsp; &nbsp;&nbsp; `def` [ID] (`:` [_Type_])<sup>?</sup> `=` [_Expression_]
 
 `def` defines a global definition usable throughout the file in which it was defined.
 It can be used as many times as one desires, instantiating itself every time it's used.
@@ -42,13 +42,13 @@ def pop = [type T] [list] list {
 
 > **<sup>Syntax</sup>**\
 > _TypeDefinition_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `type` [_ID_] _TypeParameters_<sup>?</sup> `=` [_Type_]
+> &nbsp;&nbsp; &nbsp;&nbsp; `type` [ID] _TypeParameters_<sup>?</sup> `=` [_Type_]
 >
 > _TypeParameters_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; `<` _TypeParameter_ (`,` _TypeParamter_)<sup>\*</sup> `,`<sup>?</sup> `>`
 >
 > _TypeParameter_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; [_ID_]
+> &nbsp;&nbsp; &nbsp;&nbsp; [ID]
 
 A type definition defines a type alias, not a "new type". All types in Par are structural. <!--(Proposal: Automatically add a tag in some cases for either and choice types)-->
 ```par
@@ -69,7 +69,7 @@ type Option<T> = either {
 ```
 
 
-[_ID_]: ./lexical.md
+[ID]: ./lexical.md
 [_Type_]: ./types.md
 [_PatternList_]: ./patterns.md
 [_PatternNoTopAlt_]: ./patterns.md

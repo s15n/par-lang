@@ -34,7 +34,7 @@ y = let x = 5 in x * x // 25
 ```
 
 \\[
-\frac{p:A^\perp \quad x:A \quad y[p|x]:B}{\texttt{let $p$ = $x$ in $y$}:B}
+\frac{p \leftarrow A \quad x:A \quad y[p|x]:B}{\texttt{let $p$ = $x$ in $y$}:B}
 \\]
 
 

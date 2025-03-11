@@ -2,7 +2,7 @@
 
 [Introduction](./introduction.md)
 
-- [Notation]()
+- [Notation](./notation.md)
 - [Lexical Structure]()
 - [Source Files]()
 - [Items](./items.md)

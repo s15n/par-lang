@@ -28,12 +28,12 @@ At the heart of Par lies its type system, representing linear logic.
 > &nbsp;&nbsp; &nbsp;&nbsp; `<` _TypeList_ `>`
 >
 > _Label_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `.` [_ID_]
+> &nbsp;&nbsp; &nbsp;&nbsp; `.` [ID]
 
 ## Named Types
 
 > **<sup>Syntax</sup>**\
-> _NamedType_ : [_ID_] _TypeArguments_<sup>?</sup>
+> _NamedType_ : [ID] _TypeArguments_<sup>?</sup>
 
 Defined via type aliases, named types can always be replaced with their definition without changing meaning.
 
@@ -691,6 +691,6 @@ def j = [type A] [annihilate] chan a {
 
 So the dual of a type can be used to destruct a value.
 
-[_ID_]: ./lexical.md
+[ID]: ./lexical.md
 [_ID_List_]: ./lexical.md
 [_Loop_Label_]: ./expressions.md
