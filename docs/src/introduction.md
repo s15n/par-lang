@@ -2,6 +2,10 @@
 
 Par (⅋) is a concurrent programming language bringing the expressive power of linear logic into practice.
 
+This reference contains not only the complete grammar and specification of Par but also an extensive collection of examples, explanations and best practices.
+
+When you're done reading this introduction, just go on to the chapter about [types](types.md), this is where the interesting stuff begins.
+
 ## Overview
 
 Par is a multi-layer language with an intermediate representation in itself.
@@ -24,6 +28,8 @@ def main: HW = chan user {
 Par is centered around concurrency and session typing, all in the framework of linear logic.
 What does that mean?
 
+- Types are _linear_, i.e. a value must be used exactly once.
+  You might know the type system of Rust, where a value must be used at most once.
 - Ultimately, everything in Par is a _channel_.
   - A list sends every item in order and then closes
   - A function receives its argument and becomes the result
@@ -111,3 +117,5 @@ To ask questions or discuss ideas, visit the [Discord](https://discord.gg/8Ksype
 For a quick but in-depth tutorial, read the [Readme](https://github.com/faiface/par-lang).
 
 An then, there's the document you're currently reading, of course.
+
+\>\>\> Jump directly to the chapter about [types](types.md) <<<
