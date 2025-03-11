@@ -30,7 +30,7 @@ def add = [n1, n2] n1 begin {
 
 type Seq<T> = iterative {
   .close => !
-  .next  => (T) loop
+  .next  => (T) self
 }
 
 dec fibonacci : Seq<Nat>

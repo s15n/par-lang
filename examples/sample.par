@@ -8,12 +8,12 @@ type List<T> = recursive either {
 
 type Seq<T> = iterative {
   .close => !
-  .next  => (T) loop
+  .next  => (T) self
 }
 
 type Mapper<A, B> = iterative {
   .close    => !
-  .apply(A) => (B) loop
+  .apply(A) => (B) self
 }
 
 dec mapList : [type A, B] [List<A>, Mapper<A, B>] List<B>

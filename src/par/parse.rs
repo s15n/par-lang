@@ -262,12 +262,6 @@ fn parse_type(pairs: &mut Pairs<'_, Rule>) -> Result<Type<Loc, Name>, ParseError
             Ok(Type::Self_(loc, label))
         }
 
-        Rule::typ_loop => {
-            let mut pairs = pair.into_inner();
-            let label = parse_loop_label(&mut pairs)?;
-            Ok(Type::Loop(loc, label))
-        }
-
         Rule::typ_send_type => {
             let mut pairs = pair.into_inner();
             let names = parse_name_list(&mut pairs)?;
