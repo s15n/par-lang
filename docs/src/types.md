@@ -272,8 +272,7 @@ def list_stack = [type T] [list] begin {
 
 def main = do {
   let list: List<Bool> = .item(.false!).empty!
-  let stack: Stack<List<Bool>, Bool>
-    = list_stack(type Bool)(list)
+  let stack = list_stack(type Bool)(list)
 
   stack.push(.true!)
   stack.push(.false!)
