@@ -8,7 +8,7 @@ multilingual = false
 
 [output.html]
 theme = "par-theme"
-git-repository-url = "https://github.com/par-lang/documentation"
+git-repository-url = "https://github.com/faiface/par-lang/tree/main/docs"
 mathjax-support = true
 
 [output.html.code.hidelines]

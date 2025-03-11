@@ -5,18 +5,18 @@ At the heart of Par lies its type system, representing linear logic.
 > **<sup>Syntax</sup>**\
 > _Type_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; [_NamedType_](#named-types) \
+> &nbsp;&nbsp; | [_Unit_](#the-unit-type) \
 > &nbsp;&nbsp; | [_PairType_](#pair-types) \
 > &nbsp;&nbsp; | [_FunctionType_](#function-types) \
 > &nbsp;&nbsp; | [_EitherType_](#either-types) \
 > &nbsp;&nbsp; | [_ChoiceType_](#choice-types) \
-> &nbsp;&nbsp; | [_Unit_](#the-unit-type) \
-> &nbsp;&nbsp; | [_Bottom_](#the-bottom-type) \
 > &nbsp;&nbsp; | [_RecursiveType_](#recursive-types) \
 > &nbsp;&nbsp; | [_IterativeType_](#iterative-types) \
 > &nbsp;&nbsp; | [_Self_](#recursive-types) \
 > &nbsp;&nbsp; | [_Loop_](#iterative-types) \
 > &nbsp;&nbsp; | [_ExistentialType_](#existential-types) \
 > &nbsp;&nbsp; | [_UniversalType_](#universal-types) \
+> &nbsp;&nbsp; | [_Bottom_](#the-bottom-type) \
 > &nbsp;&nbsp; | [_ChannelType_](#channel-types) <!--\
 > &nbsp;&nbsp; | _ReplicableType_ \
 > &nbsp;&nbsp; | _TaggedType_ -->
@@ -33,7 +33,7 @@ At the heart of Par lies its type system, representing linear logic.
 ## Named Types
 
 > **<sup>Syntax</sup>**\
-> _NamedType_ : [_ID_] [_TypeArguments_]<sup>?</sup>
+> _NamedType_ : [_ID_] _TypeArguments_<sup>?</sup>
 
 Defined via type aliases, named types can always be replaced with their definition without changing meaning.
 
@@ -42,194 +42,6 @@ let x: Option<T> = .none!
 // is equivalent to
 let x: either { .none!, .some T } = .none!
 ```
-
-## Pair Types
-
-> **<sup>Syntax</sup>**\
-> _PairType_ : `(` _TypeList_ `)` _Type_
-
-Having multiple types between the `()` is just syntax sugar:
-```par
-type T = (A, B)!
-// is equivalent to
-type T = (A) (B) !
-```
-
-`!` is the unit for tuples, i.e. `(A, B)!` and `(A) B` are equivalent.
-
-Values are created using [pair expressions](./expressions.md#tuple-expressions):
-```par
-let a: A = ...
-let b: B = ...
-
-let pair: (A) B = (a) b
-```
-and they can be destructed using [pair patterns]() or [receive commands]():
-```par
-type ABC = { .a!, .b!, .c! }
-
-let triple: (ABC, ABC, ABC)! = (.a!, .b!, .c!)!
-
-// pattern matching
-let (first) rest = triple
-// first = .a!
-// rest = (.b!, .c!)!
-
-// commands
-do {
-  rest[second]
-  // after this command:
-  // rest = (.c!)! 
-  // second = .b!
-} in ...
-```
-
-Mathematically, `(A) B` is \\(A \otimes B\\). For session types, it means "send `A` and continue as `B`".
-
-## Function Types
-
-> **<sup>Syntax</sup>**\
-> _FunctionType_ : `[` _TypeList_ `]` _Type_
-
-Having multiple types between the `[]` is just syntax sugar:
-```par
-type T = [A, B] R
-// is equivalent to
-type T = [A] [B] R
-```
-
-Values are created using [function expressions](./expressions.md#function-expressions):
-```par
-let id: [A] A = [a] a
-```
-and destructed by [calling]() the function:
-```par
-let a: A = ...
-let also_a = id(a) // call id
-```
-
-Mathematically, `[A] B` is a [linear](./linearity.md) function \\(A \multimap B\\). For session types, it means "receive `A` and continue as `B`".
-
-## Either Types
-
-> **<sup>Syntax</sup>**\
-> _EitherType_ : `either` `{` (_Label_ _Type_ `,`<sup>?</sup>)<sup>\*</sup> `}`
-
-An either type is a classical sum type aka. tagged union. Every value of such a type consists of a label (called "constructor") and a value of the type corresponding to the label (its "payload").
-
-```par
-// the most basic sum type
-type Bool = either {
-  .true!  // constructor "true" with payload !
-  .false! // constructor "false", also with payload !
-}
-
-// a slightly more complex example
-type TwoOrNone<T> = either {
-  .none!      // constructor "none" with "no" payload (using !)
-  .two(T, T)! // constructor "some" with "two" payloads
-}
-```
-
-Values are created by calling one of the constructors with its payload.
-```par
-let no_bool: TwoOrNone<Bool> = .none!
-
-let both_bools: TwoOrNone<Bool> = .two(.true!, .false!)!
-```
-
-Mathematically, `either { .a A, .b B }` is \\(A \oplus B\\). For session types, it means "select from `A` or `B`".
-An empty either type `either {}` is therefore \\(\mathbf{0}\\), the empty type.
-In Haskell, it's called `void` and in Rust it's `!` (not to be confused with the `!` in Par). 
-There is a function from it to every type:
-```par
-def absurd: [type T] [either {}] T = [type T] [x] x {}
-```
-This function can never be called though.
-
-Either types are often used as [recursive](#recursive-types) types.
-
-## Choice Types
-
-> **<sup>Syntax</sup>**\
-> _ChoiceType_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `{` (_Label_ (`(` _ReceiverList_ `)`)<sup>\*</sup> `=>` _Type_ `,`<sup>?</sup>)<sup>\*</sup> `}`
->
-> _ReceiverList_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; _TypeList_ \
-> &nbsp;&nbsp; | `type` [_ID_List_]
-
-A choice type is dual to an [either](#either-types) type. Constructing a value of an either type is "making a choice" and similarly, destructing such a value looks exactly like constructing a value of a choice type.
-It consists of several "destructors".
-
-```par
-// choice of two
-type BoolChoice<A, B> = {
-  .true => A
-  .false => B
-}
-
-// destruct a Bool
-def negate(b: Bool): Bool = b {
-  .true! => .false!
-  .false! => .true!
-}
-
-// construct a choice
-def negate_choice: BoolChoice<Bool, Bool> = {
-  .true => .false!
-  .false => .true!
-}
-
-// define negate using the choice
-// featuring selecting from the choice type value
-def also_negate: [Bool] Bool = [b] b {
-  .true! => negate_choice.true
-  .false! => negate_choice.false
-}
-```
-`.cons => [A] B` can also be written as `.cons(A) => B`
-
-A choice type represents an interface for interacting with data. While an either type describes its underlying data, a choice type describes what can be done with it.
-```par
-// creating an interface
-type Stack<Unwrap, T> = iter {
-  .push(T) => loop
-  .pop => (Option<T>) loop
-  .unwrap => Unwrap
-}
-
-// implementing it
-dec list_stack : [type T] [List<T>] Stack<List<T>, T>
-def list_stack = [type T] [list] begin {
-  .push(x) => let list: List<T> = .item(x) list in loop
-  .pop => list {
-    .empty! => (.none!) let list: List<T> = .empty! in loop,
-    .item(head) tail => (.some head) let list = tail in loop
-  }
-  .unwrap => list
-}
-
-def main = do {
-  let list: List<Bool> = .item(.false!).empty!
-  let stack: Stack<List<Bool>, Bool>
-    = list_stack(type Bool)(list)
-
-  stack.push(.true!)
-  stack.push(.false!)
-  stack.pop
-} in stack
-```
-todo: Is this a good example?
-
-Mathematically, `{ .a => A, .b => B }` is \\(A \mathbin{\\&} B\\). For session types, it means "offer a choice of `A` or `B`".
-An empty choice `{}` is therefore \\(\top\\) and has exactly one value, `{}`. There is a function to it from every type:
-```par
-def terminate: [type T] [T] {} = [type T] [x] {}
-```
-The result of this function can never be used though (todo: correct?).
-
-Choice types are often used as [iterative](#iterative-types) types.
 
 ## The Unit Type
 
@@ -266,28 +78,224 @@ def drop_repl: [type T] [&T] ! = !-->
 
 Mathematically, `!` is \\(\mathbf{1}\\), the unit for \\(\otimes\\).
 
-## The Bottom Type
+## Pair Types
 
 > **<sup>Syntax</sup>**\
-> _Bottom_ : `?`
+> _PairType_ : `(` _TypeList_ `)` _Type_
 
-The bottom `?` is dual to the unit `!`. 
-It's mostly used in process syntax to destruct the unit:
+Having multiple types between `(` and `)` is just syntax sugar:
 ```par
-let triple: (A, B, C)! = ...
-
-let reverse = do {
-  triple[a, b, c]?
-} in (c, b, a)!
+type T = (A, B) R
+// is equivalent to
+type T = (A) (B) R
 ```
 
-Mathematically, `?` is \\(\bot\\), the unit for \\(⅋\\). So \\(\bot \mathbin{⅋} A = \mathbf{1} \multimap A \cong A\\) (as seen before for the [unit](#the-unit-type) type).
+While `(A, B)!` and `(A) B` are both valid ways to define a pair of `A` and `B`, depending on the context, one might be more convenient than the other:
+```par
+// convert (A, B)! into (A) B
+def i : [(A, B)!] (A) B = [x]
+  let (a, b)! = x in (a) b
+// and back
+def j : [(A) B] (A, B)! = [x]
+  let (a) b = x in (a, b)!
+
+// a good use case of (A) B
+type List<T> = recursive either {
+  .empty!
+  .item(T) self
+}
+// can now be created like this:
+let bool_list: List<Bool> =
+  .item(.true!).item(.false!).empty!
+
+// in most cases, (A, B)! is the safer bet
+// as it uses more friendly syntax
+type Pair<T, T> = (T, T)!
+
+let bool_pair: Pair<Bool> =
+  (.true!, .false!)!
+```
+
+Values are created using [pair expressions](./expressions.md#tuple-expressions):
+```par
+let a: A = ...
+let b: B = ...
+
+let pair: (A) B = (a) b
+```
+and they can be destructed using [pair patterns]() or [receive commands]():
+```par
+type ABC = { .a!, .b!, .c! }
+
+let triple: (ABC, ABC, ABC)! = (.a!, .b!, .c!)!
+
+// pattern matching
+let (first) rest = triple
+// first = .a!
+// rest = (.b!, .c!)!
+
+// commands
+do {
+  rest[second]
+  // after this command:
+  // rest = (.c!)! 
+  // second = .b!
+} in ...
+```
+
+Mathematically, `(A) B` is \\(A \otimes B\\). For session types, it means "send `A` and continue as `B`".
+
+## Function Types
+
+> **<sup>Syntax</sup>**\
+> _FunctionType_ : `[` _TypeList_ `]` _Type_
+
+Having multiple types between `[` and `]` is just syntax sugar:
+```par
+type T = [A, B] R
+// is equivalent to
+type T = [A] [B] R
+```
+
+Values are created using [function expressions](./expressions.md#function-expressions):
+```par
+let add1: [Nat] Nat = [n] .succ n
+```
+and destructed by [calling]() the function:
+```par
+let one: Nat = .succ.zero!
+let two = add1(one)
+```
+
+Mathematically, `[A] B` is a [linear](./linearity.md) function \\(A \multimap B\\). For session types, it means "receive `A` and continue as `B`".
+
+## Either Types
+
+> **<sup>Syntax</sup>**\
+> _EitherType_ : `either` `{` (_Label_ _Type_ `,`<sup>?</sup>)<sup>\*</sup> `}`
+
+An either type is the usual sum type aka. a tagged union (in Rust, it's an `enum`). Every value of such a type consists of a label, marking the variant, and a value of the type corresponding to the label (its "payload").
+
+```par
+// the most basic sum type
+type Bool = either {
+  .true!  // variant "true" with payload !
+  .false! // variant "false", also with payload !
+}
+
+// a slightly more complex example
+type TwoOrNone<T> = either {
+  .none!      // variant "none" with "no" payload (using !)
+  .two(T, T)! // variant "some" with "two" payloads
+}
+```
+
+Values are created by attaching a label to its required payload.
+Note that the corresponding either type must always be known when labeling an expression. A [type annotation]() can be used for that.
+```par
+let no_bool: TwoOrNone<Bool> = .none!
+
+let both_bools: TwoOrNone<Bool> = .two(.true!, .false!)!
+```
+
+Mathematically, `either { .a A, .b B }` is \\(A \oplus B\\). For session types, it means "select from `A` or `B`".
+An empty either type `either {}` is therefore \\(\mathbf{0}\\), the empty type.
+In Haskell, it's called `void` and in Rust it's `!` (not to be confused with the `!` in Par). 
+There is a function from it to every type:
+```par
+def absurd: [type T] [either {}] T = [type T] [x] x {}
+```
+This function can never be called though.
+
+Either types are often used as [recursive](#recursive-types) types.
+
+## Choice Types
+
+> **<sup>Syntax</sup>**\
+> _ChoiceType_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; `{` (_Label_ (`(` _ReceiverList_ `)`)<sup>\*</sup> `=>` _Type_ `,`<sup>?</sup>)<sup>\*</sup> `}`
+>
+> _ReceiverList_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; _TypeList_ \
+> &nbsp;&nbsp; | `type` [_ID_List_]
+
+A choice type is dual to an [either](#either-types) type. Constructing a value of an either type is "making a choice" and similarly, destructing such a value looks exactly like constructing a value of a choice type.
+It consists of several labels that can be used as signals to destruct the receiver.
+
+```par
+// choice of two
+type BoolChoice<A, B> = {
+  .true => A
+  .false => B
+}
+
+// destruct a Bool
+def negate(b: Bool): Bool = b {
+  .true! => .false!
+  .false! => .true!
+}
+
+// construct a choice
+def negate_choice: BoolChoice<Bool, Bool> = {
+  .true => .false!
+  .false => .true!
+}
+
+// define negate using the choice
+// featuring selecting from the choice type value
+def also_negate: [Bool] Bool = [b] b {
+  .true! => negate_choice.true
+  .false! => negate_choice.false
+}
+```
+`.cons => [A] B` can also be written as `.cons(A) => B`
+
+A choice type represents an interface for interacting with data. While an either type describes its underlying data, a choice type describes what can be done with it.
+```par
+// creating an interface
+type Stack<Unwrap, T> = iterative {
+  .push(T) => loop
+  .pop => (Option<T>) loop
+  .unwrap => Unwrap
+}
+
+// implementing it
+dec list_stack : [type T] [List<T>] Stack<List<T>, T>
+def list_stack = [type T] [list] begin {
+  .push(x) => let list: List<T> = .item(x) list in loop
+  .pop => list {
+    .empty! => (.none!) let list: List<T> = .empty! in loop,
+    .item(head) tail => (.some head) let list = tail in loop
+  }
+  .unwrap => list
+}
+
+def main = do {
+  let list: List<Bool> = .item(.false!).empty!
+  let stack: Stack<List<Bool>, Bool>
+    = list_stack(type Bool)(list)
+
+  stack.push(.true!)
+  stack.push(.false!)
+  stack.pop
+} in stack
+```
+todo: Is this a good example?
+
+Mathematically, `{ .a => A, .b => B }` is \\(A \mathbin{\\&} B\\). For session types, it means "offer a choice of `A` or `B`".
+An empty choice `{}` is therefore \\(\top\\) and has exactly one value, `{}`. There is a function to it from every type:
+```par
+def immortalize: [type T] [T] {} = [type T] [x] {}
+```
+The result of this function can never be used though.
+
+Choice types are often used as [iterative](#iterative-types) types.
 
 ## Recursive Types
 
 > **<sup>Syntax</sup>**\
 > _RecursiveType_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `rec` [_LoopLabel_]<sup>?</sup> _Type_
+> &nbsp;&nbsp; &nbsp;&nbsp; `recursive` [_LoopLabel_]<sup>?</sup> _Type_
 >
 > _Self_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; `self` [_LoopLabel_]<sup>?</sup>
@@ -296,7 +304,7 @@ A recursive type can be used within itself via `self`
 
 Recursive types are mostly used in conjunction with either types:
 ```par
-type List<T> = rec either {
+type List<T> = recursive either {
   .empty!
   .item(T) self
 }
@@ -308,12 +316,12 @@ type Node<Next> = either {
   .step Next
 }
 // Defining the recursive type
-type Rec = rec Node<self>
+type Rec = recursive Node<self>
 
 // We have the following subtyping relation:
-// Node<rec Node<self>> <: rec Node<self>-->
+// Node<recursive Node<self>> <: recursive Node<self>-->
 
-Values of recursive types terminate (todo: correct?)
+Values of recursive types always terminate. They have to be constructed finitely.
 ```par
 // a simple List
 let l: List<Bool> = .item(.true!).item(.false!).empty!
@@ -326,7 +334,7 @@ A function from a recursive type is defined using induction:
 ```par
 // recursive (inductive) type representing
 // the natural numbers
-type Nat = rec either { 
+type Nat = recursive either { 
   .zero!, 
   .succ self
 }
@@ -337,6 +345,7 @@ def is_even = [n] n begin {
   // base case(s)
   .zero! => .true!
   // inductive step(s)
+  // pred loop is analogous to an inductive hypothesis
   .succ pred => not(pred loop)
 }
 ```
@@ -345,7 +354,7 @@ def is_even = [n] n begin {
 
 > **<sup>Syntax</sup>**\
 > _IterativeType_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `iter` [_LoopLabel_]<sup>?</sup> _Type_
+> &nbsp;&nbsp; &nbsp;&nbsp; `iterative` [_LoopLabel_]<sup>?</sup> _Type_
 >
 > _Loop_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; `loop` [_LoopLabel_]<sup>?</sup>
@@ -355,11 +364,17 @@ todo: General, mathematical, constraints
 An iterative type can be used within itself via `loop`
 
 Iterative types are mostly used in conjunction with choice types, for example:
-```par
-type Repl<T> = iter {
+<!--```par
+type Repl<T> = iterative {
   .copy => (loop, loop)!
   .drop => !
   .unwrap => T
+}
+```-->
+```par
+type Stream<T> = iterative {
+  .close => !
+  .next => (T) loop
 }
 ```
 
@@ -367,8 +382,8 @@ type Repl<T> = iter {
 between this and destructing a recursive type.
 ```par
 ?type Bool = either { .true!, .false! }
-?type Nat = rec either { .zero!, .succ self }
-?type List<T> = rec either { .empty!, .item(T) self }
+?type Nat = recursive either { .zero!, .succ self }
+?type List<T> = recursive either { .empty!, .item(T) self }
 ?
 // construct a list of Repl<Bool>
 // i.e. a value of a recursive type
@@ -398,24 +413,24 @@ def repl_bool = [b] begin {
 ?def main = repeat(.succ.succ.succ.zero!, repl_bool(.true!))
 ```-->
 
-Values of iterative types may be infinite (todo: correct?)
+Values of iterative types may be infinite. In contrast to recursive types, such values can only be _destructed_ in finitely many steps.
 ```par
-type Inf<T> = iter (T) loop
+type Inf<T> = iterative (T) loop
 
 def infinite_bools: Inf<Bool> = begin (.true!) loop
 ```
-This infinite value can be constructed but there is now way of fully destructing (so: using) it.
+This infinite value can be constructed but there is no way of fully destructing (so: using) it.
 
 Mathematically, an iterative choice type represents a coinductive type.
-Destructors without `loop` break the iteration, while those containing `loop` yields and continues.
+Destructors without `loop` break the iteration and return, while those containing `loop` yield and continue.
 
 A function to an iterative type is defined using coinduction (iteration):
 <!--```par
 // iterative (coinductive) type representing
 // an infinite stream
-type Stream<T> = iter either { 
-  .close!, 
-  .next(T) loop
+type Stream<T> = iterative { 
+  .close => !, 
+  .next => (T) loop
 }
 
 dec alternate_true_false : [Nat] Bool
@@ -427,40 +442,105 @@ def is_even = [n] n begin {
   .succ pred => not(pred loop)
 }
 ```-->
-```par
+<!--```par
 // construct a value of the iterative Repl<Bool>
 dec repl_bool : [Bool] Repl<Bool>
 // coinduction (marked by an independent begin-loop)
 def repl_bool = [b] begin {
-  // yield "(b, b)" and continue (coinductive step)
+  // yield "(b, b)" and
+  // continue (coinductive step), written as `loop`
   .copy => b {
     .true! => (let b: Bool = .true! in loop, let b: Bool = .true! in loop)!
     .false! => (let b: Bool = .false! in loop, let b: Bool = .false! in loop)!
   }
-  // break !
+  // break, yield !
   .drop => b {
     .true! => !
     .false! => !
   }
-  // break b
+  // break, yield b
   .unwrap => b
 }
+```-->
+```par
+?type Nat = recursive either { .zero!, .succ self }
+?
+// construct a stream of all natural numbers
+// in form of the iterative Stream<Nat>
+def nat_stream: Stream<Nat> = 
+  let n: Nat = .zero! in 
+  // coinduction (independent begin-loop)
+  begin {
+    // break, return !
+    .close => drop(n),
+
+    .next => do {
+      let (next, n)! = copy(n)
+      let n: Nat = .succ n
+    } in
+      // yield the next number 
+      (n1)
+      // continue (coinductive step)
+      loop 
+  }
+
+// helpers
+
+def drop: [Nat] ! = [n] n begin {
+  .zero! => !
+  .succ pred => pred loop
+}
+
+def copy: [Nat] (Nat, Nat)! = [n] n begin {
+  .zero! => (.zero!, .zero!)!
+  .succ pred => let (p1, p2)! = pred loop
+    in (.succ p1, .succ p2)!
+}
 ```
+<!--```par
+// fibonacci sequence
+def fib: Stream<Nat> = do {
+  let n: Nat  = .succ.zero!
+  let p: Nat = .succ.zero!
+  // coinduction
+} in begin {
+    // break, return !
+    .close => do {
+      drop(n)?
+      drop(p)?
+    } in !
+
+    .next => do {
+      let (n1, n2)! = copy(n)
+      let (p1, p2)! = copy(p)
+      let p = n1
+      let n = add(n2, p2)
+    } in
+      // yield
+      (p1)
+      // continue
+      loop
+  }
+def add: [Nat, Nat] Nat = [a, b] a begin {
+  .zero! => b,
+  .succ pred => .succ pred loop
+}
+```-->
 
 ## Existential Types
 
 > **<sup>Syntax</sup>**\
 > _ExistentialType_ : `(` `type` [_ID_List_] `)` _Type_
 
-Having multiple types between the `()` is just syntax sugar:
+Having multiple types between `(` and `)` is just syntax sugar:
 ```par
 type T = (type A, B) X
 // is equivalent to
 type T = (type A) (type B) X
 ```
 
-Existential types mirror tuple types but they're qualified over types rather than values.
-They are used to obscure their underlying type.
+Existential types mirror pair types but they're qualified over types rather than values.
+They are used to encapsulate their underlying type.
 ```par
 ?type Bool  = either { .true!, .false! }
 ?type Nat = recursive either { .zero!, .succ self }
@@ -494,19 +574,21 @@ Mathematically, `(type T) A` is \\(\exists\ T: A\\).
 > **<sup>Syntax</sup>**\
 > _UniversalType_ : `[` `type` [_ID_List_] `]` _Type_
 
-Having multiple types between the `[]` is just syntax sugar:
+Having multiple types between `[` and `]` is just syntax sugar:
 ```par
 type T = [type A, B] X
 // is equivalent to
 type T = [type A] [type B] X
 ```
 
-Existential types mirror function types but they're qualified over types rather than values.
+Values of universal types can be instantiated for any type. These types syntactically mirror function types but they're qualified over types rather than values.
 They're also similar to parameterized types.
 They are used to obscure their underlying type.
 ```par
+// compare the three types of parameterizing types
 type UnivEndo = [type T] [T] T
 type ParamEndo<T> = [T] T
+type ExistEndo = (type T) [T] T
 
 // a value of an universal type must be defined
 // for all types
@@ -515,9 +597,36 @@ let id: UnivEndo = [type T] [x] x
 // a specialized version can be represented using
 // a parameterized type
 let id_bool: ParamEndo<Bool> = id(type Bool)
+
+// this type encapsulates the Bool
+let id_bool_2: ExistEndo = (type Bool) id_bool
 ```
+For a more interesting example, see [(list reverse)]().
 
 Mathematically, `[type T] A` is \\(\forall\ T: A\\).
+
+## The Bottom Type
+
+> **<sup>Syntax</sup>**\
+> _Bottom_ : `?`
+
+The bottom `?` is dual to the unit `!`.
+```par
+dec just_true : Bool
+def just_true = chan return {
+  let continuation: ? = chan handover {
+    handover?
+    // do whatever with user
+    // In this case, return true
+    return.true!
+  }
+  // destruct ? using !
+  // i.e. end continuation
+  continuation!  
+}
+```
+
+Mathematically, `?` is \\(\bot\\), the unit for \\(⅋\\). So \\(\bot \mathbin{⅋} A = \mathbf{1} \multimap A \cong A\\) (as seen before for the [unit](#the-unit-type) type).
 
 ## Channel Types
 
@@ -531,18 +640,20 @@ def just_true: Bool = chan yield {
   c.true!
 }
 ```
+`chan` is merely a type transformer, turning a type into its dual.
+For example, `chan chan T` is _equal_ to `T` (not just isomorphic).
 
 A more elaborate example can be seen [here](https://github.com/faiface/par-lang/blob/main/examples/flatten.par)
 
-A `chan A` can be linked with an `A`, annihilating both and ending the process.
+A `chan A` can be linked with an `A` (using `<>`), annihilating both and ending the process.
 ```par
 def just_true: Bool = chan yield {
   let c: chan Bool = yield
   let b: Bool = .true!
-  c <-> b
+  c <> b
 }
 ```
-Note that `b <-> c` would have been equally valid.
+Note that `b <> c` would have been equally valid.
 
 Mathematically, `chan A` is \\(A^\perp\\), i.e. the dual type to `A`. Every type has a dual. We get for example:
 
@@ -556,8 +667,8 @@ Mathematically, `chan A` is \\(A^\perp\\), i.e. the dual type to `A`. Every type
 | `{ .a => A, .b => B }` | `either { .a chan A, .b chan B }` |
 | `!` | `?` |
 | `?` | `!` |
-| `rec T` | `iter chan T` |
-| `iter T` | `rec chan T` |
+| `recursive T` | `iterative chan T` |
+| `iterative T` | `recursive chan T` |
 | `self` | `loop` |
 | `loop` | `self` |
 | `(type T) A` | `[type T] chan A` |
@@ -569,13 +680,18 @@ dec i : [type A] [chan A] [A]?
 def i = [type A] [ch] chan receive {
   // receive is of type (A)!
   receive[a]?
-  ch <-> a
+  ch <> a
 }
 
 dec j : [type A] [[A]?] chan A
 def j = [type A] [annihilate] chan a {
+  // a is of type A
   annihilate(a)!
 }
 ```
 
 So the dual of a type can be used to destruct a value.
+
+[_ID_]: ./lexical.md
+[_ID_List_]: ./lexical.md
+[_Loop_Label_]: ./expressions.md

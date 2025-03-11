@@ -34,7 +34,7 @@ def negate: [Bool] Bool = [b] b {
 dec pop : [type T] [List<T>] (Option<T>) List<T>
 def pop = [type T] [list] list {
   .empty! => (.none!) .empty!
-  .item(head) tail => (.some(head)) tail
+  .item(head) tail => (.some head) tail
 }
 ```
 
