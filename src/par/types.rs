@@ -819,6 +819,58 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             ),
         })
     }
+
+    fn invalidate_ascendent(&mut self, label: &Option<Name>) {
+        match self {
+            Self::Var(_, name) => {}
+            Self::Name(_, name, args) => {
+                for arg in args {
+                    arg.invalidate_ascendent(label);
+                }
+            }
+            Self::Send(_, t, u) => {
+                t.invalidate_ascendent(label);
+                u.invalidate_ascendent(label);
+            }
+            Self::Receive(_, t, u) => {
+                t.invalidate_ascendent(label);
+                u.invalidate_ascendent(label);
+            }
+            Self::Either(_, branches) => {
+                for (_, t) in branches {
+                    t.invalidate_ascendent(label);
+                }
+            }
+            Self::Choice(_, branches) => {
+                for (_, t) in branches {
+                    t.invalidate_ascendent(label);
+                }
+            }
+            Self::Break(_) => {}
+            Self::Continue(_) => {}
+
+            Self::Recursive(_, asc, _, t) => {
+                asc.shift_remove(label);
+                t.invalidate_ascendent(label);
+            }
+            Self::Iterative(_, asc, _, t) => {
+                asc.shift_remove(label);
+                t.invalidate_ascendent(label);
+            }
+            Self::Self_(_, _) => {}
+
+            Self::SendType(_, _, t) => {
+                t.invalidate_ascendent(label);
+            }
+            Self::ReceiveType(_, _, t) => {
+                t.invalidate_ascendent(label);
+            }
+
+            Self::Chan(_, t) => {
+                t.invalidate_ascendent(label);
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -887,6 +939,12 @@ where
         }
         self.variables.insert(name, typ);
         Ok(())
+    }
+
+    fn invalidate_ascendent(&mut self, label: &Option<Name>) {
+        for (_, t) in &mut self.variables {
+            t.invalidate_ascendent(label);
+        }
     }
 
     pub fn add_declaration(&mut self, name: Name, typ: Type<Loc, Name>) {
@@ -1206,6 +1264,7 @@ where
                 let mut typ_asc = typ_asc.clone();
                 typ_asc.insert(label.clone());
 
+                self.invalidate_ascendent(label);
                 self.loop_points.insert(
                     label.clone(),
                     (
