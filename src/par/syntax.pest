@@ -71,7 +71,7 @@ cons_branch_then      = { "=>" ~ expression }
 cons_branch_receive   = { "(" ~ pattern_list ~ ")" ~ cons_branch }
 cons_branch_recv_type = { "(" ~ "type" ~ name_list ~ ")" ~ cons_branch }
 
-application     = { name ~ apply }
+application     = { (name | "{" ~ expression ~ "}") ~ apply }
 apply           = { apply_begin | apply_loop | apply_send | apply_choose | apply_either | apply_send_type | apply_noop }
 apply_noop      = { "" }
 apply_send      = { "(" ~ expression_list ~ ")" ~ apply }

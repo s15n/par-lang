@@ -17,11 +17,12 @@ pub enum Pattern<Loc, Name> {
 
 #[derive(Clone, Debug)]
 pub enum Expression<Loc, Name> {
+    Reference(Loc, Name),
     Let(Loc, Pattern<Loc, Name>, Box<Self>, Box<Self>),
     Do(Loc, Box<Process<Loc, Name>>, Box<Self>),
     Fork(Loc, Name, Option<Type<Loc, Name>>, Box<Process<Loc, Name>>),
     Construction(Loc, Construct<Loc, Name>),
-    Application(Loc, Name, Apply<Loc, Name>),
+    Application(Loc, Box<Self>, Apply<Loc, Name>),
 }
 
 #[derive(Clone, Debug)]
@@ -289,6 +290,12 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Expression<Loc, Name> {
         &self,
     ) -> Result<Arc<process::Expression<Loc, Internal<Name>, ()>>, CompileError<Loc>> {
         Ok(match self {
+            Self::Reference(loc, name) => Arc::new(process::Expression::Reference(
+                loc.clone(),
+                Internal::Original(name.clone()),
+                (),
+            )),
+
             Self::Let(loc, pattern, expression, body) => {
                 let expression = expression.compile()?;
                 let body = body.compile()?;
@@ -345,11 +352,10 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Expression<Loc, Name> {
                 ))
             }
 
-            Self::Application(loc, name, Apply::Noop(_)) => Arc::new(
-                process::Expression::Reference(loc.clone(), Internal::Original(name.clone()), ()),
-            ),
+            Self::Application(_, expr, Apply::Noop(_)) => expr.compile()?,
 
-            Self::Application(loc, name, apply) => {
+            Self::Application(loc, expr, apply) => {
+                let expr = expr.compile()?;
                 let process = apply.compile()?;
                 Arc::new(process::Expression::Fork(
                     loc.clone(),
@@ -362,11 +368,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Expression<Loc, Name> {
                         Internal::Object(None),
                         None,
                         (),
-                        Arc::new(process::Expression::Reference(
-                            loc.clone(),
-                            Internal::Original(name.clone()),
-                            (),
-                        )),
+                        expr,
                         process,
                     )),
                 ))
