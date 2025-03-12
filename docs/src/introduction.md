@@ -42,8 +42,7 @@ What does that mean?
 
 Putting all of this together, Par manages to be a functional language while also allowing imperative-style code and mutability.
 
-An example of a stack can be found [here](types.md#choice-types).
-It can be used like this:
+For example, a mutable stack can be implemented like this ([explanation](types.md#choice-types)):
 ```par
 ?type Bool = either { .true!, .false! }
 ?type List<T> = recursive either { .empty!, .item(T) self }
@@ -56,16 +55,14 @@ type Stack<Unwrap, T> = iterative {
 }
 
 dec list_stack : [type T] [List<T>] Stack<List<T>, T>
-// for the implementation follow the link above
-// or click the eye on the top right of this code block
-?def list_stack = [type T] [list] begin {
-?  .push(x) => let list: List<T> = .item(x) list in loop
-?  .pop => list {
-?    .empty! => (.none!) let list: List<T> = .empty! in loop,
-?    .item(head) tail => (.some head) let list = tail in loop
-?  }
-?  .unwrap => list
-?}
+def list_stack = [type T] [list] begin {
+  .push(x) => let list: List<T> = .item(x) list in loop
+  .pop => list {
+    .empty! => (.none!) let list: List<T> = .empty! in loop,
+    .item(head) tail => (.some head) let list = tail in loop
+  }
+  .unwrap => list
+}
 
 def main = do {
   let list: List<Bool> = .empty!

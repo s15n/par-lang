@@ -12,14 +12,16 @@ At the heart of Par lies its type system, representing linear logic.
 > &nbsp;&nbsp; | [_ChoiceType_](#choice-types) \
 > &nbsp;&nbsp; | [_RecursiveType_](#recursive-types) \
 > &nbsp;&nbsp; | [_IterativeType_](#iterative-types) \
-> &nbsp;&nbsp; | [_Self_](#recursive-types) \
-> &nbsp;&nbsp; | [_Loop_](#iterative-types) \
 > &nbsp;&nbsp; | [_ExistentialType_](#existential-types) \
 > &nbsp;&nbsp; | [_UniversalType_](#universal-types) \
 > &nbsp;&nbsp; | [_Bottom_](#the-bottom-type) \
-> &nbsp;&nbsp; | [_ChannelType_](#channel-types) <!--\
+> &nbsp;&nbsp; | [_ChannelType_](#channel-types) \
+> &nbsp;&nbsp; | _Self_ <!--\
 > &nbsp;&nbsp; | _ReplicableType_ \
 > &nbsp;&nbsp; | _TaggedType_ -->
+>
+> _Self_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; `self` [_LoopLabel_]<sup>?</sup>
 >
 > _TypeList_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; _Type_ (`,` _Type_)<sup>\*</sup> `,`<sup>?</sup>
@@ -47,6 +49,14 @@ let x: either { .none!, .some T } = .none!
 
 > **<sup>Syntax</sup>**\
 > _Unit_ : `!`
+
+*<sup>
+[Dual](#the-bottom-type)
+| [Constructing Expression](./expressions/construction.md#the-unit-expression)
+| [Pattern](./patterns.md#todo)
+| [Constructing Statement](./statements/commands.md#todo)
+| [Destructing Statement](./statements/commands.md#todo)
+</sup>*
 
 Unit is a type providing no information. In C(++) it's called `void`, in Rust it's `()` (and it can be thought of as an empty tuple in Par as well). There is exactly one value of type `!`, and it's also `!`.
 ```par
@@ -82,6 +92,14 @@ Mathematically, `!` is \\(\mathbf{1}\\), the unit for \\(\otimes\\).
 
 > **<sup>Syntax</sup>**\
 > _PairType_ : `(` _TypeList_ `)` _Type_
+
+*<sup>
+[Dual](#function-types)
+| [Constructing Expression](./expressions/construction.md#pair-expressions)
+| [Pattern](./patterns.md#todo)
+| [Constructing Statement](./statements/commands.md#todo)
+| [Destructing Statement](./statements/commands.md#todo)
+</sup>*
 
 Having multiple types between `(` and `)` is just syntax sugar:
 ```par
@@ -150,6 +168,14 @@ Mathematically, `(A) B` is \\(A \otimes B\\). For session types, it means "send 
 > **<sup>Syntax</sup>**\
 > _FunctionType_ : `[` _TypeList_ `]` _Type_
 
+*<sup>
+[Dual](#pair-types)
+| [Constructing Expression](./expressions/construction.md#function-expressions)
+| [Destructing Expression](./expressions/application.md#function-application)
+| [Constructing Statement](./statements/commands.md#todo)
+| [Destructing Statement](./statements/commands.md#todo)
+</sup>*
+
 Having multiple types between `[` and `]` is just syntax sugar:
 ```par
 type T = [A, B] R
@@ -173,6 +199,14 @@ Mathematically, `[A] B` is a [linear](./linearity.md) function \\(A \multimap B\
 
 > **<sup>Syntax</sup>**\
 > _EitherType_ : `either` `{` (_Label_ _Type_ `,`<sup>?</sup>)<sup>\*</sup> `}`
+
+*<sup>
+[Dual](#choice-types)
+| [Constructing Expression](./expressions/construction.md#todo)
+| [Destructing Expression](./expressions/application.md#todo)
+| [Constructing Statement](./statements/commands.md#todo)
+| [Destructing Statement](./statements/commands.md#todo)
+</sup>*
 
 An either type is the usual sum type aka. a tagged union (in Rust, it's an `enum`). Every value of such a type consists of a label, marking the variant, and a value of the type corresponding to the label (its "payload").
 
@@ -219,6 +253,14 @@ Either types are often used as [recursive](#recursive-types) types.
 > &nbsp;&nbsp; &nbsp;&nbsp; _TypeList_ \
 > &nbsp;&nbsp; | `type` [_ID_List_]
 
+*<sup>
+[Dual](#either-types)
+| [Constructing Expression](./expressions/construction.md#todo)
+| [Destructing Expression](./expressions/application.md#todo)
+| [Constructing Statement](./statements/commands.md#todo)
+| [Destructing Statement](./statements/commands.md#todo)
+</sup>*
+
 A choice type is dual to an [either](#either-types) type. Constructing a value of an either type is "making a choice" and similarly, destructing such a value looks exactly like constructing a value of a choice type.
 It consists of several labels that can be used as signals to destruct the receiver.
 
@@ -254,8 +296,8 @@ A choice type represents an interface for interacting with data. While an either
 ```par
 // creating an interface
 type Stack<Unwrap, T> = iterative {
-  .push(T) => loop
-  .pop => (Option<T>) loop
+  .push(T) => self
+  .pop => (Option<T>) self
   .unwrap => Unwrap
 }
 
@@ -279,7 +321,7 @@ def main = do {
   stack.pop
 } in stack
 ```
-todo: Is this a good example?
+For an explanation of `iterative`-`self` and `begin`-`loop`, see [iterative types](#iterative-types)
 
 Mathematically, `{ .a => A, .b => B }` is \\(A \mathbin{\\&} B\\). For session types, it means "offer a choice of `A` or `B`".
 An empty choice `{}` is therefore \\(\top\\) and has exactly one value, `{}`. There is a function to it from every type:
@@ -293,11 +335,13 @@ Choice types are often used as [iterative](#iterative-types) types.
 ## Recursive Types
 
 > **<sup>Syntax</sup>**\
-> _RecursiveType_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `recursive` [_LoopLabel_]<sup>?</sup> _Type_
->
-> _Self_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `self` [_LoopLabel_]<sup>?</sup>
+> _RecursiveType_ : `recursive` [_LoopLabel_]<sup>?</sup> _Type_
+
+*<sup>
+[Dual](#iterative-types)
+| [Destructing Expression](./expressions/application.md#todo)
+| [Destructing Statement](./statements/commands.md#todo)
+</sup>*
 
 A recursive type can be used within itself via `self`
 
@@ -352,11 +396,13 @@ def is_even = [n] n begin {
 ## Iterative Types
 
 > **<sup>Syntax</sup>**\
-> _IterativeType_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `iterative` [_LoopLabel_]<sup>?</sup> _Type_
->
-> _Loop_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `loop` [_LoopLabel_]<sup>?</sup>
+> _IterativeType_ : `iterative` [_LoopLabel_]<sup>?</sup> _Type_
+
+*<sup>
+[Dual](#recursive-types)
+| [Constructing Expression](./expressions/construction.md#todo)
+| [Constructing Statement](./statements/commands.md#todo)
+</sup>*
 
 todo: General, mathematical, constraints
 
@@ -365,7 +411,7 @@ An iterative type can be used within itself via `loop`
 Iterative types are mostly used in conjunction with choice types, for example:
 <!--```par
 type Repl<T> = iterative {
-  .copy => (loop, loop)!
+  .copy => (self, self)!
   .drop => !
   .unwrap => T
 }
@@ -373,7 +419,7 @@ type Repl<T> = iterative {
 ```par
 type Stream<T> = iterative {
   .close => !
-  .next => (T) loop
+  .next => (T) self
 }
 ```
 
@@ -414,7 +460,7 @@ def repl_bool = [b] begin {
 
 Values of iterative types may be infinite. In contrast to recursive types, such values can only be _destructed_ in finitely many steps.
 ```par
-type Inf<T> = iterative (T) loop
+type Inf<T> = iterative (T) self
 
 def infinite_bools: Inf<Bool> = begin (.true!) loop
 ```
@@ -429,7 +475,7 @@ A function to an iterative type is defined using coinduction (iteration):
 // an infinite stream
 type Stream<T> = iterative { 
   .close => !, 
-  .next => (T) loop
+  .next => (T) self
 }
 
 dec alternate_true_false : [Nat] Bool
@@ -531,6 +577,14 @@ def add: [Nat, Nat] Nat = [a, b] a begin {
 > **<sup>Syntax</sup>**\
 > _ExistentialType_ : `(` `type` [_ID_List_] `)` _Type_
 
+*<sup>
+[Dual](#universal-types)
+| [Constructing Expression](./expressions/construction.md#todo)
+| [Pattern](./patterns.md#todo)
+| [Constructing Statement](./statements/commands.md#todo)
+| [Destructing Statement](./statements/commands.md#todo)
+</sup>*
+
 Having multiple types between `(` and `)` is just syntax sugar:
 ```par
 type T = (type A, B) X
@@ -573,6 +627,14 @@ Mathematically, `(type T) A` is \\(\exists\ T: A\\).
 > **<sup>Syntax</sup>**\
 > _UniversalType_ : `[` `type` [_ID_List_] `]` _Type_
 
+*<sup>
+[Dual](#existential-types)
+| [Constructing Expression](./expressions/construction.md#todo)
+| [Destructing Expression](./expressions/application.md#todo)
+| [Constructing Statement](./statements/commands.md#todo)
+| [Destructing Statement](./statements/commands.md#todo)
+</sup>*
+
 Having multiple types between `[` and `]` is just syntax sugar:
 ```par
 type T = [type A, B] X
@@ -609,19 +671,18 @@ Mathematically, `[type T] A` is \\(\forall\ T: A\\).
 > **<sup>Syntax</sup>**\
 > _Bottom_ : `?`
 
+*<sup>
+[Dual](#the-unit-type)
+| [Constructing Statement](./statements/commands.md#todo)
+| [Destructing Statement](./statements/commands.md#todo)
+</sup>*
+
 The bottom `?` is dual to the unit `!`.
 ```par
-dec just_true : Bool
-def just_true = chan return {
-  let continuation: ? = chan handover {
-    handover?
-    // do whatever with user
-    // In this case, return true
-    return.true!
-  }
-  // destruct ? using !
-  // i.e. end continuation
-  continuation!  
+def main: Bool = chan user {
+  user.true
+  // user now has type ?
+  user!
 }
 ```
 
@@ -631,6 +692,12 @@ Mathematically, `?` is \\(\bot\\), the unit for \\(â…‹\\). So \\(\bot \mathbin{â
 
 > **<sup>Syntax</sup>**\
 > _ChannelType_ : `chan` _Type_
+
+*<sup>
+[Dual](#types)
+| [Constructing Expression](expressions.md#channel-expressions)
+| [Destructing Statement](./statements/commands.md#todo)
+</sup>*
 
 `chan A` represents a channel accepting an `A`:
 ```par
@@ -668,8 +735,6 @@ Mathematically, `chan A` is \\(A^\perp\\), i.e. the dual type to `A`. Every type
 | `?` | `!` |
 | `recursive T` | `iterative chan T` |
 | `iterative T` | `recursive chan T` |
-| `self` | `loop` |
-| `loop` | `self` |
 | `(type T) A` | `[type T] chan A` |
 | `[type T] A` | `(type T) chan A` |
 
@@ -693,4 +758,4 @@ So the dual of a type can be used to destruct a value.
 
 [ID]: ./lexical.md
 [_ID_List_]: ./lexical.md
-[_Loop_Label_]: ./expressions.md
+[_LoopLabel_]: ./expressions.md
