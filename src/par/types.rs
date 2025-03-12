@@ -6,8 +6,6 @@ use std::{
     sync::Arc,
 };
 
-use crate::par::parse::Loc;
-
 use super::process::{Captures, Command, Expression, Process};
 
 #[derive(Clone, Debug)]
@@ -37,7 +35,7 @@ pub enum Operation<Loc, Name> {
     Send(Loc),
     Receive(Loc),
     Choose(Loc, Name),
-    Match(Loc, Arc<[Name]>),
+    Match(Loc, #[allow(unused)] Arc<[Name]>),
     Break(Loc),
     Continue(Loc),
     Begin(Loc, Option<Name>),
@@ -822,8 +820,8 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
 
     fn invalidate_ascendent(&mut self, label: &Option<Name>) {
         match self {
-            Self::Var(_, name) => {}
-            Self::Name(_, name, args) => {
+            Self::Var(_, _) => {}
+            Self::Name(_, _, args) => {
                 for arg in args {
                     arg.invalidate_ascendent(label);
                 }
