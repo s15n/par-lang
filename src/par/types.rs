@@ -1974,7 +1974,7 @@ impl<Loc, Name: Display> TypeError<Loc, Name> {
             }
             Self::DoesNotDescendSubjectOfBegin(loc, _) => {
                 format!(
-                    "{}\nThis loop may diverge.\n\nThe subject of this `loop` does not descend from the subject of the corresponding `begin`.",
+                    "{}\nThis `loop` may diverge.\n\nValue does not descend from the corresponding `begin`.",
                     display_loc(loc),
                 )
             }
