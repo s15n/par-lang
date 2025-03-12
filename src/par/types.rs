@@ -6,6 +6,8 @@ use std::{
     sync::Arc,
 };
 
+use crate::par::parse::Loc;
+
 use super::process::{Captures, Command, Expression, Process};
 
 #[derive(Clone, Debug)]
@@ -24,6 +26,7 @@ pub enum TypeError<Loc, Name> {
     RedundantBranch(Loc, Name, Type<Loc, Name>),
     TypesCannotBeUnified(Type<Loc, Name>, Type<Loc, Name>),
     NoSuchLoopPoint(Loc, Option<Name>),
+    DoesNotDescendSubjectOfBegin(Loc, Option<Name>),
     LoopVariableNotPreserved(Loc, Name),
     LoopVariableChangedType(Loc, Name, Type<Loc, Name>, Type<Loc, Name>),
     Telltypes(Loc, IndexMap<Name, Type<Loc, Name>>),
@@ -54,8 +57,8 @@ pub enum Type<Loc, Name> {
     Choice(Loc, IndexMap<Name, Self>),
     Break(Loc),
     Continue(Loc),
-    Recursive(Loc, Option<Name>, Box<Self>),
-    Iterative(Loc, Option<Name>, Box<Self>),
+    Recursive(Loc, IndexSet<Option<Name>>, Option<Name>, Box<Self>),
+    Iterative(Loc, IndexSet<Option<Name>>, Option<Name>, Box<Self>),
     Self_(Loc, Option<Name>),
     SendType(Loc, Name, Box<Self>),
     ReceiveType(Loc, Name, Box<Self>),
@@ -161,8 +164,8 @@ impl<Loc, Name> Type<Loc, Name> {
             Self::Choice(loc, _) => loc,
             Self::Break(loc) => loc,
             Self::Continue(loc) => loc,
-            Self::Recursive(loc, _, _) => loc,
-            Self::Iterative(loc, _, _) => loc,
+            Self::Recursive(loc, _, _, _) => loc,
+            Self::Iterative(loc, _, _, _) => loc,
             Self::Self_(loc, _) => loc,
             Self::SendType(loc, _, _) => loc,
             Self::ReceiveType(loc, _, _) => loc,
@@ -202,12 +205,18 @@ impl<Loc, Name: Eq + Hash> Type<Loc, Name> {
             ),
             Self::Break(loc) => Type::Break(loc),
             Self::Continue(loc) => Type::Continue(loc),
-            Self::Recursive(loc, label, body) => {
-                Type::Recursive(loc, map_label(label, f), Box::new(body.map_names(f)))
-            }
-            Self::Iterative(loc, label, body) => {
-                Type::Iterative(loc, map_label(label, f), Box::new(body.map_names(f)))
-            }
+            Self::Recursive(loc, asc, label, body) => Type::Recursive(
+                loc,
+                asc.into_iter().map(|label| map_label(label, f)).collect(),
+                map_label(label, f),
+                Box::new(body.map_names(f)),
+            ),
+            Self::Iterative(loc, asc, label, body) => Type::Iterative(
+                loc,
+                asc.into_iter().map(|label| map_label(label, f)).collect(),
+                map_label(label, f),
+                Box::new(body.map_names(f)),
+            ),
             Self::Self_(loc, label) => Type::Self_(loc, map_label(label, f)),
             Self::SendType(loc, name, body) => {
                 Type::SendType(loc, f(name), Box::new(body.map_names(f)))
@@ -279,11 +288,11 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             Self::Break(loc) => Self::Break(loc),
             Self::Continue(loc) => Self::Continue(loc),
 
-            Self::Recursive(loc, label, body) => {
-                Self::Recursive(loc, label, Box::new(body.substitute(var, typ)?))
+            Self::Recursive(loc, asc, label, body) => {
+                Self::Recursive(loc, asc, label, Box::new(body.substitute(var, typ)?))
             }
-            Self::Iterative(loc, label, body) => {
-                Self::Iterative(loc, label, Box::new(body.substitute(var, typ)?))
+            Self::Iterative(loc, asc, label, body) => {
+                Self::Iterative(loc, asc, label, Box::new(body.substitute(var, typ)?))
             }
             Self::Self_(loc, label) => Self::Self_(loc, label),
 
@@ -390,23 +399,29 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             (Self::Break(_), Self::Break(_)) => true,
             (Self::Continue(_), Self::Continue(_)) => true,
 
-            (Self::Recursive(_, label1, body1), Self::Recursive(_, label2, body2)) => {
+            (Self::Recursive(_, asc1, label1, body1), Self::Recursive(_, asc2, label2, body2)) => {
+                if !asc2.iter().all(|label| asc1.contains(label)) {
+                    return Ok(false);
+                }
                 let mut ind = ind.clone();
                 ind.insert((label1.clone(), label2.clone()));
                 body1.is_assignable_to(body2, type_defs, &ind)?
             }
-            (typ, Self::Recursive(_, label, body)) => typ.is_assignable_to(
-                &Self::expand_recursive(label, body, type_defs)?,
+            (typ, Self::Recursive(_, asc, label, body)) => typ.is_assignable_to(
+                &Self::expand_recursive(asc, label, body, type_defs)?,
                 type_defs,
                 ind,
             )?,
-            (Self::Iterative(_, label1, body1), Self::Iterative(_, label2, body2)) => {
+            (Self::Iterative(_, asc1, label1, body1), Self::Iterative(_, asc2, label2, body2)) => {
+                if !asc2.iter().all(|label| asc1.contains(label)) {
+                    return Ok(false);
+                }
                 let mut ind = ind.clone();
                 ind.insert((label1.clone(), label2.clone()));
                 body1.is_assignable_to(body2, type_defs, &ind)?
             }
-            (Self::Iterative(_, label, body), typ) => {
-                Self::expand_iterative(label, body, type_defs)?
+            (Self::Iterative(_, asc, label, body), typ) => {
+                Self::expand_iterative(asc, label, body, type_defs)?
                     .is_assignable_to(typ, type_defs, ind)?
             }
 
@@ -473,13 +488,15 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             Self::Break(loc) => Self::Continue(loc.clone()),
             Self::Continue(loc) => Self::Break(loc.clone()),
 
-            Self::Recursive(loc, label, t) => Self::Iterative(
+            Self::Recursive(loc, asc, label, t) => Self::Iterative(
                 loc.clone(),
+                asc.clone(),
                 label.clone(),
                 Box::new(t.dual(type_defs)?.chan_self(label)),
             ),
-            Self::Iterative(loc, label, t) => Self::Recursive(
+            Self::Iterative(loc, asc, label, t) => Self::Recursive(
                 loc.clone(),
+                asc.clone(),
                 label.clone(),
                 Box::new(t.dual(type_defs)?.chan_self(label)),
             ),
@@ -533,18 +550,18 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             Self::Break(loc) => Self::Break(loc.clone()),
             Self::Continue(loc) => Self::Continue(loc.clone()),
 
-            Self::Recursive(loc, label1, t) => {
+            Self::Recursive(loc, asc, label1, t) => {
                 if &label1 == label {
-                    Self::Recursive(loc, label1, t)
+                    Self::Recursive(loc, asc, label1, t)
                 } else {
-                    Self::Recursive(loc, label1, Box::new(t.chan_self(label)))
+                    Self::Recursive(loc, asc, label1, Box::new(t.chan_self(label)))
                 }
             }
-            Self::Iterative(loc, label1, t) => {
+            Self::Iterative(loc, asc, label1, t) => {
                 if &label1 == label {
-                    Self::Iterative(loc, label1, t)
+                    Self::Iterative(loc, asc, label1, t)
                 } else {
-                    Self::Iterative(loc, label1, Box::new(t.chan_self(label)))
+                    Self::Iterative(loc, asc, label1, Box::new(t.chan_self(label)))
                 }
             }
             Self::Self_(loc, label1) => {
@@ -574,15 +591,18 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
     }
 
     pub fn expand_recursive(
+        asc: &IndexSet<Option<Name>>,
         label: &Option<Name>,
         body: &Self,
         type_defs: &TypeDefs<Loc, Name>,
     ) -> Result<Self, TypeError<Loc, Name>> {
-        body.clone().expand_recursive_helper(label, body, type_defs)
+        body.clone()
+            .expand_recursive_helper(asc, label, body, type_defs)
     }
 
     fn expand_recursive_helper(
         self,
+        top_asc: &IndexSet<Option<Name>>,
         top_label: &Option<Name>,
         top_body: &Self,
         type_defs: &TypeDefs<Loc, Name>,
@@ -592,13 +612,13 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             Self::Name(loc, name, args) => Self::Name(loc, name, args),
             Self::Send(loc, t, u) => Self::Send(
                 loc,
-                Box::new(t.expand_recursive_helper(top_label, top_body, type_defs)?),
-                Box::new(u.expand_recursive_helper(top_label, top_body, type_defs)?),
+                Box::new(t.expand_recursive_helper(top_asc, top_label, top_body, type_defs)?),
+                Box::new(u.expand_recursive_helper(top_asc, top_label, top_body, type_defs)?),
             ),
             Self::Receive(loc, t, u) => Self::Receive(
                 loc,
-                Box::new(t.expand_recursive_helper(top_label, top_body, type_defs)?),
-                Box::new(u.expand_recursive_helper(top_label, top_body, type_defs)?),
+                Box::new(t.expand_recursive_helper(top_asc, top_label, top_body, type_defs)?),
+                Box::new(u.expand_recursive_helper(top_asc, top_label, top_body, type_defs)?),
             ),
             Self::Either(loc, branches) => Self::Either(
                 loc,
@@ -607,7 +627,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     .map(|(branch, typ)| {
                         Ok((
                             branch,
-                            typ.expand_recursive_helper(top_label, top_body, type_defs)?,
+                            typ.expand_recursive_helper(top_asc, top_label, top_body, type_defs)?,
                         ))
                     })
                     .collect::<Result<_, _>>()?,
@@ -619,7 +639,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     .map(|(branch, typ)| {
                         Ok((
                             branch,
-                            typ.expand_recursive_helper(top_label, top_body, type_defs)?,
+                            typ.expand_recursive_helper(top_asc, top_label, top_body, type_defs)?,
                         ))
                     })
                     .collect::<Result<_, _>>()?,
@@ -627,25 +647,29 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             Self::Break(loc) => Self::Break(loc),
             Self::Continue(loc) => Self::Continue(loc),
 
-            Self::Recursive(loc, label, t) => {
+            Self::Recursive(loc, asc, label, t) => {
                 if &label == top_label {
-                    Self::Recursive(loc, label, t)
+                    Self::Recursive(loc, asc, label, t)
                 } else {
                     Self::Recursive(
                         loc,
+                        asc,
                         label,
-                        Box::new(t.expand_recursive_helper(top_label, top_body, type_defs)?),
+                        Box::new(
+                            t.expand_recursive_helper(top_asc, top_label, top_body, type_defs)?,
+                        ),
                     )
                 }
             }
-            Self::Iterative(loc, label, t) => Self::Iterative(
+            Self::Iterative(loc, asc, label, t) => Self::Iterative(
                 loc,
+                asc,
                 label,
-                Box::new(t.expand_recursive_helper(top_label, top_body, type_defs)?),
+                Box::new(t.expand_recursive_helper(top_asc, top_label, top_body, type_defs)?),
             ),
             Self::Self_(loc, label) => {
                 if &label == top_label {
-                    Self::Recursive(loc, label, Box::new(top_body.clone()))
+                    Self::Recursive(loc, top_asc.clone(), label, Box::new(top_body.clone()))
                 } else {
                     Self::Self_(loc, label)
                 }
@@ -654,6 +678,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                 if &label == top_label {
                     Self::Iterative(
                         loc2,
+                        top_asc.clone(),
                         label.clone(),
                         Box::new(top_body.dual(type_defs)?.chan_self(&label)),
                     )
@@ -665,31 +690,34 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             Self::SendType(loc, name, t) => Self::SendType(
                 loc,
                 name,
-                Box::new(t.expand_recursive_helper(top_label, top_body, type_defs)?),
+                Box::new(t.expand_recursive_helper(top_asc, top_label, top_body, type_defs)?),
             ),
             Self::ReceiveType(loc, name, t) => Self::ReceiveType(
                 loc,
                 name,
-                Box::new(t.expand_recursive_helper(top_label, top_body, type_defs)?),
+                Box::new(t.expand_recursive_helper(top_asc, top_label, top_body, type_defs)?),
             ),
 
             Self::Chan(loc, t) => Self::Chan(
                 loc,
-                Box::new(t.expand_recursive_helper(top_label, top_body, type_defs)?),
+                Box::new(t.expand_recursive_helper(top_asc, top_label, top_body, type_defs)?),
             ),
         })
     }
 
     pub fn expand_iterative(
+        asc: &IndexSet<Option<Name>>,
         label: &Option<Name>,
         body: &Self,
         type_defs: &TypeDefs<Loc, Name>,
     ) -> Result<Self, TypeError<Loc, Name>> {
-        body.clone().expand_iterative_helper(label, body, type_defs)
+        body.clone()
+            .expand_iterative_helper(asc, label, body, type_defs)
     }
 
     fn expand_iterative_helper(
         self,
+        top_asc: &IndexSet<Option<Name>>,
         top_label: &Option<Name>,
         top_body: &Self,
         type_defs: &TypeDefs<Loc, Name>,
@@ -699,13 +727,13 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             Self::Name(loc, name, args) => Self::Name(loc, name, args),
             Self::Send(loc, t, u) => Self::Send(
                 loc,
-                Box::new(t.expand_iterative_helper(top_label, top_body, type_defs)?),
-                Box::new(u.expand_iterative_helper(top_label, top_body, type_defs)?),
+                Box::new(t.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?),
+                Box::new(u.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?),
             ),
             Self::Receive(loc, t, u) => Self::Receive(
                 loc,
-                Box::new(t.expand_iterative_helper(top_label, top_body, type_defs)?),
-                Box::new(u.expand_iterative_helper(top_label, top_body, type_defs)?),
+                Box::new(t.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?),
+                Box::new(u.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?),
             ),
             Self::Either(loc, branches) => Self::Either(
                 loc,
@@ -714,7 +742,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     .map(|(branch, typ)| {
                         Ok((
                             branch,
-                            typ.expand_iterative_helper(top_label, top_body, type_defs)?,
+                            typ.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?,
                         ))
                     })
                     .collect::<Result<_, _>>()?,
@@ -726,7 +754,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     .map(|(branch, typ)| {
                         Ok((
                             branch,
-                            typ.expand_iterative_helper(top_label, top_body, type_defs)?,
+                            typ.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?,
                         ))
                     })
                     .collect::<Result<_, _>>()?,
@@ -734,25 +762,29 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             Self::Break(loc) => Self::Break(loc),
             Self::Continue(loc) => Self::Continue(loc),
 
-            Self::Recursive(loc, label, t) => Self::Recursive(
+            Self::Recursive(loc, asc, label, t) => Self::Recursive(
                 loc,
+                asc,
                 label,
-                Box::new(t.expand_iterative_helper(top_label, top_body, type_defs)?),
+                Box::new(t.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?),
             ),
-            Self::Iterative(loc, label, t) => {
+            Self::Iterative(loc, asc, label, t) => {
                 if &label == top_label {
-                    Self::Iterative(loc, label, t)
+                    Self::Iterative(loc, asc, label, t)
                 } else {
                     Self::Iterative(
                         loc,
+                        asc,
                         label,
-                        Box::new(t.expand_iterative_helper(top_label, top_body, type_defs)?),
+                        Box::new(
+                            t.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?,
+                        ),
                     )
                 }
             }
             Self::Self_(loc, label) => {
                 if &label == top_label {
-                    Self::Iterative(loc, label, Box::new(top_body.clone()))
+                    Self::Iterative(loc, top_asc.clone(), label, Box::new(top_body.clone()))
                 } else {
                     Self::Self_(loc, label)
                 }
@@ -761,6 +793,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                 if &label == top_label {
                     Self::Recursive(
                         loc2,
+                        top_asc.clone(),
                         label.clone(),
                         Box::new(top_body.dual(type_defs)?.chan_self(&label)),
                     )
@@ -772,17 +805,17 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             Self::SendType(loc, name, t) => Self::SendType(
                 loc,
                 name,
-                Box::new(t.expand_iterative_helper(top_label, top_body, type_defs)?),
+                Box::new(t.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?),
             ),
             Self::ReceiveType(loc, name, t) => Self::ReceiveType(
                 loc,
                 name,
-                Box::new(t.expand_iterative_helper(top_label, top_body, type_defs)?),
+                Box::new(t.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?),
             ),
 
             Self::Chan(loc, t) => Self::Chan(
                 loc,
-                Box::new(t.expand_iterative_helper(top_label, top_body, type_defs)?),
+                Box::new(t.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?),
             ),
         })
     }
@@ -977,24 +1010,24 @@ where
             );
         }
         if !matches!(command, Command::Link(_)) {
-            if let Type::Iterative(_, top_label, body) = typ {
+            if let Type::Iterative(_, top_asc, top_label, body) = typ {
                 return self.check_command(
                     inference_subject,
                     loc,
                     object,
-                    &Type::expand_iterative(top_label, body, &self.type_defs)?,
+                    &Type::expand_iterative(top_asc, top_label, body, &self.type_defs)?,
                     command,
                     analyze_process,
                 );
             }
         }
         if !matches!(command, Command::Begin(_, _) | Command::Loop(_)) {
-            if let Type::Recursive(_, top_label, body) = typ {
+            if let Type::Recursive(_, top_asc, top_label, body) = typ {
                 return self.check_command(
                     inference_subject,
                     loc,
                     object,
-                    &Type::expand_recursive(top_label, body, &self.type_defs)?,
+                    &Type::expand_recursive(top_asc, top_label, body, &self.type_defs)?,
                     command,
                     analyze_process,
                 );
@@ -1162,13 +1195,16 @@ where
             }
 
             Command::Begin(label, process) => {
-                let Type::Recursive(typ_loc, typ_label, typ_body) = typ else {
+                let Type::Recursive(typ_loc, typ_asc, typ_label, typ_body) = typ else {
                     return Err(TypeError::InvalidOperation(
                         loc.clone(),
                         Operation::Begin(loc.clone(), label.clone()),
                         typ.clone(),
                     ));
                 };
+
+                let mut typ_asc = typ_asc.clone();
+                typ_asc.insert(label.clone());
 
                 self.loop_points.insert(
                     label.clone(),
@@ -1180,6 +1216,7 @@ where
                                 object.clone(),
                                 Type::Recursive(
                                     typ_loc.clone(),
+                                    typ_asc.clone(),
                                     typ_label.clone(),
                                     typ_body.clone(),
                                 ),
@@ -1192,30 +1229,42 @@ where
                 self.put(
                     loc,
                     object.clone(),
-                    Type::expand_recursive(typ_label, typ_body, &self.type_defs)?,
+                    Type::expand_recursive(&typ_asc, typ_label, typ_body, &self.type_defs)?,
                 )?;
                 let (process, inferred_type) = analyze_process(self, process)?;
 
-                let inferred_iterative = inferred_type
-                    .map(|body| Type::Iterative(loc.clone(), label.clone(), Box::new(body)));
+                let inferred_iterative = inferred_type.map(|body| {
+                    Type::Iterative(loc.clone(), typ_asc, label.clone(), Box::new(body))
+                });
 
                 (Command::Begin(label.clone(), process), inferred_iterative)
             }
 
             Command::Loop(label) => {
-                let Type::Recursive(_, typ_label, typ_body) = typ else {
+                if !matches!(typ, Type::Recursive(_, _, _, _)) {
                     return Err(TypeError::InvalidOperation(
                         loc.clone(),
                         Operation::Loop(loc.clone(), label.clone()),
                         typ.clone(),
                     ));
-                };
-                let expanded = Type::expand_recursive(typ_label, typ_body, &self.type_defs)?;
-
+                }
                 let Some((driver, variables)) = self.loop_points.get(label).cloned() else {
                     return Err(TypeError::NoSuchLoopPoint(loc.clone(), label.clone()));
                 };
-                self.put(loc, driver.clone(), expanded)?;
+                self.put(loc, driver.clone(), typ.clone())?;
+
+                if let (Type::Recursive(_, asc1, _, _), Some(Type::Recursive(_, asc2, _, _))) =
+                    (typ, variables.get(&driver))
+                {
+                    for label in asc2 {
+                        if !asc1.contains(label) {
+                            return Err(TypeError::DoesNotDescendSubjectOfBegin(
+                                loc.clone(),
+                                label.clone(),
+                            ));
+                        }
+                    }
+                }
 
                 let mut inferred_loop = None;
 
@@ -1447,7 +1496,12 @@ where
                 let (process, body) = self.infer_process(process, subject)?;
                 (
                     Command::Begin(label.clone(), process),
-                    Type::Recursive(loc.clone(), label.clone(), Box::new(body)),
+                    Type::Recursive(
+                        loc.clone(),
+                        IndexSet::from([label.clone()]),
+                        label.clone(),
+                        Box::new(body),
+                    ),
                 )
             }
 
@@ -1677,18 +1731,44 @@ impl<Loc, Name: Display> Type<Loc, Name> {
             Self::Break(_) => write!(f, "!"),
             Self::Continue(_) => write!(f, "?"),
 
-            Self::Recursive(_, label, body) => {
+            Self::Recursive(_, asc, label, body) => {
                 write!(f, "recursive ")?;
                 if let Some(label) = label {
                     write!(f, ":{} ", label)?;
                 }
+                if asc.len() > 0 {
+                    write!(f, "/* descends ")?;
+                    for (i, label) in asc.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        match label {
+                            Some(label) => write!(f, ":{}", label)?,
+                            None => write!(f, "unlabeled")?,
+                        }
+                    }
+                    write!(f, " */ ")?;
+                }
                 body.pretty(f, indent)
             }
 
-            Self::Iterative(_, label, body) => {
+            Self::Iterative(_, asc, label, body) => {
                 write!(f, "iterative ")?;
                 if let Some(label) = label {
                     write!(f, ":{} ", label)?;
+                }
+                if asc.len() > 0 {
+                    write!(f, "/* descends ")?;
+                    for (i, label) in asc.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        match label {
+                            Some(label) => write!(f, ":{}", label)?,
+                            None => write!(f, "unlabeled")?,
+                        }
+                    }
+                    write!(f, " */ ")?;
                 }
                 body.pretty(f, indent)
             }
@@ -1832,6 +1912,12 @@ impl<Loc, Name: Display> TypeError<Loc, Name> {
             Self::NoSuchLoopPoint(loc, _) => {
                 format!(
                     "{}\nThere is no matching loop point in scope.",
+                    display_loc(loc),
+                )
+            }
+            Self::DoesNotDescendSubjectOfBegin(loc, _) => {
+                format!(
+                    "{}\nThis loop may diverge.\n\nThe subject of this `loop` does not descend from the subject of the corresponding `begin`.",
                     display_loc(loc),
                 )
             }
