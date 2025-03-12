@@ -1,5 +1,7 @@
 # Introduction
 
+TODO: Jump between type, con/de-structing expression/statements
+
 Par (⅋) is a concurrent programming language bringing the expressive power of linear logic into practice.
 
 This reference contains not only the complete grammar and specification of Par but also an extensive collection of examples, explanations and best practices.
@@ -118,4 +120,6 @@ For a quick but in-depth tutorial, read the [Readme](https://github.com/faiface/
 
 An then, there's the document you're currently reading, of course.
 
-\>\>\> Jump directly to the chapter about [types](types.md) <<<
+---
+
+Jump directly to the chapter about [types](types.md)
