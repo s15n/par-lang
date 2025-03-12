@@ -597,7 +597,13 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             },
 
             Self::Var(loc, name) => Self::Var(loc, name),
-            Self::Name(loc, name, args) => Self::Name(loc, name, args),
+            Self::Name(loc, name, args) => Self::Name(
+                loc,
+                name,
+                args.into_iter()
+                    .map(|arg| Ok(arg.expand_recursive_helper(top_label, top_body, type_defs)?))
+                    .collect::<Result<_, _>>()?,
+            ),
 
             Self::Send(loc, t, u) => Self::Send(
                 loc,
@@ -701,7 +707,13 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
             },
 
             Self::Var(loc, name) => Self::Var(loc, name),
-            Self::Name(loc, name, args) => Self::Name(loc, name, args),
+            Self::Name(loc, name, args) => Self::Name(
+                loc,
+                name,
+                args.into_iter()
+                    .map(|arg| Ok(arg.expand_iterative_helper(top_label, top_body, type_defs)?))
+                    .collect::<Result<_, _>>()?,
+            ),
 
             Self::Send(loc, t, u) => Self::Send(
                 loc,
