@@ -80,6 +80,51 @@ pub struct TestingState<Name: NameRequiredTraits> {
 }
 
 impl<Name: NameRequiredTraits> TestingState<Name> {
+    fn result_to_pattern(&self, result: ReadbackResult<Name>) -> BoxFuture<ReadbackPattern<Name>> {
+        async move {
+            match result {
+                ReadbackResult::Break => ReadbackPattern::Break,
+                ReadbackResult::Continue => ReadbackPattern::Continue,
+                ReadbackResult::Send(left, right) => {
+                    let (left, right) = join(
+                        self.result_to_pattern(*left),
+                        self.result_to_pattern(*right),
+                    )
+                    .await;
+                    ReadbackPattern::Send(Box::new(left), Box::new(right))
+                }
+                ReadbackResult::Receive(left, right) => {
+                    let (left, right) = join(
+                        self.result_to_pattern(*left),
+                        self.result_to_pattern(*right),
+                    )
+                    .await;
+                    ReadbackPattern::Receive(Box::new(left), Box::new(right))
+                }
+                ReadbackResult::Either(name, payload) => {
+                    ReadbackPattern::Either(name, Box::new(self.result_to_pattern(*payload).await))
+                }
+                ReadbackResult::Halted(mut tree) => {
+                    tree.ty = crate::readback::prepare_type_for_readback(
+                        &self.prog,
+                        tree.ty,
+                        &Default::default(),
+                    );
+                    let res = self.shared.read_with_type(tree).await;
+                    self.result_to_pattern(res).await
+                }
+                ReadbackResult::Expand(mut package) => {
+                    let tree = self.shared.expand_once(package.tree).await;
+                    self.result_to_pattern(ReadbackResult::Halted(tree.with_type(package.ty)))
+                        .await
+                }
+                a => {
+                    todo!("{a:?}")
+                }
+            }
+        }
+        .boxed()
+    }
     fn matches(
         &self,
         result: ReadbackResult<Name>,
@@ -140,6 +185,11 @@ impl<Name: NameRequiredTraits> TestingState<Name> {
                     self.matches(res, pattern).await
                 }
 
+                ReadbackResult::Expand(mut package) => {
+                    let tree = self.shared.expand_once(package.tree).await;
+                    self.matches(ReadbackResult::Halted(tree.with_type(package.ty)), pattern)
+                        .await
+                }
                 ReadbackResult::Variable(_) => todo!(),
                 _ => todo!(),
             }
@@ -148,10 +198,15 @@ impl<Name: NameRequiredTraits> TestingState<Name> {
     }
 }
 
+pub enum TestPattern<Name: Clone> {
+    Pattern(ReadbackPattern<Name>),
+    Code(String),
+}
+
 pub struct TestCase {
     code: String,
     ty: String,
-    pattern: ReadbackPattern<Internal<Name>>,
+    pattern: TestPattern<Internal<Name>>,
 }
 
 pub struct TestFamily {
@@ -159,36 +214,52 @@ pub struct TestFamily {
     prelude: String,
     tests: Vec<TestCase>,
 }
+/// Macro to generate a TestCase
+macro_rules! test_case {
+    ($code:expr, $ty:expr, code $pattern:expr) => {
+        TestCase {
+            code: $code.to_string(),
+            ty: $ty.to_string(),
+            pattern: TestPattern::Code($pattern.to_string()),
+        }
+    };
+    ($code:expr, $ty:expr, pat $pattern:expr) => {
+        TestCase {
+            code: $code.to_string(),
+            ty: $ty.to_string(),
+            pattern: TestPattern::Pattern($pat.to_string()),
+        }
+    };
+}
+
+macro_rules! test_family {
+    ($name:expr, $prelude:expr, [$($case:tt)*]) => {
+        TestFamily {
+            name: $name.to_string(),
+            prelude: $prelude.to_string(),
+            tests: vec![
+                $(test_case! $case),*
+            ],
+        }
+    };
+}
 
 #[tokio::test]
 async fn test_whole_programs() -> Result<(), String> {
     let mut failed = false;
-    let test_families = vec![TestFamily {
-        name: "hello world".to_owned(),
-        prelude: r#"
-            type Bool  = either { .true!, .false! }
-            type Option<T>  = either { .some T, .none! }
-            dec true: Bool
-            def true = .true!
-            dec false: Bool
-            def false = .false!
-
-            dec not: [Bool] Bool
-            def not = [x] x {
-                true? => .false!
-                false? => .true!
-            }
-        "#
-        .to_owned(),
-        tests: vec![TestCase {
-            code: "not(false)".to_owned(),
-            ty: "Bool".to_owned(),
-            pattern: ReadbackPattern::Either(
-                "false".to_owned().into(),
-                Box::new(ReadbackPattern::Break),
-            ),
-        }],
-    }];
+    let test_families = vec![test_family!(
+        "hello world",
+        include_str!("sample_ic.par"),
+        [
+            (".true!", "Bool", code ".true!")
+            ("not(true)", "Bool", code "false")
+            ("not(false)", "Bool", code "true")
+            ("xor(true)(true)", "Bool", code "false")
+            ("xor(true)(false)", "Bool", code "true")
+            ("xor(false)(true)", "Bool", code "true")
+            ("xor(true)(true)", "Bool", code "false")
+        ]
+    )];
     for i in test_families {
         eprintln!("testing family: {}", i.name);
         use core::fmt::Write;
@@ -198,6 +269,10 @@ async fn test_whole_programs() -> Result<(), String> {
         for (idx, j) in i.tests.iter().enumerate() {
             write!(&mut source, "dec test_{}: {}\n", idx, j.ty).unwrap();
             write!(&mut source, "def test_{} = {}\n", idx, j.code).unwrap();
+            if let TestPattern::Code(code) = &j.pattern {
+                write!(&mut source, "dec test_pat_{}: {}\n", idx, j.ty).unwrap();
+                write!(&mut source, "def test_pat_{} = {}\n", idx, code).unwrap();
+            }
         }
         let compiled = playground::Compiled::from_string(&source).unwrap();
         let checked = compiled.checked.unwrap();
@@ -214,11 +289,31 @@ async fn test_whole_programs() -> Result<(), String> {
             net: net.clone(),
             prog: prog.clone(),
         };
-        for (idx, j) in i.tests.iter().enumerate() {
+        for (idx, j) in i.tests.into_iter().enumerate() {
             let def_name = format!("test_{}", idx);
             let def_name = Internal::Original(def_name.into());
             let mut tree = ic_compiled.get_with_name(&def_name).unwrap();
             net.lock().unwrap().freshen_variables(&mut tree);
+            let pattern = match j.pattern {
+                TestPattern::Code(_) => {
+                    let def_name = format!("test_pat_{}", idx);
+                    let def_name = Internal::Original(def_name.into());
+                    let mut tree = ic_compiled.get_with_name(&def_name).unwrap();
+                    net.lock().unwrap().freshen_variables(&mut tree);
+                    let res = ReadbackResult::Halted(
+                        tree.with_type(
+                            prog.declarations
+                                .get(&def_name)
+                                .unwrap()
+                                .as_ref()
+                                .unwrap()
+                                .clone(),
+                        ),
+                    );
+                    state.result_to_pattern(res).await
+                }
+                TestPattern::Pattern(pat) => pat,
+            };
             let testing_result = state
                 .matches(
                     ReadbackResult::Halted(
@@ -231,7 +326,7 @@ async fn test_whole_programs() -> Result<(), String> {
                                 .clone(),
                         ),
                     ),
-                    j.pattern.clone(),
+                    pattern,
                 )
                 .await;
             if testing_result.checked {
