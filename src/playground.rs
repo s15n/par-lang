@@ -260,8 +260,11 @@ impl eframe::App for Playground {
                                 self.file_path.as_ref().and_then(|p| p.file_name())
                             {
                                 ui.label(
-                                    egui::RichText::new(format!("{}", file_name.display()))
-                                        .strong(),
+                                    egui::RichText::new(format!(
+                                        "{}",
+                                        file_name.to_str().unwrap_or("")
+                                    ))
+                                    .strong(),
                                 );
                             }
                         });
