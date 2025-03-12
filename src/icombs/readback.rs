@@ -2,6 +2,7 @@ use futures::{
     channel::oneshot::{channel, Receiver, Sender},
     future::{join, select, BoxFuture, Either},
     stream::FuturesUnordered,
+    task::Spawn,
     FutureExt, SinkExt, StreamExt,
 };
 use indexmap::IndexSet;
@@ -557,6 +558,43 @@ impl SharedState {
                 }
             }
         }
+    }
+
+    pub fn choose_choice<Name: Clone + PartialEq>(
+        &self,
+        chosen: Name,
+        ctx: Tree,
+        options: Vec<(Name, Tree, TypedTree<Name>)>,
+        spawner: &(dyn futures::task::Spawn + Send + Sync),
+    ) -> TypedTree<Name> {
+        use futures::task::Spawn;
+        use futures::task::SpawnExt;
+        let mut ctx = Some(ctx);
+        let mut ret_payload = None;
+        for (idx, (name, ctx_here, payload)) in options.into_iter().enumerate() {
+            let this = self.clone();
+            if name == chosen {
+                let ctx = ctx.take().unwrap();
+                spawner
+                    .spawn(async move {
+                        let mut this2 = this.clone();
+                        this.add_redex(ctx_here, ctx).await;
+                    })
+                    .unwrap();
+                ret_payload = Some(payload);
+            } else {
+                spawner
+                    .spawn(async move {
+                        join(
+                            this.add_redex(ctx_here, Tree::e()),
+                            this.add_redex(payload.tree, Tree::e()),
+                        )
+                        .await;
+                    })
+                    .unwrap();
+            }
+        }
+        ret_payload.unwrap()
     }
 }
 

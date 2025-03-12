@@ -1051,8 +1051,6 @@ where
         >,
     ) -> Result<(Command<Loc, Name, Type<Loc, Name>>, Vec<Type<Loc, Name>>), TypeError<Loc, Name>>
     {
-        println!("{:?}", (inference_subject, object, typ, command));
-
         if let Type::Name(_, name, args) = typ {
             return self.check_command(
                 inference_subject,

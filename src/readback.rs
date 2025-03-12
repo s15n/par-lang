@@ -282,7 +282,7 @@ impl<Name: NameRequiredTraits> ReadbackStateInner<Name> {
                                             )
                                             .clicked()
                                         {
-                                            chosen = Some(idx);
+                                            chosen = Some(name.clone());
                                         }
                                     }
                                 });
@@ -292,46 +292,28 @@ impl<Name: NameRequiredTraits> ReadbackStateInner<Name> {
                                     else {
                                         unreachable!()
                                     };
-                                    let mut ctx = Some(ctx);
-                                    for (idx, (name, ctx_here, payload)) in
-                                        options.into_iter().enumerate()
-                                    {
-                                        let this = self.clone();
-                                        let handle = handle.clone();
-                                        let prog = prog.clone();
-                                        if idx == chosen {
-                                            lock.add_event(Event::Choose(name));
-                                            let ctx = ctx.take().unwrap();
-                                            self.spawner
-                                                .spawn(async move {
-                                                    let mut this2 = this.clone();
-                                                    join(
-                                                        this.shared.add_redex(ctx_here, ctx),
-                                                        this2.readback_result(
-                                                            handle,
-                                                            ReadbackResult::Halted(payload),
-                                                            prog,
-                                                        ),
-                                                    )
-                                                    .await;
-                                                })
-                                                .unwrap();
-                                        } else {
-                                            self.spawner
-                                                .spawn(async move {
-                                                    join(
-                                                        this.shared.add_redex(ctx_here, Tree::e()),
-                                                        this.shared
-                                                            .add_redex(payload.tree, Tree::e()),
-                                                    )
-                                                    .await;
-                                                })
-                                                .unwrap();
-                                        }
-                                    }
+                                    lock.add_event(Event::Choose(chosen.clone()));
+                                    let payload = self.shared.choose_choice(
+                                        chosen,
+                                        ctx,
+                                        options,
+                                        &self.spawner,
+                                    );
+                                    let mut this = self.clone();
+                                    let handle = handle.clone();
+                                    self.spawner
+                                        .spawn(async move {
+                                            this.readback_result(
+                                                handle,
+                                                ReadbackResult::Halted(payload),
+                                                prog,
+                                            )
+                                            .await;
+                                        })
+                                        .unwrap();
                                 }
                             }
-                            Request::Expand(package) => {
+                            Request::Expand(_) => {
                                 if ui
                                     .button(
                                         RichText::from("expand").italics().color(Color32::WHITE),
@@ -452,7 +434,6 @@ impl<Name: NameRequiredTraits> ReadbackStateInner<Name> {
                         let mut lock = handle_2.lock().unwrap();
                         lock.add_event(Event::SendType(name.clone()));
                     }
-                    self.type_variables.insert(name);
                     self.readback_result(handle, *payload, prog).await;
                 }
                 ReadbackResult::ReceiveType(name, payload) => {
