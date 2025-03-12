@@ -37,7 +37,7 @@ At the heart of Par lies its type system, representing linear logic.
 > **<sup>Syntax</sup>**\
 > _NamedType_ : [ID] _TypeArguments_<sup>?</sup>
 
-Defined via type aliases, named types can always be replaced with their definition without changing meaning.
+Defined via [type aliases](items.md#type-definitions), named types can always be replaced with their definition without changing meaning.
 
 ```par
 let x: Option<T> = .none!
@@ -134,7 +134,7 @@ let bool_pair: Pair<Bool> =
   (.true!, .false!)!
 ```
 
-Values are created using [pair expressions](./expressions.md#tuple-expressions):
+Values are created using [pair expressions](./expressions/construction.md#pair-expressions):
 ```par
 let a: A = ...
 let b: B = ...
@@ -171,7 +171,7 @@ Mathematically, `(A) B` is \\(A \otimes B\\). For session types, it means "send 
 *<sup>
 [Dual](#pair-types)
 | [Constructing Expression](./expressions/construction.md#function-expressions)
-| [Destructing Expression](./expressions/application.md#function-application)
+| [Destructing Expression](./expressions/application.md#function-calls)
 | [Constructing Statement](./statements/commands.md#todo)
 | [Destructing Statement](./statements/commands.md#todo)
 </sup>*
@@ -183,11 +183,11 @@ type T = [A, B] R
 type T = [A] [B] R
 ```
 
-Values are created using [function expressions](./expressions.md#function-expressions):
+Values are created using [function expressions](./expressions/construction.md#function-expressions):
 ```par
 let add1: [Nat] Nat = [n] .succ n
 ```
-and destructed by [calling]() the function:
+and destructed by [calling](./expressions/application.md#function-calls) the function:
 ```par
 let one: Nat = .succ.zero!
 let two = add1(one)
@@ -202,8 +202,8 @@ Mathematically, `[A] B` is a [linear](./linearity.md) function \\(A \multimap B\
 
 *<sup>
 [Dual](#choice-types)
-| [Constructing Expression](./expressions/construction.md#todo)
-| [Destructing Expression](./expressions/application.md#todo)
+| [Constructing Expression](./expressions/construction.md#either-selections)
+| [Destructing Expression](./expressions/application.md#either-destructions)
 | [Constructing Statement](./statements/commands.md#todo)
 | [Destructing Statement](./statements/commands.md#todo)
 </sup>*
@@ -247,16 +247,16 @@ Either types are often used as [recursive](#recursive-types) types.
 
 > **<sup>Syntax</sup>**\
 > _ChoiceType_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `{` (_Label_ (`(` _ReceiverList_ `)`)<sup>\*</sup> `=>` _Type_ `,`<sup>?</sup>)<sup>\*</sup> `}`
+> &nbsp;&nbsp; &nbsp;&nbsp; `{` (_Label_ (`(` _ReceiveTypes_ `)`)<sup>\*</sup> `=>` _Type_ `,`<sup>?</sup>)<sup>\*</sup> `}`
 >
-> _ReceiverList_ :\
+> _ReceiveTypes_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; _TypeList_ \
 > &nbsp;&nbsp; | `type` [_ID_List_]
 
 *<sup>
 [Dual](#either-types)
-| [Constructing Expression](./expressions/construction.md#todo)
-| [Destructing Expression](./expressions/application.md#todo)
+| [Constructing Expression](./expressions/construction.md#choice-constructions)
+| [Destructing Expression](./expressions/application.md#choice-selections)
 | [Constructing Statement](./statements/commands.md#todo)
 | [Destructing Statement](./statements/commands.md#todo)
 </sup>*
@@ -339,7 +339,7 @@ Choice types are often used as [iterative](#iterative-types) types.
 
 *<sup>
 [Dual](#iterative-types)
-| [Destructing Expression](./expressions/application.md#todo)
+| [Destructing Expression](./expressions/application.md#recursive-destructions)
 | [Destructing Statement](./statements/commands.md#todo)
 </sup>*
 
@@ -400,7 +400,7 @@ def is_even = [n] n begin {
 
 *<sup>
 [Dual](#recursive-types)
-| [Constructing Expression](./expressions/construction.md#todo)
+| [Constructing Expression](./expressions/construction.md#iterative-constructions)
 | [Constructing Statement](./statements/commands.md#todo)
 </sup>*
 
@@ -579,7 +579,7 @@ def add: [Nat, Nat] Nat = [a, b] a begin {
 
 *<sup>
 [Dual](#universal-types)
-| [Constructing Expression](./expressions/construction.md#todo)
+| [Constructing Expression](./expressions/construction.md#existential-constructions)
 | [Pattern](./patterns.md#todo)
 | [Constructing Statement](./statements/commands.md#todo)
 | [Destructing Statement](./statements/commands.md#todo)
@@ -629,8 +629,8 @@ Mathematically, `(type T) A` is \\(\exists\ T: A\\).
 
 *<sup>
 [Dual](#existential-types)
-| [Constructing Expression](./expressions/construction.md#todo)
-| [Destructing Expression](./expressions/application.md#todo)
+| [Constructing Expression](./expressions/construction.md#universal-constructions)
+| [Destructing Expression](./expressions/application.md#universal-specializations)
 | [Constructing Statement](./statements/commands.md#todo)
 | [Destructing Statement](./statements/commands.md#todo)
 </sup>*

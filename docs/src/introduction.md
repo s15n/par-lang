@@ -49,8 +49,8 @@ For example, a mutable stack can be implemented like this ([explanation](types.m
 ?type Option<T> = either { .none!, .some T }
 ?
 type Stack<Unwrap, T> = iterative {
-  .push(T) => loop
-  .pop => (Option<T>) loop
+  .push(T) => self
+  .pop => (Option<T>) self
   .unwrap => Unwrap
 }
 

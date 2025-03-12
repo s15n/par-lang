@@ -1,67 +1,49 @@
 # Expressions
 
-This page is not ready
-
-<!--"expression"
-  ::=& #raw("let") "pattern" #raw("=") "expression" #raw("in") "expression" \
-  |& #raw("do") #raw("{") "process"^? #raw("}") #raw("in") "expression" \
-  |& #raw("chan") "id" #raw("{") "process"^? #raw("}") "[annotation?]" \
-  //"construction" \
-  |& #raw("(") "expression" #raw(")") "expression" comment("construct" tensor"-type") \
-  |& #raw("[") "pattern" #raw("]") "expression" comment("construct" lolli"-type") \
-  |& #raw(".") "id" "expression" comment("construct variant of" oplus"-type") \
-  |& #raw("{") (#raw(".") "id" (#raw("(") "pattern "#raw(")"))^* #raw("=>") "expression")^* #raw("}") comment("construct" with"-type") \
-  |& #raw("!") comment(unit) \
-  |& #raw("begin") "loop-label"^? "expression" comment("place comefrom") \
-  |& #raw("loop") "loop-label"^? comment("goto") \
-  |& #raw("(") #raw("<") "type" #raw(">") #raw(")") "expression" comment("construct" exists"-type") \
-  |& #raw("[") #raw("<") "type" #raw(">") #raw("]") "expression" comment("construct" forall"-type") \
-  |& #raw("&") "expression" comment("derelict: construct" !"-type") \
-  |& "tag" "expression" comment("add tag") \
-  |& "primary-expression" "suffix"^?-->
-
 > **<sup>Syntax</sup>**\
 > _Expression_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `let` [_Pattern_] `=` _Expression_ `in` _Expression_ \
-> &nbsp;&nbsp; | ... \
-> &nbsp;&nbsp; | `(` _Expression_ `)` _Expression_ \
-> &nbsp;&nbsp; | ...
+> &nbsp;&nbsp; &nbsp;&nbsp; [_Construction_] \
+> &nbsp;&nbsp; | [_Application_] \
+> &nbsp;&nbsp; | [_LetExpression_] \
+> &nbsp;&nbsp; | [_DoExpression_] \
+> &nbsp;&nbsp; | [_ChanExpression_]
 
-A `let` expression exposes the bindings of the pattern in the expression after `in`.
+## Primary Expressions
 
-```par
-y = let x = 5 in x * x // 25
-```
+> **<sup>Syntax</sup>**\
+> _PrimaryExpression_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; [ID] \
+> &nbsp;&nbsp; | _GroupedExpression_
+>
+> _GroupedExpression_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; `{` _Expression_ `}`
 
-\\[
-\frac{p \leftarrow A \quad x:A \quad y[p|x]:B}{\texttt{let $p$ = $x$ in $y$}:B}
-\\]
+Par uses `{` and `}` for grouping expressions together.
+Together with names like `x` they form the primary expressions, which can be [destructed](./expressions/application.md) using expressions.
 
+Primary expressions appear [here](./expressions/application.md) in the grammar.
 
----
+## Let Expressions
 
-## Pair Expressions
+> **<sup>Syntax</sup>**\
+> _LetExpression_ : `let` [_Pattern_] `=` _Expression_ `in` _Expression_
 
-A pair expression is of the form `(expr) expr`:
-```par
-pair = (1) 0
-```
-It constructs a value of a \\( \otimes \\)-type (a [tuple type](./types/tuples.md))
+The second expression must use all bindings of the pattern (which must be irrefutable) due to linearity.
 
-\\[
-\frac{x:A \quad y:B}{\texttt{($x$) $y$}:A \otimes B}
-\\]
+## Do Expressions
 
-```par
-x : A
-y : B
+> **<sup>Syntax</sup>**\
+> _DoExpression_ : `do` `{` [_Process_] `}` `in` _Expression_
 
-pair : (A) B
-pair = (x) y
-```
+Do expressions are syntax sugar for channel expressions (todo: specify how). Linearity requires that all leftover bindings from the process must be used in the expression at the end.
 
----
+## Channel Expressions
 
-...
+> **<sup>Syntax</sup>**\
+> _ChanExpression_ : `chan` [ID] [_Annotation_]<sup>?</sup> `{` [_Process_] `}`
+
+The name declared after the channel may be used inside the process and must be fully destructed there.
+
+The expression `chan a: A { ... }` has type `chan A`. Conversely, if `chan b { ... }` has type `B`, `b` has type `chan B`.
 
 [_Pattern_]: ./patterns.md

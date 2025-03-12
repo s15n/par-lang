@@ -8,6 +8,8 @@
 - [Items](./items.md)
 - [Types](./types.md)
 - [Expressions](./expressions.md)
+    - [Constructions](./expressions/construction.md)
+    - [Applications](./expressions/application.md)
 - [Patterns](./patterns.md)
 - [Statements]()
 - [Contributors]()
