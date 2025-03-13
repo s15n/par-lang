@@ -262,12 +262,6 @@ fn parse_type(pairs: &mut Pairs<'_, Rule>) -> Result<Type<Loc, Name>, ParseError
             Ok(Type::Self_(loc, label))
         }
 
-        Rule::typ_loop => {
-            let mut pairs = pair.into_inner();
-            let label = parse_loop_label(&mut pairs)?;
-            Ok(Type::Loop(loc, label))
-        }
-
         Rule::typ_send_type => {
             let mut pairs = pair.into_inner();
             let names = parse_name_list(&mut pairs)?;
@@ -412,9 +406,18 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Expression<Loc, Name>
 
         Rule::application => {
             let mut pairs = pair.into_inner();
-            let (loc, object_name) = parse_name(&mut pairs)?;
+            let expr = Box::new({
+                let pair = pairs.next().unwrap();
+                match pair.as_rule() {
+                    Rule::name => {
+                        Expression::Reference(loc.clone(), parse_name(&mut Pairs::single(pair))?.1)
+                    }
+                    Rule::expression => parse_expression(&mut Pairs::single(pair))?,
+                    _ => unreachable!(),
+                }
+            });
             let apply = parse_apply(&mut pairs)?;
-            Ok(Expression::Application(loc, object_name, apply))
+            Ok(Expression::Application(loc, expr, apply))
         }
 
         Rule::expression => parse_expression(&mut Pairs::single(pair)),

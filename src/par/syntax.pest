@@ -19,7 +19,7 @@ name_list = { name  ~ ("," ~ name )* ~ ","? }
 typ_list = { typ  ~ ("," ~ typ )* ~ ","? }
 pattern_list = { pattern  ~ ("," ~ pattern )* ~ ","? }
 
-typ           = { typ_name | typ_chan | typ_send | typ_receive | typ_either | typ_choice | typ_break | typ_continue | typ_recursive | typ_iterative | typ_self | typ_loop | typ_send_type | typ_recv_type }
+typ           = { typ_name | typ_chan | typ_send | typ_receive | typ_either | typ_choice | typ_break | typ_continue | typ_recursive | typ_iterative | typ_self | typ_send_type | typ_recv_type }
 typ_name      = { name ~ type_args }
 typ_chan      = { "chan" ~ typ }
 typ_send      = { "(" ~ typ_list ~ ")" ~ typ }
@@ -31,7 +31,6 @@ typ_continue  = { "?" }
 typ_recursive = { "recursive" ~ loop_label ~ typ }
 typ_iterative = { "iterative" ~ loop_label ~ typ }
 typ_self      = { "self" ~ loop_label }
-typ_loop      = { "loop" ~ loop_label }
 typ_send_type = { "(" ~ "type" ~ name_list ~ ")" ~ typ }
 typ_recv_type = { "[" ~ "type" ~ name_list ~ "]" ~ typ }
 
@@ -72,7 +71,7 @@ cons_branch_then      = { "=>" ~ expression }
 cons_branch_receive   = { "(" ~ pattern_list ~ ")" ~ cons_branch }
 cons_branch_recv_type = { "(" ~ "type" ~ name_list ~ ")" ~ cons_branch }
 
-application     = { name ~ apply }
+application     = { (name | "{" ~ expression ~ "}") ~ apply }
 apply           = { apply_begin | apply_loop | apply_send | apply_choose | apply_either | apply_send_type | apply_noop }
 apply_noop      = { "" }
 apply_send      = { "(" ~ expression_list ~ ")" ~ apply }
@@ -118,4 +117,4 @@ cmd_branch_receive   = { "(" ~ pattern_list ~ ")" ~ cmd_branch }
 cmd_branch_continue  = { "!" ~ "=>" ~ "{" ~ process ~ "}" }
 cmd_branch_recv_type = { "(" ~ "type" ~ name_list ~ ")" ~ cmd_branch }
 
-loop_label = { ("@" ~ name)? }
+loop_label = { (":" ~ name)? }

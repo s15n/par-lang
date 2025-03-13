@@ -1,5 +1,3 @@
-#![feature(box_patterns)]
-
 use eframe::egui;
 use playground::Playground;
 

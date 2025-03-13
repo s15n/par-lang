@@ -40,7 +40,7 @@ def Nat_mul = [n] [m] n begin {
 
 type Stream<T> = iterative {
   .end => !
-  .next => (T) loop
+  .next => (T) self
 }
 
 dec nats: Stream<Nat>
@@ -56,13 +56,13 @@ def nats = let m = zero in
 
 type Dup<T> = iterative {
   .end => !
-  .new => (loop) loop
-  .dup(T) => (T) (T) loop
+  .new => (self) self
+  .dup(T) => (T) (T) self
 }
 type Era<T> = iterative {
   .end => !
-  .new => (loop) loop
-  .era(T) => loop
+  .new => (self) self
+  .era(T) => self
 }
 
 dec instDupNat: Dup<Nat>
@@ -80,8 +80,8 @@ def instEraNat = begin {
 
 type Add<T> = iterative {
   .end => !
-  .new => (loop) loop
-  .add(T)(T) => (T) loop
+  .new => (self) self
+  .add(T)(T) => (T) self
 }
 
 dec instAddNat: Add<Nat>
@@ -93,8 +93,8 @@ def instAddNat = begin {
 
 type Mul<T> = iterative {
   .end => !
-  .new => (loop) loop
-  .mul(T)(T) => (T) loop
+  .new => (self) self
+  .mul(T)(T) => (T) self
 }
 
 dec instMulNat: Mul<Nat>
@@ -128,12 +128,12 @@ dec Stack_new: [type T] Stack<T>
 def Stack_new = [type T] .empty!
 
 dec instEraStack: [type T] [Era<T>] Era<Stack<T>>
-def instEraStack = [type T] [instEra] begin @out {
+def instEraStack = [type T] [instEra] begin :out {
   .end => do {instEra.end?} in !
-  .new => do {instEra.new[inst]} in (loop@out) let instEra = inst in loop @out
-  .era => [s] s begin @inner {
-    .empty! => loop @out
-    .item(t) s => do {instEra.era(t)} in s loop @inner
+  .new => do {instEra.new[inst]} in (loop :out) let instEra = inst in loop :out
+  .era => [s] s begin :inner {
+    .empty! => loop :out
+    .item(t) s => do {instEra.era(t)} in s loop :inner
   }
 }
 
@@ -193,8 +193,8 @@ def Queue_pop = [type T] [(l) r] r {
 // See <https://leanprover-community.github.io/mathlib4_docs/Mathlib/Algebra/Group/Defs.html#Semigroup>
 type Semigroup<T> = iterative {
   .end => !
-  .new => (loop) loop
-  .mul(T)(T) => (T) loop // since instances are explicitly named conflict with Mul.mul with subtyping is fine (actually makes Mul the same as Semigroup)
+  .new => (self) self
+  .mul(T)(T) => (T) self // since instances are explicitly named conflict with Mul.mul with subtyping is fine (actually makes Mul the same as Semigroup)
 }
 
 // Stack which keeps track of cumulative semigroup value
