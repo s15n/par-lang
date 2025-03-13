@@ -11,6 +11,7 @@
     - [Constructions](./expressions/construction.md)
     - [Applications](./expressions/application.md)
 - [Patterns](./patterns.md)
-- [Statements]()
+- [Statements](./statements.md)
+    - [Commands](./statements/commands.md)
 - [Contributors]()
 - [Future]()

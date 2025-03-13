@@ -13,7 +13,7 @@
 > &nbsp;&nbsp; &nbsp;&nbsp; `dec` [ID] `:` [_Type_]
 > 
 > _Definition_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `def` [ID] (`:` [_Type_])<sup>?</sup> `=` [_Expression_]
+> &nbsp;&nbsp; &nbsp;&nbsp; `def` [ID] [_Annotation_]<sup>?</sup> `=` [_Expression_]
 
 `def` defines a global definition usable throughout the file in which it was defined.
 It can be used as many times as one desires, instantiating itself every time it's used.

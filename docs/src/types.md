@@ -54,7 +54,6 @@ let x: either { .none!, .some T } = .none!
 [Dual](#the-bottom-type)
 | [Constructing Expression](./expressions/construction.md#the-unit-expression)
 | [Pattern](./patterns.md#todo)
-| [Constructing Statement](./statements/commands.md#todo)
 | [Destructing Statement](./statements/commands.md#todo)
 </sup>*
 
@@ -97,7 +96,6 @@ Mathematically, `!` is \\(\mathbf{1}\\), the unit for \\(\otimes\\).
 [Dual](#function-types)
 | [Constructing Expression](./expressions/construction.md#pair-expressions)
 | [Pattern](./patterns.md#todo)
-| [Constructing Statement](./statements/commands.md#todo)
 | [Destructing Statement](./statements/commands.md#todo)
 </sup>*
 
@@ -143,21 +141,19 @@ let pair: (A) B = (a) b
 ```
 and they can be destructed using [pair patterns]() or [receive commands]():
 ```par
-type ABC = { .a!, .b!, .c! }
-
-let triple: (ABC, ABC, ABC)! = (.a!, .b!, .c!)!
+let triple: (A, B, C)! = (a, b, c)!
 
 // pattern matching
 let (first) rest = triple
-// first = .a!
-// rest = (.b!, .c!)!
+// first = a
+// rest = (b, c)!
 
 // commands
 do {
   rest[second]
   // after this command:
-  // rest = (.c!)! 
-  // second = .b!
+  // rest = (c)! 
+  // second = b
 } in ...
 ```
 

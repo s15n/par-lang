@@ -8,6 +8,8 @@
 > &nbsp;&nbsp; | [_DoExpression_] \
 > &nbsp;&nbsp; | [_ChanExpression_]
 
+Some expressions are evaluated strictly, some lazily. todo: which
+
 ## Primary Expressions
 
 > **<sup>Syntax</sup>**\
