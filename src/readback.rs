@@ -7,7 +7,11 @@ use futures::{
 };
 use indexmap::IndexSet;
 
-use crate::icombs::{net::number_to_string, Net};
+use crate::{
+    icombs::{net::number_to_string, Net},
+    par::types::TypeDefs,
+    playground::CheckedProgram,
+};
 
 pub trait NameRequiredTraits:
     Clone + Hash + Eq + core::fmt::Debug + Ord + Display + Send + Sync + 'static
@@ -39,22 +43,24 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-type Prog<Name> = Arc<Program<Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>>;
+use crate::icombs::Name;
+
+type Prog = Arc<Program<Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>>;
 #[derive(Clone)]
-pub struct ReadbackStateInner<Name: NameRequiredTraits> {
+pub struct ReadbackStateInner {
     pub shared: SharedState,
     pub spawner: Arc<dyn Spawn + Send + Sync>,
     pub type_variables: IndexSet<Name>,
 }
 
-pub struct Handle<Name: NameRequiredTraits> {
+pub struct Handle {
     refresh: Arc<dyn Fn() + Send + Sync>,
-    history: Vec<Event<Name>>,
-    end: Option<Request<Name>>,
+    history: Vec<Event>,
+    end: Option<Request>,
     net: Arc<Mutex<Net>>,
 }
 
-impl<Name: NameRequiredTraits> Handle<Name> {
+impl Handle {
     fn child(&self) -> Self {
         Self {
             refresh: self.refresh.clone(),
@@ -63,47 +69,47 @@ impl<Name: NameRequiredTraits> Handle<Name> {
             net: self.net.clone(),
         }
     }
-    fn add_event(&mut self, ev: Event<Name>) {
+    fn add_event(&mut self, ev: Event) {
         self.history.push(ev);
         (self.refresh)()
     }
-    fn set_end(&mut self, end: Option<Request<Name>>) {
+    fn set_end(&mut self, end: Option<Request>) {
         self.end = end;
         (self.refresh)()
     }
 }
 
 #[derive(Debug)]
-enum Request<Name: NameRequiredTraits> {
+enum Request {
     Waiting,
-    Port(TypedTree<Name>),
-    Expand(TypedTree<Name>),
+    Port(TypedTree),
+    Expand(TypedTree),
     Variable(usize),
-    Choose(Tree, Vec<(Name, Tree, TypedTree<Name>)>),
+    Choose(Tree, Vec<(Name, Tree, TypedTree)>),
 }
 
 #[derive(Debug)]
-pub enum Event<Name: NameRequiredTraits> {
-    Send(Arc<Mutex<Handle<Name>>>),
-    Receive(Arc<Mutex<Handle<Name>>>),
+pub enum Event {
+    Send(Arc<Mutex<Handle>>),
+    Receive(Arc<Mutex<Handle>>),
     SendType(Name),
     ReceiveType(Name),
     Break,
     Continue,
     Either(Name),
     Choose(Name),
-    Named(TypedTree<Name>),
+    Named(TypedTree),
 }
 
-impl<Name: NameRequiredTraits> Debug for Handle<Name> {
+impl Debug for Handle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Handle").finish_non_exhaustive()
     }
 }
 
-pub struct ReadbackState<Name: NameRequiredTraits> {
-    pub root: Arc<Mutex<Handle<Name>>>,
-    pub inner: ReadbackStateInner<Name>,
+pub struct ReadbackState {
+    pub root: Arc<Mutex<Handle>>,
+    pub inner: ReadbackStateInner,
     // it's OK that this is unused, because we only use it to drop it when we're dropped.
     #[allow(unused)]
     pub net_tx: Sender<()>,
@@ -111,8 +117,8 @@ pub struct ReadbackState<Name: NameRequiredTraits> {
     pub show_net: bool,
 }
 
-impl<Name: NameRequiredTraits> ReadbackState<Name> {
-    pub fn show_readback(&mut self, ui: &mut egui::Ui, prog: Prog<Name>) {
+impl ReadbackState {
+    pub fn show_readback(&mut self, ui: &mut egui::Ui, prog: Arc<CheckedProgram>) {
         ui.vertical(|ui| {
             self.root_impl.show_message(ui);
             ui.horizontal(|ui| {
@@ -129,9 +135,9 @@ impl<Name: NameRequiredTraits> ReadbackState<Name> {
     pub fn initialize(
         ui: &mut egui::Ui,
         net: Net,
-        tree: TypedTree<Name>,
+        tree: TypedTree,
         spawner: Arc<dyn Spawn + Send + Sync>,
-        program: &Prog<Name>,
+        program: &Arc<CheckedProgram>,
     ) -> Self {
         let root_impl = ReadbackImplLevel::from_type(&tree.ty, &program, &mut Default::default());
         let ctx = ui.ctx().clone();
@@ -144,7 +150,7 @@ impl<Name: NameRequiredTraits> ReadbackState<Name> {
             net: Arc::new(Mutex::new(net)),
         };
         let (net_tx, net_rx) = channel();
-        let shared = SharedState::with_net(handle.net.clone());
+        let shared = SharedState::with_net(handle.net.clone(), program.type_defs.clone());
         // the net_tx channel gets dropped when the readback state is dropped.
         spawner.spawn(shared.create_net_reducer(net_rx)).unwrap();
         Self {
@@ -162,12 +168,12 @@ impl<Name: NameRequiredTraits> ReadbackState<Name> {
 }
 // first, we render as deep as we can. Button clicks replace nodes by a Halt node
 // then, we read back, replacing Halt nodes with other nodes. This is the async part
-impl<Name: NameRequiredTraits> ReadbackStateInner<Name> {
+impl ReadbackStateInner {
     pub fn show_handle(
         &mut self,
         ui: &mut egui::Ui,
-        handle: Arc<Mutex<Handle<Name>>>,
-        prog: Prog<Name>,
+        handle: Arc<Mutex<Handle>>,
+        prog: Arc<CheckedProgram>,
     ) {
         egui::Frame::default()
             .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
@@ -225,8 +231,6 @@ impl<Name: NameRequiredTraits> ReadbackStateInner<Name> {
                                 let tree = &tree.tree;
                                 if let Type::Name(_, name, _) = ty {
                                     ui.label(format!("name {}", name));
-                                } else if let Type::DualName(_, name, _) = ty {
-                                    ui.label(format!("name chan {}", name));
                                 }
                             }
                             Event::Break => {
@@ -254,8 +258,11 @@ impl<Name: NameRequiredTraits> ReadbackStateInner<Name> {
                                 };
 
                                 let shared = self.shared.clone();
-                                port.ty =
-                                    prepare_type_for_readback(&prog, port.ty, &self.type_variables);
+                                port.ty = prepare_type_for_readback(
+                                    self.shared.type_defs(),
+                                    port.ty,
+                                    &self.type_variables,
+                                );
                                 {
                                     let handle = handle.clone();
                                     let mut this = self.clone();
@@ -354,9 +361,9 @@ impl<Name: NameRequiredTraits> ReadbackStateInner<Name> {
     }
     pub fn readback_result(
         &mut self,
-        handle: Arc<Mutex<Handle<Name>>>,
-        port: ReadbackResult<Name>,
-        prog: Prog<Name>,
+        handle: Arc<Mutex<Handle>>,
+        port: ReadbackResult,
+        prog: Arc<CheckedProgram>,
     ) -> BoxFuture<()> {
         async move {
             let handle_2 = handle.clone();
@@ -418,8 +425,11 @@ impl<Name: NameRequiredTraits> ReadbackStateInner<Name> {
                     let mut this = self.clone();
                     self.spawner
                         .spawn(async move {
-                            tree.ty =
-                                prepare_type_for_readback(&prog, tree.ty, &this.type_variables);
+                            tree.ty = prepare_type_for_readback(
+                                &this.shared.type_defs(),
+                                tree.ty,
+                                &this.type_variables,
+                            );
                             let res = this.shared.read_with_type(tree).await;
                             this.readback_result(handle, res, prog).await;
                         })
@@ -434,6 +444,7 @@ impl<Name: NameRequiredTraits> ReadbackStateInner<Name> {
                         let mut lock = handle_2.lock().unwrap();
                         lock.add_event(Event::SendType(name.clone()));
                     }
+                    self.type_variables.insert(name);
                     self.readback_result(handle, *payload, prog).await;
                 }
                 ReadbackResult::ReceiveType(name, payload) => {
@@ -457,8 +468,8 @@ impl<Name: NameRequiredTraits> ReadbackStateInner<Name> {
         .boxed()
     }
 }
-pub fn prepare_type_for_readback<Name: NameRequiredTraits>(
-    program: &Program<Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>,
+pub fn prepare_type_for_readback(
+    type_defs: &TypeDefs<Loc, Name>,
     mut ty: Type<Loc, Name>,
     type_variables: &IndexSet<Name>,
 ) -> Type<Loc, Name> {
@@ -468,18 +479,15 @@ pub fn prepare_type_for_readback<Name: NameRequiredTraits>(
                 if type_variables.contains(&name) {
                     break Type::Name(loc, name, args);
                 } else {
-                    program.dereference_type_def(&name, &args)
+                    type_defs.get(&loc, &name, &args).unwrap()
                 }
             }
-            Type::DualName(loc, name, args) => {
-                if type_variables.contains(&name) {
-                    break Type::DualName(loc, name, args);
-                } else {
-                    program.dereference_type_def(&name, &args).dual()
-                }
+            Type::Recursive(_, label, body) => {
+                Type::expand_recursive(&label, &*body, &type_defs).unwrap()
             }
-            Type::Recursive(_, label, body) => Type::expand_recursive(&label, &*body),
-            Type::Iterative(_, label, body) => Type::expand_iterative(&label, &*body),
+            Type::Iterative(_, label, body) => {
+                Type::expand_iterative(&label, &*body, &type_defs).unwrap()
+            }
             ty => break ty,
         };
     }
@@ -505,18 +513,19 @@ impl core::ops::BitAnd<ReadbackImplLevel> for ReadbackImplLevel {
 }
 
 impl ReadbackImplLevel {
-    fn from_type<Name: NameRequiredTraits>(
+    fn from_type(
         typ: &Type<Loc, Name>,
-        prog: &Program<Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>,
+        prog: &CheckedProgram,
         type_variables: &mut BTreeSet<Name>,
     ) -> Self {
         use core::ops::BitAnd;
         use ReadbackImplLevel::*;
         match typ {
-            Type::Name(_, name, items) | Type::DualName(_, name, items) => {
+            Type::Chan(loc, body) => ReadbackImplLevel::from_type(&body, prog, type_variables),
+            Type::Name(loc, name, items) => {
                 if !type_variables.contains(name) {
                     ReadbackImplLevel::from_type(
-                        &prog.dereference_type_def(name, &items),
+                        &prog.type_defs.get(&loc, name, &items).unwrap(),
                         prog,
                         type_variables,
                     )

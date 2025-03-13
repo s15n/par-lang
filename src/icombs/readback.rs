@@ -16,15 +16,18 @@ use std::{
     },
 };
 
-use crate::par::{parse::Loc, types::Type};
+use crate::par::{
+    language::Internal,
+    parse::Loc,
+    types::{Type, TypeDefs},
+};
 
-use super::{compiler::TypedTree, Net, Tree};
-
-#[derive(Default)]
+use super::{compiler::TypedTree, Name, Net, Tree};
 pub struct CoroState {
     pub(crate) net: Arc<Mutex<Net>>,
     new_redex: Mutex<Vec<futures::channel::mpsc::Sender<()>>>,
     new_var: AtomicUsize,
+    type_defs: TypeDefs<Loc, Name>,
 }
 
 fn unwrap_err_or<T, E>(value: Result<T, E>, default: E) -> E {
@@ -48,7 +51,7 @@ struct WaitingOutsideExt(Tree, async_watch::Receiver<bool>);
 struct WaitingInsideExt(Tree, async_watch::Sender<bool>);
 struct ReadbackExt(Sender<PortContents>);
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct SharedState {
     pub(crate) shared: Arc<CoroState>,
 }
@@ -81,12 +84,13 @@ fn do_copy(
 }
 
 impl SharedState {
-    pub fn with_net(net: Arc<Mutex<Net>>) -> Self {
+    pub fn with_net(net: Arc<Mutex<Net>>, type_defs: TypeDefs<Loc, Name>) -> Self {
         Self {
             shared: Arc::new(CoroState {
                 net,
                 new_redex: Default::default(),
                 new_var: Default::default(),
+                type_defs,
             }),
         }
     }
@@ -319,11 +323,7 @@ impl SharedState {
         }
         .boxed()
     }
-    pub async fn as_either<Name: Debug + Send>(
-        &self,
-        tree: Tree,
-        variants: Vec<Name>,
-    ) -> (Name, Tree) {
+    pub async fn as_either(&self, tree: Tree, variants: Vec<Name>) -> (Name, Tree) {
         // TODO: This as_either function is weaker than it should be
         // It will not detect some invalid Either instances, where the context wires are plugged in incorrectly
         let (context, possibilities) = self.as_con(tree).await;
@@ -373,19 +373,19 @@ impl SharedState {
         }
         (context, res)
     }
-    pub async fn read_with_type<Name: Clone + Ord + std::hash::Hash + 'static + Debug + Send>(
-        &self,
-        tree: TypedTree<Name>,
-    ) -> ReadbackResult<Name> {
+    pub async fn read_with_type(&self, tree: TypedTree) -> ReadbackResult {
         let ty = tree.ty;
         let port = self.read_port(tree.tree).await;
         self.as_with_type(port, ty).await
     }
-    pub fn as_with_type<Name: Clone + Ord + std::hash::Hash + 'static + Debug + Send>(
+    pub fn type_defs(&self) -> &TypeDefs<Loc, Name> {
+        &self.shared.type_defs
+    }
+    pub fn as_with_type(
         &self,
         port: PortContents,
         ty: Type<Loc, Name>,
-    ) -> BoxFuture<ReadbackResult<Name>> {
+    ) -> BoxFuture<ReadbackResult> {
         async move {
             let tree = match port {
                 PortContents::Aux(tx) => {
@@ -420,7 +420,8 @@ impl SharedState {
                 Type::Receive(_, from, to) => {
                     let (a, b) = self.as_par(tree).await;
                     ReadbackResult::Receive(
-                        b.with_type((*from).dual()).into_readback_result_boxed(),
+                        b.with_type((*from).dual(self.type_defs()).unwrap())
+                            .into_readback_result_boxed(),
                         a.with_type(*to).into_readback_result_boxed(),
                     )
                 }
@@ -472,9 +473,7 @@ impl SharedState {
                     self.read_era(tree).await.unwrap();
                     ReadbackResult::Continue
                 }
-                ty @ Type::Name(..) | ty @ Type::DualName(..) => {
-                    ReadbackResult::Named(tree.with_type(ty))
-                }
+                ty @ Type::Name(..) => ReadbackResult::Named(tree.with_type(ty)),
                 ty => ReadbackResult::Unsupported(tree.with_type(ty)),
             }
         }
@@ -560,13 +559,13 @@ impl SharedState {
         }
     }
 
-    pub fn choose_choice<Name: Clone + PartialEq>(
+    pub fn choose_choice(
         &self,
         chosen: Name,
         ctx: Tree,
-        options: Vec<(Name, Tree, TypedTree<Name>)>,
+        options: Vec<(Name, Tree, TypedTree)>,
         spawner: &(dyn futures::task::Spawn + Send + Sync),
-    ) -> TypedTree<Name> {
+    ) -> TypedTree {
         use futures::task::Spawn;
         use futures::task::SpawnExt;
         let mut ctx = Some(ctx);
@@ -599,29 +598,29 @@ impl SharedState {
 }
 
 #[derive(Debug, Default)]
-pub enum ReadbackResult<Name: Clone> {
+pub enum ReadbackResult {
     #[default]
     Break,
     Continue,
-    Send(Box<ReadbackResult<Name>>, Box<ReadbackResult<Name>>),
-    Receive(Box<ReadbackResult<Name>>, Box<ReadbackResult<Name>>),
-    SendType(Name, Box<ReadbackResult<Name>>),
-    ReceiveType(Name, Box<ReadbackResult<Name>>),
-    Either(Name, Box<ReadbackResult<Name>>),
-    Choice(Tree, Vec<(Name, Tree, TypedTree<Name>)>),
-    Named(TypedTree<Name>),
-    Expand(TypedTree<Name>),
-    Halted(TypedTree<Name>),
-    Unsupported(TypedTree<Name>),
-    Waiting(TypedTree<Name>, async_watch::Receiver<bool>),
+    Send(Box<ReadbackResult>, Box<ReadbackResult>),
+    Receive(Box<ReadbackResult>, Box<ReadbackResult>),
+    SendType(Name, Box<ReadbackResult>),
+    ReceiveType(Name, Box<ReadbackResult>),
+    Either(Name, Box<ReadbackResult>),
+    Choice(Tree, Vec<(Name, Tree, TypedTree)>),
+    Named(TypedTree),
+    Expand(TypedTree),
+    Halted(TypedTree),
+    Unsupported(TypedTree),
+    Waiting(TypedTree, async_watch::Receiver<bool>),
     Variable(usize),
 }
 
-impl<Name: Clone> TypedTree<Name> {
-    fn into_readback_result(self) -> ReadbackResult<Name> {
+impl TypedTree {
+    fn into_readback_result(self) -> ReadbackResult {
         ReadbackResult::Halted(self)
     }
-    fn into_readback_result_boxed(self) -> Box<ReadbackResult<Name>> {
+    fn into_readback_result_boxed(self) -> Box<ReadbackResult> {
         Box::new(self.into_readback_result())
     }
 }

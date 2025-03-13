@@ -17,15 +17,16 @@ use crate::{
     },
     par::{
         language::Internal,
-        parse::{Loc, Name, Program},
+        parse::{Loc, Program},
         process::Expression,
         types::Type,
     },
-    playground,
+    playground::{self, CheckedProgram},
     readback::{NameRequiredTraits, ReadbackState},
     spawn::TokioSpawn,
 };
-type Prog<Name> = Arc<Program<Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>>;
+
+use crate::icombs::Name;
 
 #[derive(Debug, Default, Clone)]
 pub enum ReadbackPattern<Name: Clone> {
@@ -72,15 +73,15 @@ impl From<(TestingResult, TestingResult)> for TestingResult {
 
 // testing works by matching each readback result against a pattern.
 
-pub struct TestingState<Name: NameRequiredTraits> {
+pub struct TestingState {
     pub shared: SharedState,
     pub spawner: Arc<dyn Spawn + Send + Sync>,
     pub net: Arc<Mutex<Net>>,
-    pub prog: Prog<Name>,
+    pub prog: Arc<CheckedProgram>,
 }
 
-impl<Name: NameRequiredTraits> TestingState<Name> {
-    fn result_to_pattern(&self, result: ReadbackResult<Name>) -> BoxFuture<ReadbackPattern<Name>> {
+impl TestingState {
+    fn result_to_pattern(&self, result: ReadbackResult) -> BoxFuture<ReadbackPattern<Name>> {
         async move {
             match result {
                 ReadbackResult::Break => ReadbackPattern::Break,
@@ -106,7 +107,7 @@ impl<Name: NameRequiredTraits> TestingState<Name> {
                 }
                 ReadbackResult::Halted(mut tree) => {
                     tree.ty = crate::readback::prepare_type_for_readback(
-                        &self.prog,
+                        &self.prog.type_defs,
                         tree.ty,
                         &Default::default(),
                     );
@@ -127,7 +128,7 @@ impl<Name: NameRequiredTraits> TestingState<Name> {
     }
     fn matches(
         &self,
-        result: ReadbackResult<Name>,
+        result: ReadbackResult,
         pattern: ReadbackPattern<Name>,
     ) -> BoxFuture<TestingResult> {
         async move {
@@ -177,7 +178,7 @@ impl<Name: NameRequiredTraits> TestingState<Name> {
                 }
                 ReadbackResult::Halted(mut tree) => {
                     tree.ty = crate::readback::prepare_type_for_readback(
-                        &self.prog,
+                        &self.prog.type_defs,
                         tree.ty,
                         &Default::default(),
                     );
@@ -198,7 +199,7 @@ impl<Name: NameRequiredTraits> TestingState<Name> {
     }
 }
 
-pub enum TestPattern<Name: Clone> {
+pub enum TestPattern {
     Pattern(ReadbackPattern<Name>),
     Code(String),
 }
@@ -206,7 +207,7 @@ pub enum TestPattern<Name: Clone> {
 pub struct TestCase {
     code: String,
     ty: String,
-    pattern: TestPattern<Internal<Name>>,
+    pattern: TestPattern,
 }
 
 pub struct TestFamily {
@@ -249,7 +250,7 @@ async fn test_whole_programs() -> Result<(), String> {
     let mut failed = false;
     let test_families = vec![test_family!(
         "hello world",
-        include_str!("sample_ic.par"),
+        include_str!("../examples/sample_ic.par"),
         [
             (".true!", "Bool", code ".true!")
             ("not(true)", "Bool", code "false")
@@ -280,7 +281,7 @@ async fn test_whole_programs() -> Result<(), String> {
         let prog = (checked.program.clone());
         let mut spawner = Arc::new(TokioSpawn);
         let mut net = Arc::new(Mutex::new(ic_compiled.create_net()));
-        let mut shared = SharedState::with_net(net.clone());
+        let mut shared = SharedState::with_net(net.clone(), prog.type_defs.clone());
         let (_tx, rx) = channel();
         spawner.spawn(shared.create_net_reducer(rx)).unwrap();
         let mut state = TestingState {

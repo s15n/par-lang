@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::par::parse::Loc;
+use crate::{par::parse::Loc, playground::CheckedProgram};
 use indexmap::{IndexMap, IndexSet};
 use std::hash::Hash;
 
@@ -11,12 +11,14 @@ use super::net::{Net, Tree};
 use crate::par::parse::Loc::External;
 use crate::par::{
     language::Internal,
-    parse::{Name, Program},
+    parse::Program,
     process::{Captures, Command, Expression, Process},
     types::Type,
 };
 
-type Prog<Name> = Program<Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>;
+use super::Name;
+
+type Prog = Program<Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 enum VariableKind {
@@ -29,12 +31,12 @@ enum VariableKind {
 }
 
 #[derive(Debug, Clone)]
-pub struct TypedTree<Name: Clone> {
+pub struct TypedTree {
     pub tree: Tree,
     pub ty: Type<Loc, Name>,
 }
 
-impl<Name: Clone> Default for TypedTree<Name> {
+impl Default for TypedTree {
     fn default() -> Self {
         Self {
             tree: Tree::e(),
@@ -44,15 +46,15 @@ impl<Name: Clone> Default for TypedTree<Name> {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Var<Name: Clone + Debug + Hash + PartialEq + Eq + PartialOrd + Ord> {
+pub enum Var {
     Name(Name),
     Loop(Option<Name>),
 }
 
-pub struct Compiler<'program, Name: Debug + Clone + Eq + Hash + Ord> {
+pub struct Compiler<'program> {
     net: Net,
-    vars: IndexMap<Var<Name>, (TypedTree<Name>, VariableKind)>,
-    program: &'program Prog<Name>,
+    vars: IndexMap<Var, (TypedTree, VariableKind)>,
+    program: &'program CheckedProgram,
     global_name_to_id: IndexMap<Name, usize>,
     type_variables: IndexSet<Name>,
     id_to_ty: Vec<Type<Loc, Name>>,
@@ -60,7 +62,7 @@ pub struct Compiler<'program, Name: Debug + Clone + Eq + Hash + Ord> {
 }
 
 impl Tree {
-    pub(crate) fn with_type<Name: Clone>(self, ty: Type<Loc, Name>) -> TypedTree<Name> {
+    pub(crate) fn with_type(self, ty: Type<Loc, Name>) -> TypedTree {
         TypedTree { tree: self, ty }
     }
 }
@@ -76,8 +78,8 @@ fn multiplex_trees(mut trees: Vec<Tree>) -> Tree {
     }
 }
 
-impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'program, Name> {
-    fn compile_global(&mut self, name: &Name) -> Option<TypedTree<Name>> {
+impl<'program> Compiler<'program> {
+    fn compile_global(&mut self, name: &Name) -> Option<TypedTree> {
         if let Some(id) = self.global_name_to_id.get(name) {
             let ty = self.id_to_ty.get(*id).unwrap().clone();
             return Some(TypedTree {
@@ -111,7 +113,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
 
     fn in_package(
         &mut self,
-        f: impl FnOnce(&mut Self) -> TypedTree<Name>,
+        f: impl FnOnce(&mut Self) -> TypedTree,
         typ: Option<&Type<Loc, Name>>,
         debug: bool,
     ) -> (usize, Type<Loc, Name>) {
@@ -166,13 +168,13 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
         }
         t
     }
-    fn bind_variable(&mut self, name: &Name, tree: TypedTree<Name>) {
+    fn bind_variable(&mut self, name: &Name, tree: TypedTree) {
         assert!(self
             .vars
             .insert(Var::Name(name.clone()), (tree, VariableKind::Linear))
             .is_none())
     }
-    fn instantiate_variable(&mut self, name: &Name) -> TypedTree<Name> {
+    fn instantiate_variable(&mut self, name: &Name) -> TypedTree {
         let (value, kind) = self.use_name(name);
         if kind == VariableKind::Boxed {
             todo!()
@@ -180,7 +182,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
         value
     }
 
-    fn use_var(&mut self, var: &Var<Name>) -> (TypedTree<Name>, VariableKind) {
+    fn use_var(&mut self, var: &Var) -> (TypedTree, VariableKind) {
         if let Some((tree, kind)) = self.vars.swap_remove(var) {
             match kind {
                 VariableKind::Linear => (tree, kind),
@@ -212,7 +214,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
         }
     }
 
-    fn use_name(&mut self, name: &Name) -> (TypedTree<Name>, VariableKind) {
+    fn use_name(&mut self, name: &Name) -> (TypedTree, VariableKind) {
         if self.vars.contains_key(&Var::Name(name.clone())) {
             self.use_var(&Var::Name(name.clone()))
         } else if self.compile_global(name).is_some() {
@@ -224,7 +226,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
             panic!("unknown variable {}", name)
         }
     }
-    fn create_typed_wire(&mut self, t: Type<Loc, Name>) -> (TypedTree<Name>, TypedTree<Name>) {
+    fn create_typed_wire(&mut self, t: Type<Loc, Name>) -> (TypedTree, TypedTree) {
         let (v0, v1) = self.net.create_wire();
         (
             TypedTree {
@@ -233,7 +235,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
             },
             TypedTree {
                 tree: v1,
-                ty: t.dual(),
+                ty: t.dual(&self.program.type_defs).unwrap(),
             },
         )
     }
@@ -250,7 +252,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
         println!("Net:");
         println!("{}", self.net.show_indent(1));
     }
-    fn link_typed(&mut self, a: TypedTree<Name>, b: TypedTree<Name>) {
+    fn link_typed(&mut self, a: TypedTree, b: TypedTree) {
         self.net.link(a.tree, b.tree);
     }
     fn either_instance(&mut self, tree: Tree, index: usize, out_of: usize) -> Tree {
@@ -272,15 +274,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 if self.type_variables.contains(&name) {
                     return Type::Name(loc, name, args);
                 } else {
-                    let ty = self.program.dereference_type_def(&name, &args);
-                    self.normalize_type(ty)
-                }
-            }
-            Type::DualName(loc, name, args) => {
-                if self.type_variables.contains(&name) {
-                    return Type::DualName(loc, name, args);
-                } else {
-                    let ty = self.program.dereference_type_def(&name, &args).dual();
+                    let ty = self.program.type_defs.get(&loc, &name, &args).unwrap();
                     self.normalize_type(ty)
                 }
             }
@@ -292,20 +286,17 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
                 index_map.sort_keys();
                 Type::Choice(loc, index_map)
             }
-            Type::Recursive(_, name, body) => {
-                self.normalize_type(Type::expand_recursive(&name, &body))
-            }
-            Type::Iterative(_, name, body) => {
-                self.normalize_type(Type::expand_iterative(&name, &body))
-            }
+            Type::Recursive(_, name, body) => self.normalize_type(
+                Type::expand_recursive(&name, &body, &self.program.type_defs).unwrap(),
+            ),
+            Type::Iterative(_, name, body) => self.normalize_type(
+                Type::expand_iterative(&name, &body, &self.program.type_defs).unwrap(),
+            ),
             a => a,
         }
     }
 
-    fn compile_expression(
-        &mut self,
-        expr: &Expression<Loc, Name, Type<Loc, Name>>,
-    ) -> TypedTree<Name> {
+    fn compile_expression(&mut self, expr: &Expression<Loc, Name, Type<Loc, Name>>) -> TypedTree {
         match expr {
             Expression::Reference(_, name, ty) => self.instantiate_variable(name),
             Expression::Fork(_, captures, name, _, typ, proc) => {
@@ -557,7 +548,7 @@ impl<'program, Name: Debug + Clone + Eq + Hash + Display + Ord> Compiler<'progra
     }
 }
 
-pub fn compile_file(program: &Prog<Internal<Name>>) -> IcCompiled {
+pub fn compile_file(program: &CheckedProgram) -> IcCompiled {
     let mut compiler = Compiler {
         net: Net::default(),
         vars: IndexMap::default(),
@@ -579,7 +570,7 @@ pub fn compile_file(program: &Prog<Internal<Name>>) -> IcCompiled {
 #[derive(Clone, Default)]
 pub struct IcCompiled {
     pub(crate) id_to_package: Arc<IndexMap<usize, Tree>>,
-    pub(crate) name_to_id: IndexMap<Internal<Name>, usize>,
+    pub(crate) name_to_id: IndexMap<Name, usize>,
 }
 
 impl Display for IcCompiled {
@@ -598,7 +589,7 @@ impl Display for IcCompiled {
 }
 
 impl IcCompiled {
-    pub fn get_with_name(&self, name: &Internal<Name>) -> Option<Tree> {
+    pub fn get_with_name(&self, name: &Name) -> Option<Tree> {
         let id = self.name_to_id.get(name)?;
         self.id_to_package.get(id).cloned()
     }

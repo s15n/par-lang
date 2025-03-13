@@ -7,8 +7,8 @@ def false = .false!
 
 dec not: [Bool] Bool
 def not = [x] x {
-	true? => .false!
-	false? => .true!
+	.true! => .false!,
+	.false! => .true!
 }
 
 
@@ -28,22 +28,22 @@ def tree =
 
 dec xor: [Bool][Bool] Bool
 def xor = [a][b] a{
-	true? => not(b)
-	false? => b
+	.true! => not(b),
+	.false! => b
 }
 
 dec xor_tree: [Tree] Bool
 
 def xor_tree = [tree: Tree] tree begin {
-	empty? => .true!
-	item[lst1][lst2]? => xor(lst1 loop)(lst2 loop)
+	.empty! => .true!,
+	.item(lst1)(lst2)! => xor(lst1 loop)(lst2 loop)
 }
 
 
 dec is_some: [Option<Bool>] Bool
 def is_some = [option: Option<Bool>] option {
-    some val => val
-    none? => .false!
+    .some val => val,
+    .none! => .false!
 }
 
 dec main: Tree
@@ -51,13 +51,13 @@ def main = .empty!
 
 dec quant: (type T) (T) (T) [T] [T] Bool
 def quant = (type Bool) (.true!) (.false!) [x] [y] x {
-    true? => y {
-        true? => .false!
-        false? => .true!
+    .true! => y {
+        .true! => .false!,
+        .false! => .true!
     }
-    false? => y {
-        true? => .false!
-        false? => .true!
+    .false! => y {
+        .true! => .false!,
+        .false! => .true!
     }
 
 }

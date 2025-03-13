@@ -1,6 +1,8 @@
 use std::{
     collections::BTreeSet,
     fmt::Write,
+    fs::File,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -16,13 +18,14 @@ use crate::{
         parse::{parse_program, Loc, Name, ParseError, Program},
         process::Expression,
         runtime::{self, Context, Operation},
-        types::{self, Type, TypeError},
+        types::{self, Type, TypeDefs, TypeError},
     },
     readback::{prepare_type_for_readback, ReadbackState},
     spawn::TokioSpawn,
 };
 
 pub struct Playground {
+    file_path: Option<PathBuf>,
     code: String,
     compiled: Option<Result<Compiled, Error>>,
     compiled_code: Arc<str>,
@@ -30,7 +33,7 @@ pub struct Playground {
     editor_font_size: f32,
     show_compiled: bool,
     show_ic: bool,
-    readback_state: Option<crate::readback::ReadbackState<Internal<Name>>>,
+    readback_state: Option<crate::readback::ReadbackState>,
 }
 
 #[derive(Clone)]
@@ -104,14 +107,15 @@ impl Compiled {
                 buf
             })
             .collect();
-        // attempt to type check
-        let mut new_program = Program::default();
-        for (name, expression) in &program.definitions {
-            let mut context = types::Context::new(
-                Arc::new(program.type_defs.clone()),
-                Arc::new(types::Declarations(program.declarations.clone())),
-            );
 
+        // attempt to type check
+        let mut new_program = CheckedProgram::default();
+        let mut context = types::Context::new(
+            Arc::new(program.type_defs.clone()),
+            types::Declarations(program.declarations.clone()),
+        );
+
+        for (name, expression) in &program.definitions {
             match program.declarations.get(name) {
                 Some(Some(declaration)) => {
                     new_program
@@ -135,7 +139,8 @@ impl Compiled {
                         new_program.definitions.insert(name.clone(), e);
                         new_program
                             .declarations
-                            .insert(name.clone(), Some(inferred_type));
+                            .insert(name.clone(), Some(inferred_type.clone()));
+                        context.add_declaration(name.clone(), inferred_type);
                     }
                     Err(error) => {
                         return Compiled {
@@ -147,7 +152,10 @@ impl Compiled {
                 },
             }
         }
-        new_program.type_defs = program.type_defs.clone();
+        new_program.type_defs = TypeDefs {
+            globals: Arc::new(program.type_defs.clone()),
+            vars: Default::default(),
+        };
         return Compiled {
             program,
             pretty,
@@ -156,21 +164,22 @@ impl Compiled {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct CheckedProgram {
+    pub type_defs: TypeDefs<Loc, Internal<Name>>,
+    pub declarations: IndexMap<Internal<Name>, Option<Type<Loc, Internal<Name>>>>,
+    pub definitions:
+        IndexMap<Internal<Name>, Arc<Expression<Loc, Internal<Name>, Type<Loc, Internal<Name>>>>>,
+}
+
 #[derive(Clone)]
 pub(crate) struct Checked {
-    pub(crate) program: Arc<
-        Program<Internal<Name>, Arc<Expression<Loc, Internal<Name>, Type<Loc, Internal<Name>>>>>,
-    >,
+    pub(crate) program: Arc<CheckedProgram>,
     pub(crate) ic_compiled: Option<crate::icombs::IcCompiled>,
 }
 
 impl Checked {
-    pub(crate) fn from_program(
-        program: Program<
-            Internal<Name>,
-            Arc<Expression<Loc, Internal<Name>, Type<Loc, Internal<Name>>>>,
-        >,
-    ) -> Self {
+    pub(crate) fn from_program(program: CheckedProgram) -> Self {
         // attempt to compile to interaction combinators
         Checked {
             ic_compiled: Some(compile_file(&program)),
@@ -206,6 +215,7 @@ impl Playground {
         });
         let default_code = DEFAULT_CODE.to_string();
         Box::new(Self {
+            file_path: None,
             code: default_code.clone(),
             compiled: None,
             compiled_code: Arc::from(default_code),
@@ -237,6 +247,50 @@ impl eframe::App for Playground {
                             if ui.button(egui::RichText::new("+").monospace()).clicked() {
                                 self.editor_font_size = (self.editor_font_size + 1.0).min(320.0);
                             }
+
+                            ui.add_space(5.0);
+
+                            egui::menu::menu_custom_button(
+                                ui,
+                                egui::Button::new(egui::RichText::new("File").strong()),
+                                |ui| {
+                                    if ui.button(egui::RichText::new("Open...").strong()).clicked()
+                                    {
+                                        self.open_file();
+                                        ui.close_menu();
+                                    }
+
+                                    if let Some(path) = self.file_path.clone() {
+                                        if ui.button(egui::RichText::new("Save").strong()).clicked()
+                                        {
+                                            self.save_file(&path);
+                                            ui.close_menu();
+                                        }
+                                    }
+
+                                    if ui
+                                        .button(egui::RichText::new("Save as...").strong())
+                                        .clicked()
+                                    {
+                                        self.save_file_as();
+                                        ui.close_menu();
+                                    }
+                                },
+                            );
+
+                            ui.add_space(5.0);
+
+                            if let Some(file_name) =
+                                self.file_path.as_ref().and_then(|p| p.file_name())
+                            {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{}",
+                                        file_name.to_str().unwrap_or("")
+                                    ))
+                                    .strong(),
+                                );
+                            }
                         });
 
                         ui.separator();
@@ -258,6 +312,36 @@ impl eframe::App for Playground {
 }
 
 impl Playground {
+    fn open_file(&mut self) {
+        if let Some(path) = rfd::FileDialog::new().pick_file() {
+            if let Ok(file_content) = File::open(&path).and_then(|mut file| {
+                use std::io::Read;
+                let mut buf = String::new();
+                file.read_to_string(&mut buf)?;
+                Ok(buf)
+            }) {
+                self.file_path = Some(path);
+                self.code = file_content;
+            }
+        }
+    }
+
+    fn save_file_as(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_can_create_directories(true)
+            .save_file()
+        {
+            self.save_file(&path);
+        }
+    }
+
+    fn save_file(&mut self, path: &Path) {
+        let _ = File::create(&path).and_then(|mut file| {
+            use std::io::Write;
+            file.write_all(self.code.as_bytes())
+        });
+    }
+
     fn get_theme(&self, ui: &egui::Ui) -> ColorTheme {
         if ui.visuals().dark_mode {
             fix_dark_theme(ColorTheme::GITHUB_DARK)
@@ -267,14 +351,9 @@ impl Playground {
     }
 
     fn readback(
-        readback_state: &mut Option<ReadbackState<Internal<Name>>>,
+        readback_state: &mut Option<ReadbackState>,
         ui: &mut egui::Ui,
-        program: Arc<
-            Program<
-                Internal<Name>,
-                Arc<Expression<Loc, Internal<Name>, Type<Loc, Internal<Name>>>>,
-            >,
-        >,
+        program: Arc<CheckedProgram>,
         compiled: &IcCompiled,
     ) {
         for (internal_name, expression) in &program.definitions {
@@ -333,6 +412,7 @@ impl Playground {
             }
         }
     }
+
     fn recompile(&mut self) {
         self.compiled = Some(Compiled::from_string(self.code.as_str()));
         self.compiled_code = Arc::from(self.code.as_str());
@@ -584,8 +664,9 @@ impl Error {
         match self {
             Self::Parse(error) => {
                 format!(
-                    "{}\nSyntax error.",
-                    Self::display_loc(code, &error.location)
+                    "{}\nSyntax error: {}.",
+                    Self::display_loc(code, &error.location),
+                    error.msg
                 )
             }
 
@@ -787,4 +868,4 @@ fn blue() -> egui::Color32 {
     egui::Color32::from_hex("#118ab2").unwrap()
 }
 
-static DEFAULT_CODE: &str = include_str!("sample_ic.par");
+static DEFAULT_CODE: &str = include_str!("../examples/sample_ic.par");
