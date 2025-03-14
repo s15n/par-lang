@@ -2,7 +2,7 @@
 
 TODO: Jump between type, con/de-structing expression/statements
 
-Par (⅋) is a concurrent programming language bringing the expressive power of linear logic into practice.
+Par (<span style="font-family: Noto Sans">⅋</span>) is a concurrent programming language bringing the expressive power of linear logic into practice.
 
 This reference contains not only the complete grammar and specification of Par but also an extensive collection of examples, explanations and best practices.
 
@@ -36,8 +36,11 @@ What does that mean?
   - A list sends every item in order and then closes
   - A function receives its argument and becomes the result
   - An infinite stream can be signaled to either yield the next item or close
-- Channels communicate with each other by sending signals (the names with a dot in front)
-- Everything has a dual in Par. Every value is either supplied or consumed.
+- Channels communicate with each other by 
+  - sending signals (the names with a dot in front)
+  - sending values
+  - closing each other
+- Everything has a dual in Par: A value can be created by destroying its dual (see [channel expressions](expressions.md#channel-expressions))
 - This can all be abstracted away in [expressions](expressions.md) and [types](types.md) or be exposed as [statements](statements.md) in _process syntax_.
 
 Putting all of this together, Par manages to be a functional language while also allowing imperative-style code and mutability.

@@ -291,14 +291,14 @@ def also_negate: [Bool] Bool = [b] b {
 A choice type represents an interface for interacting with data. While an either type describes its underlying data, a choice type describes what can be done with it.
 ```par
 // creating an interface
-type Stack<Unwrap, T> = iterative {
+type Stack<T, Unwrap> = iterative {
   .push(T) => self
   .pop => (Option<T>) self
   .unwrap => Unwrap
 }
 
 // implementing it
-dec list_stack : [type T] [List<T>] Stack<List<T>, T>
+dec list_stack : [type T] [List<T>] Stack<T, List<T>>
 def list_stack = [type T] [list] begin {
   .push(x) => let list: List<T> = .item(x) list in loop
   .pop => list {
@@ -309,12 +309,9 @@ def list_stack = [type T] [list] begin {
 }
 
 def main = do {
-  let list: List<Bool> = .item(.false!).empty!
-  let stack = list_stack(type Bool)(list)
-
+  let stack = list_stack(type Bool)(.empty!)
   stack.push(.true!)
   stack.push(.false!)
-  stack.pop
 } in stack
 ```
 For an explanation of `iterative`-`self` and `begin`-`loop`, see [iterative types](#iterative-types)
@@ -616,7 +613,6 @@ let any: Any = ...
 let (type X) x = any
 let y: X = x
 ```
-todo: This doesn't work in Par currently. Is this intended?
 
 Mathematically, `(type T) A` is \\(\exists\ T: A\\).
 
@@ -733,6 +729,7 @@ Mathematically, `chan A` is \\(A^\perp\\), i.e. the dual type to `A`. Every type
 | `?` | `!` |
 | `recursive T` | `iterative chan T` |
 | `iterative T` | `recursive chan T` |
+| `self` | `self` |
 | `(type T) A` | `[type T] chan A` |
 | `[type T] A` | `(type T) chan A` |
 

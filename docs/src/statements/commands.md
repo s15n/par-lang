@@ -517,3 +517,9 @@ def id: [type T] [T] T = chan return: (type T) (T) chan T {
   return <> x
 }
 ```
+
+[ID]: ../lexical.md
+[_Expression_]: ../expressions.md
+[_ExpressionList_]: ../expressions.md
+[_PatternList_]: ../patterns.md
+[_ID_List_]: ../lexical.md
