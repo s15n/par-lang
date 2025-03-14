@@ -2,17 +2,20 @@
 
 > **<sup>Syntax</sup>**\
 > _Pattern_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; _PatternNoAlt_ \
-> &nbsp;&nbsp; | [_AltPattern_](#alternatives)
+> &nbsp;&nbsp; &nbsp;&nbsp; _PatternNoAlt_ <!--\
+> &nbsp;&nbsp; | [_AltPattern_](#alternatives)-->
 >
 > _PatternNoAlt_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; [_BindingPattern_](#binding-patterns) \
 > &nbsp;&nbsp; | [_Unit_](#the-unit-pattern) \
-> &nbsp;&nbsp; | [_PairPattern_](#pair-patterns) \
-> &nbsp;&nbsp; | [_VariantPattern_](#variant-patterns) <!--\
+> &nbsp;&nbsp; | [_PairPattern_](#pair-patterns) <!--\
+> &nbsp;&nbsp; | [_VariantPattern_](#variant-patterns) \
 > &nbsp;&nbsp; | [_BlankPattern_](#the-blank-pattern) -->\
 > &nbsp;&nbsp; | [_GroupedPattern_](#grouped-patterns) \
 > &nbsp;&nbsp; | [_ExistentialPattern_](#existential-patterns)
+>
+> _PatternList_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; _PatternNoAlt_ (`,` _PatternNoAlt_)<sup>*</sup> `,`<sup>?</sup>
 
 There are two properties of a pattern: What names it *binds* and whether it's *refutable*.
 
@@ -41,7 +44,7 @@ Patterns can appear in several places:
   All bindings of `p` must be used in `body` or `rest...` respectively.
   Here, `p` must also be irrefutable.
 
-- in pattern matching, i.e. either destruction
+<!-- - in pattern matching, i.e. either destruction
   ```par
   x {
     p1 => y1,
@@ -51,7 +54,25 @@ Patterns can appear in several places:
   ```
   Here, the patterns `p1`, `p2`, ... don't have to be irrefutable. All bindings of a pattern `p` must be used in the corresponding branch `y` though.
 
-  The matching must be *exhaustive*, i.e. every possible value of `x` must be matched in some branch. If multiple branches would match `x`, the first one is used.
+  The matching must be *exhaustive*, i.e. every possible value of `x` must be matched in some branch. If multiple branches would match `x`, the first one is used.-->
+- in pattern matching, i.e. either destruction/choice construction
+  ```par
+  // either destruction
+  x {
+    .label (p) rest_payload => y
+    ...
+  }
+  // in process syntax, the rest_payload isn't present
+  // (instead, x becomes it)
+
+  // choice construction
+  {
+    .label (p) => y
+    ...
+  }
+  ```
+  All bindings of `p` must be used in `y`.
+  Here, `p` must also be irrefutable.
 
 ## Binding Patterns
 
@@ -135,7 +156,7 @@ dec drop_bool : [Bool] !
 ## Pair Patterns
 
 > **<sup>Syntax</sup>**\
-> _PairPattern_ : `(` _Pattern_ `)` _Pattern_
+> _PairPattern_ : `(` _PatternList_ `)` _Pattern_
 
 *<sup>
 [Type](types.md#pair-types)
@@ -148,10 +169,22 @@ dec drop_bool : [Bool] !
 - `(p) q` matches `(a) b` if and only if `p` matches `a` and `q` matches `b`
 - When matching `(a) b`, the bindings are those of `p` matching `a`, together with those of `q` matching `b`
 
-A pair pattern is used to destruct a value of a [pair type](types.md#pair-types): todo (example)
+Having multiple patterns between `(` and `)` is just syntax sugar:
+```par
+// the pattern
+(p, q) r
+// is equivalent to
+(p) (q) r
+```
+
+A pair pattern is used to destruct a value of a [pair type](types.md#pair-types):
+```par
+dec uncurry : [type A, B, C] [[A, B] C] [(A, B)!] C
+def uncurry = [type A, B, C] [f] [(a, b)!] f(a, b)
+```
 
 
-## Variant Patterns
+<!--## Variant Patterns
 
 > **<sup>Syntax</sup>**\
 > _VariantPattern_ : [_Label_](types.md) _PatternNoAlt_
@@ -175,6 +208,7 @@ def get_second = [type T] [list] list {
   other => (.none!) other
 }
 ```
+-->
 
 ## Grouped Patterns
 
@@ -199,10 +233,36 @@ A grouped pattern is equivalent to its body.
 - `(type X) p` matches `(type T) a` if and only if `p` matches `a`
 - When matching `(type T) a`, the bindings are those of `p` matching `a`, and `X` is bound to `T`
 
-## Alternatives
+Having multiple types between `(` and `)` is just syntax sugar:
+```par
+// the pattern
+(type X, Y) p
+// is equivalent to
+(type X) (type Y) p
+```
+
+An existential pattern is used to destruct a value of an [existential type](types.md#existential-types)
+```par
+type Any = (type T) T
+
+def any_test: Any = do {
+  let x: Any = (type Bool) .true!
+  let (type X) x_val = x
+  // X = Bool
+  // x_val = .true!
+  let y: X = x_val
+} (type X) y
+```
+
+<!--## Alternatives
 
 > **<sup>Syntax</sup>**\
 > _Alternatives_ : `|`<sup>?</sup> _PatternNoAlt_ (`|` _PatternNoAlt_)<sup>+</sup>
 
 - The alternatives `a | b | ...` can be used on type `T` if `a`, `b`, ... can all be used on type `T`
-- Together, they're an irrefutable pattern if and only if 
+- Together, they're an irrefutable pattern if and only if (todo)
+-->
+
+## Future
+
+More extensive pattern matching, along with more types of patterns is planned in the future. See [here](future.md) for more.

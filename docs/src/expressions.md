@@ -25,6 +25,12 @@ Together with names like `x` they form the primary expressions, which can be [de
 
 Primary expressions appear [here](./expressions/application.md) in the grammar.
 
+Examples:
+```par
+dec apply_id : [type T] [T] T
+def apply_id = [type T] [x] {[y] y}(x)
+```
+
 ## Let Expressions
 
 > **<sup>Syntax</sup>**\

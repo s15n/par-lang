@@ -77,7 +77,7 @@ A selection of the [either type](../types.md#either-types) `either { .a A, .b B 
 
 > **<sup>Syntax</sup>**\
 > _ChoiceConstruction_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `{` (_Label_ (`(` _ReceivePatterns_ `)`)<sup>\*</sup> `=>` _Expression_ `,`<sup>?</sup>)<sup>\*</sup> `}`
+> &nbsp;&nbsp; &nbsp;&nbsp; `{` ([_Label_] (`(` _ReceivePatterns_ `)`)<sup>\*</sup> `=>` _Expression_ `,`<sup>?</sup>)<sup>\*</sup> `}`
 >
 > _ReceivePatterns_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; _PatternList_ \
