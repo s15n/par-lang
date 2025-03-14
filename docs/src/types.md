@@ -339,7 +339,9 @@ Choice types are often used as [iterative](#iterative-types) types.
 | [Destructing Statement](./statements/commands.md#todo)
 </sup>*
 
-A recursive type can be used within itself via `self`
+A recursive type can be used within itself via `self`.
+
+If no loop label is present, `self` corresponds to the innermost `recursive`/`iterative`. Else to the one with the same loop label.
 
 Recursive types are mostly used in conjunction with either types:
 ```par
@@ -400,9 +402,9 @@ def is_even = [n] n begin {
 | [Constructing Statement](./statements/commands.md#todo)
 </sup>*
 
-todo: General, mathematical, constraints
+An iterative type can be used within itself via `self`.
 
-An iterative type can be used within itself via `loop`
+If no loop label is present, `self` corresponds to the innermost `recursive`/`iterative`. Else to the one with the same loop label.
 
 Iterative types are mostly used in conjunction with choice types, for example:
 <!--```par

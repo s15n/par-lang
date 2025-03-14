@@ -109,6 +109,8 @@ If `a` is of type `A` and `b` is of type `B`, the choice construction `{ .a => a
 
 If --- given every `loop` in `a` is of type `iterative A` --- `a` is of type `A`, the iterative construction `begin a` is of the [iterative type](../types.md#iterative-types) `iterative A`.
 
+If no loop label is present, `loop` corresponds to the innermost `begin`. Else to the `begin` with the same loop label.
+
 
 ## Existential Constructions
 

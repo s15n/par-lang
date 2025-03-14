@@ -44,12 +44,7 @@ While [constructions](construction.md) construct values, applications destruct t
 > _EitherDestruction_ : _Applicable_ `{` (_Pattern_ `=>` _Expression_ `,`<sup>?</sup>)<sup>\*</sup> `}`
 -->
 > **<sup>Syntax</sup>**\
-> _EitherDestruction_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; _Applicable_ `{` ([_Label_] (`(` _ReceivePatterns_ `)`)<sup>\*</sup> ([ID] | `!`) `=>` _Expression_ `,`<sup>?</sup>)<sup>\*</sup> `}`
->
-> _ReceivePatterns_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; _PatternList_ \
-> &nbsp;&nbsp; | `type` [_ID_List_]
+> _EitherDestruction_ : _Applicable_ `{` ([_Label_] (`(` [_ReceivePatterns_] `)`)<sup>\*</sup> ([ID] | `!`) `=>` _Expression_ `,`<sup>?</sup>)<sup>\*</sup> `}`
 
 *<sup>
 [Destructs Type](../types.md#either-types)
@@ -72,6 +67,8 @@ Similar to `match` in Rust or `case` in Haskell.
 [Destructs Type](../types.md#recursive-types)
 | [Statement](../statements/commands.md#todo)
 </sup>*
+
+If no loop label is present, `loop` corresponds to the innermost `begin`. Else to the `begin` with the same loop label.
 
 ## Universal Specializations
 
