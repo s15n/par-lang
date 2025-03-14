@@ -3,7 +3,7 @@ COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
 keyword = {
     "type" | "dec" | "def" |
-    "chan" | "let" | "do" | "in" | "pass" | "begin" | "loop" | "telltypes" |
+    "chan" | "let" | "do" | "in" | "begin" | "loop" | "telltypes" |
     "either" | "recursive" | "iterative" | "self"
 }
 
@@ -87,9 +87,8 @@ apply_branch_receive   = { "(" ~ pattern_list ~ ")" ~ apply_branch }
 apply_branch_continue  = { "!" ~ "=>" ~ expression }
 apply_branch_recv_type = { "(" ~ "type" ~ name_list ~ ")" ~ apply_branch }
 
-process        = { proc_let | proc_pass | proc_telltypes | command | proc_noop }
+process        = { proc_let | proc_telltypes | command | proc_noop }
 proc_let       = { "let" ~ pattern ~ "=" ~ expression ~ process }
-proc_pass      = { "pass" }
 proc_telltypes = { "telltypes" ~ process }
 proc_noop      = { "" }
 
@@ -108,7 +107,7 @@ cmd_loop      = { "loop" ~ loop_label }
 cmd_send_type = { "(" ~ "type" ~ typ_list ~ ")" ~ cmd }
 cmd_recv_type = { "[" ~ "type" ~ name_list ~ "]" ~ cmd }
 
-pass_process = { proc_let | proc_pass | proc_telltypes | command }
+pass_process = { proc_let | proc_telltypes | command }
 
 cmd_branches         = { ("." ~ name ~ cmd_branch)* }
 cmd_branch           = { cmd_branch_then | cmd_branch_receive | cmd_branch_continue | cmd_branch_recv_type }
