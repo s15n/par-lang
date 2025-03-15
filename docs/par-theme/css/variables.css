@@ -50,6 +50,7 @@
     --quote-border: hsl(226, 15%, 22%);
 
     --warning-border: #ff8e00;
+    --note-border: #00a6ff;
 
     --table-border-color: hsl(210, 25%, 13%);
     --table-header-bg: hsl(210, 25%, 28%);
@@ -62,7 +63,7 @@
     --searchresults-header-fg: #666;
     --searchresults-border-color: #888;
     --searchresults-li-bg: #252932;
-    --search-mark-bg: #e3b171;
+    --search-mark-bg: #070604;
 
     --color-scheme: dark;
 
@@ -99,6 +100,7 @@
     --quote-border: hsl(234, 21%, 23%);
 
     --warning-border: #ff8e00;
+    --note-border: #00a6ff;
 
     --table-border-color: hsl(200, 7%, 13%);
     --table-header-bg: hsl(200, 7%, 28%);
@@ -148,6 +150,7 @@
     --quote-border: hsl(197, 37%, 91%);
 
     --warning-border: #ff8e00;
+    --note-border: #00a6ff;
 
     --table-border-color: hsl(0, 0%, 95%);
     --table-header-bg: hsl(0, 0%, 80%);
@@ -197,6 +200,7 @@
     --quote-border: hsl(226, 15%, 22%);
 
     --warning-border: #ff8e00;
+    --note-border: #00a6ff;
 
     --table-border-color: hsl(226, 23%, 16%);
     --table-header-bg: hsl(226, 23%, 31%);
@@ -246,6 +250,7 @@
     --quote-border: hsl(60, 5%, 70%);
 
     --warning-border: #ff8e00;
+    --note-border: #00a6ff;
 
     --table-border-color: hsl(60, 9%, 82%);
     --table-header-bg: #b3a497;
@@ -294,6 +299,7 @@
         --quote-border: hsl(234, 21%, 23%);
 
         --warning-border: #ff8e00;
+        --note-border: #00a6ff;
 
         --table-border-color: hsl(200, 7%, 13%);
         --table-header-bg: hsl(200, 7%, 28%);

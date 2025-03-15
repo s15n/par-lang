@@ -19,6 +19,11 @@
 
 There are two properties of a pattern: What names it *binds* and whether it's *refutable*.
 
+<div class="warning" style="--warning-border: var(--note-border)">
+
+Currently, all patterns are irrefutable. Because of plans to extend the patterns system (see the [Future](#future) section) this word (irrefutable) is used throughout this part of the reference. It can be safely ignored for now.
+</div>
+
 Patterns can appear in several places:
 - in a `let` binding:
   ```par
