@@ -9,8 +9,8 @@ use super::{
 use indexmap::IndexMap;
 use winnow::{
     combinator::{
-        alt, cut_err, delimited, dispatch, fail, not, opt, peek, preceded, repeat, separated,
-        separated_pair, seq, terminated, todo, trace,
+        alt, cut_err, delimited, dispatch, fail, not, opt, peek, preceded, repeat, separated, seq,
+        terminated, todo, trace,
     },
     error::{ContextError, ErrMode, ModalError, ParserError, StrContext},
     stream::{Accumulate, Compare, Range, Stream, StreamIsPartial},
@@ -169,11 +169,14 @@ pub fn program(
 }
 
 pub fn type_def(input: &mut Input) -> Result<(Name, (Vec<Name>, Type<Loc, Name>))> {
-    commit_after("type", (name, separated_pair(type_params, "=", typ))).parse_next(input)
+    commit_after("type", (name, type_params, "=", typ))
+        .map(|(name, type_params, _, typ)| (name, (type_params, typ)))
+        .parse_next(input)
 }
 
 pub fn declaration(input: &mut Input) -> Result<(Name, Type<Loc, Name>)> {
-    commit_after("dec", separated_pair(name, ":", typ))
+    commit_after("dec", (name, ":", typ))
+        .map(|(name, _, typ)| (name, typ))
         .context(StrContext::Label("declaration"))
         .parse_next(input)
 }
@@ -333,13 +336,13 @@ fn typ_self<'s>(input: &mut Input) -> Result<Type<Loc, Name>> {
 fn typ_send_type<'s>(input: &mut Input) -> Result<Type<Loc, Name>> {
     with_loc(commit_after(
         ("(", "type"),
-        separated_pair(
+        (
             list(name).context(StrContext::Label("list of type names to send")),
             ")",
             typ,
         ),
     ))
-    .map(|((names, typ), span)| {
+    .map(|((names, _, typ), span)| {
         names.into_iter().rev().fold(typ, |body, name| {
             Type::SendType(Loc::from(span.clone()), name, Box::new(body))
         })
@@ -350,13 +353,13 @@ fn typ_send_type<'s>(input: &mut Input) -> Result<Type<Loc, Name>> {
 fn typ_recv_type<'s>(input: &mut Input<'s>) -> Result<Type<Loc, Name>> {
     with_loc(commit_after(
         ("[", "type"),
-        separated_pair(
+        (
             list(name).context(StrContext::Label("list of type names to receive")),
             "]",
             typ,
         ),
     ))
-    .map(|((names, typ), span)| {
+    .map(|((names, _, typ), span)| {
         names.into_iter().rev().fold(typ, |body, name| {
             Type::ReceiveType(Loc::from(span.clone()), name, Box::new(body))
         })
@@ -386,24 +389,21 @@ fn typ_branch_then<'s>(input: &mut Input<'s>) -> Result<Type<Loc, Name>> {
 }
 
 fn typ_branch_receive<'s>(input: &mut Input<'s>) -> Result<Type<Loc, Name>> {
-    with_loc(commit_after(
-        "(",
-        separated_pair(list(typ), ")", typ_branch),
-    ))
-    .map(|((args, then), span)| {
-        args.into_iter().rev().fold(then, |acc, arg| {
-            Type::Receive(Loc::from(span.clone()), Box::new(arg), Box::new(acc))
+    with_loc(commit_after("(", (list(typ), ")", typ_branch)))
+        .map(|((args, _, then), span)| {
+            args.into_iter().rev().fold(then, |acc, arg| {
+                Type::Receive(Loc::from(span.clone()), Box::new(arg), Box::new(acc))
+            })
         })
-    })
-    .parse_next(input)
+        .parse_next(input)
 }
 
 fn typ_branch_recv_type<'s>(input: &mut Input<'s>) -> Result<Type<Loc, Name>> {
     with_loc(preceded(
         ("(", "type"),
-        cut_err(separated_pair(list(name), ")", typ_branch)),
+        cut_err((list(name), ")", typ_branch)),
     ))
-    .map(|((names, body), span)| {
+    .map(|((names, _, body), span)| {
         names.into_iter().rev().fold(body, |acc, name| {
             Type::ReceiveType(Loc::from(span.clone()), name, Box::new(acc))
         })
