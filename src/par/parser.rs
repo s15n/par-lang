@@ -1,30 +1,31 @@
 use super::{
-    language::Expression,
+    language::{
+        Apply, Construct, ConstructBranch, ConstructBranches, Expression, Pattern, Process,
+    },
+    lexer::{Input, Token, TokenKind},
     parse::{Loc, Name, Program},
     types::Type,
 };
-use core::ops::DerefMut;
 use indexmap::IndexMap;
 use winnow::{
-    ascii::{alpha1, alphanumeric1, line_ending, space0, space1},
     combinator::{
         alt, cut_err, delimited, dispatch, fail, not, opt, peek, preceded, repeat, separated,
         separated_pair, seq, terminated, todo, trace,
     },
     error::{ContextError, ErrMode, ModalError, ParserError, StrContext},
     stream::{Accumulate, Compare, Range, Stream, StreamIsPartial},
-    token::any,
-    LocatingSlice, ModalResult as Result, Parser,
+    token::{any, take},
+    ModalResult as Result, Parser,
 };
 
 // struct State;
 // type Input<'a> = Stateful<&'a str, State>;
 
-type Input<'a> = LocatingSlice<&'a str>;
-type Error = ErrMode<ContextError>;
+// pub type Input<'a> = LocatingSlice<&'a [Token<'a>]>;
+pub type Error = ErrMode<ContextError>;
 
 /// Like regular `preceded` but cuts if `parser` after `ignored` fails, assuming that it should be unambiguous.
-pub fn preceded_cut<Input, Ignored, Output, Error, IgnoredParser, ParseNext>(
+pub fn commit_after<Input, Ignored, Output, Error, IgnoredParser, ParseNext>(
     mut ignored: IgnoredParser,
     parser: ParseNext,
 ) -> impl Parser<Input, Output, Error>
@@ -41,63 +42,20 @@ where
     })
 }
 
-fn unit(u: ()) -> () {
-    u
-}
-/// Adapt a parser which runs on `&str` to run over `Input`.
-// fn as_str<'s, O, E>(mut parser: impl Parser<&'s str, O, E>) -> impl Parser<Input<'s>, O, E> {
-//     move |input: &mut Input<'s>| {
-//         let mut s: &str = input;
-//         let res = parser.parse_next(&mut s)?;
-//         let end = Input::new(s).checkpoint();
-//         input.reset(&end);
-//         Ok(res)
-//     }
-// }
-
-fn whitespace<'s, T: Into<Range>, I>(
-    occurrences: T,
-) -> impl Parser<I, I::Slice, Error> + use<'s, I, T>
+pub fn comment<I, E>() -> impl Parser<I, I::Slice, E>
 where
-    I: Stream<Token = char> + StreamIsPartial + Compare<&'s str>,
-{
-    trace("whitespace", {
-        repeat(
-            occurrences,
-            dispatch! {peek(any);
-                ' '| '\t'| '\n'| '\r' => any.void(),
-                _ => fail
-            },
-        )
-        .map(unit)
-        .take()
-    })
-}
-/// Same as `~` in Pest. Matches 0 or more whitespace. Always successful. Returns if it matched at least 1 char.
-fn ws<'s, I>(input: &mut I) -> Result<bool>
-where
-    I: Stream<Token = char> + StreamIsPartial + Compare<&'s str>,
-{
-    match whitespace(1..).parse_next(input) {
-        Ok(_) => Ok(true),
-        Err(_) => Ok(false),
-    }
-}
-
-fn comment<'s, I>() -> impl Parser<I, I::Slice, Error> + use<'s, I>
-where
-    I: Stream + StreamIsPartial + Compare<&'s str>,
+    I: Stream + StreamIsPartial + for<'s> Compare<&'s str>,
+    E: ParserError<I>,
 {
     // TODO can we add /* */ as accepted syntax?
     // delimited(("/*"), parser, ("*/"))
-    preceded_cut("//", repeat(0.., (not("\n"), any)).map(unit))
-        .take()
-        .context(StrContext::Label("comment"))
+    preceded("//", repeat(0.., (not("\n"), any)).map(|()| ())).take()
+    // .context(StrContext::Label("comment"))
 }
 
-fn keyword<'s, I>() -> impl Parser<I, I::Slice, Error> + use<'s, I>
+fn keyword<I>() -> impl Parser<I, I::Slice, Error>
 where
-    I: Stream + StreamIsPartial + Compare<&'s str>,
+    I: Stream + StreamIsPartial + for<'s> Compare<&'s str>,
 {
     alt((
         "type",
@@ -119,14 +77,34 @@ where
     .context(StrContext::Label("keyword"))
 }
 
-fn name<'s>(input: &mut Input<'s>) -> Result<Name> {
-    let name_char = || alt(("_", alphanumeric1));
-    (
-        not((keyword(), not(name_char()))),
-        (alpha1, repeat(0.., name_char()).map(unit)),
-    )
-        .take()
-        .parse_to()
+pub fn with_loc<'a, O, E>(
+    mut parser: impl Parser<Input<'a>, O, E>,
+) -> impl Parser<Input<'a>, (O, Loc), E>
+where
+    E: ParserError<Input<'a>> + ModalError,
+{
+    move |input: &mut Input<'a>| -> core::result::Result<(O, Loc), E> {
+        let tok: &Token<'_> = peek(any).parse_next(input)?;
+        let out = parser.parse_next(input)?;
+        Ok((out, tok.loc.clone()))
+    }
+}
+pub fn with_span<'a, O, E>(
+    mut parser: impl Parser<Input<'a>, O, E>,
+) -> impl Parser<Input<'a>, (O, core::ops::Range<usize>), E>
+where
+    E: ParserError<Input<'a>>,
+{
+    move |input: &mut Input<'a>| -> core::result::Result<(O, core::ops::Range<usize>), E> {
+        let start = peek(any).parse_next(input)?.span.start;
+        let out = parser.parse_next(input)?;
+        let end = peek(any).parse_next(input)?.span.end;
+        Ok((out, start..end))
+    }
+}
+
+pub fn name<'s>(input: &mut Input<'s>) -> Result<Name> {
+    preceded(not(keyword()), TokenKind::Ident.parse_to::<Name>())
         .context(StrContext::Expected(
             winnow::error::StrContextValue::CharLiteral('_'),
         ))
@@ -144,74 +122,58 @@ pub fn program(
     input: Input,
 ) -> std::result::Result<
     Program<Name, Expression<Loc, Name>>,
-    winnow::error::ParseError<LocatingSlice<&str>, ContextError>,
+    winnow::error::ParseError<Input, ContextError>,
 > {
-    enum Either<A, B, C, D> {
+    enum Either<A, B, C> {
         A(A),
         B(B),
         C(C),
-        D(D),
     }
 
-    delimited(
-        ws,
-        repeat(
-            0..,
-            alt((
-                type_def.map(Either::A),
-                declaration.map(Either::B),
-                definition.map(Either::C),
-                (|input: &mut Input| match dbg!(ws.parse_next(input)) {
-                    Ok(true) => Ok(()),
-                    Ok(false) => dbg!(fail.parse_next(input)),
-                    Err(e) => Err(e),
-                })
-                .map(Either::D),
-                cut_err(
-                    fail.context(StrContext::Label("item"))
-                        .context(StrContext::Expected(
-                            winnow::error::StrContextValue::Description("type"),
-                        ))
-                        .context(StrContext::Expected(
-                            winnow::error::StrContextValue::Description("declaration"),
-                        ))
-                        .context(StrContext::Expected(
-                            winnow::error::StrContextValue::Description("definition"),
-                        )),
-                ),
-            )),
-        )
-        .fold(Program::default, |mut acc, item| {
-            match item {
-                Either::A((name, (params, typ))) => {
-                    acc.type_defs.insert(name, (params, typ));
-                }
-                Either::B((name, typ)) => {
-                    acc.declarations.insert(name, Some(typ));
-                }
-                Either::C((name, typ, expression)) => {
-                    acc.declarations.insert(name.clone(), typ);
-                    acc.definitions.insert(name, expression);
-                }
-                Either::D(_) => (),
-            };
-            acc
-        }),
-        ws,
+    repeat(
+        0..,
+        alt((
+            type_def.map(Either::A),
+            declaration.map(Either::B),
+            definition.map(Either::C),
+            cut_err(
+                fail.context(StrContext::Label("item"))
+                    .context(StrContext::Expected(
+                        winnow::error::StrContextValue::Description("type"),
+                    ))
+                    .context(StrContext::Expected(
+                        winnow::error::StrContextValue::Description("declaration"),
+                    ))
+                    .context(StrContext::Expected(
+                        winnow::error::StrContextValue::Description("definition"),
+                    )),
+            ),
+        )),
     )
+    .fold(Program::default, |mut acc, item| {
+        match item {
+            Either::A((name, (params, typ))) => {
+                acc.type_defs.insert(name, (params, typ));
+            }
+            Either::B((name, typ)) => {
+                acc.declarations.insert(name, Some(typ));
+            }
+            Either::C((name, typ, expression)) => {
+                acc.declarations.insert(name.clone(), typ);
+                acc.definitions.insert(name, expression);
+            }
+        };
+        acc
+    })
     .parse(input)
 }
 
 pub fn type_def(input: &mut Input) -> Result<(Name, (Vec<Name>, Type<Loc, Name>))> {
-    preceded_cut(
-        ("type", ws),
-        seq!(name, _:ws, seq!(type_params, _:(ws, "=", ws), typ)),
-    )
-    .parse_next(input)
+    commit_after("type", (name, separated_pair(type_params, "=", typ))).parse_next(input)
 }
 
 pub fn declaration(input: &mut Input) -> Result<(Name, Type<Loc, Name>)> {
-    preceded_cut(("dec", ws), (separated_pair(name, (":", ws), typ)))
+    commit_after("dec", separated_pair(name, ":", typ))
         .context(StrContext::Label("declaration"))
         .parse_next(input)
 }
@@ -219,27 +181,26 @@ pub fn declaration(input: &mut Input) -> Result<(Name, Type<Loc, Name>)> {
 pub fn definition(
     input: &mut Input,
 ) -> Result<(Name, Option<Type<Loc, Name>>, Expression<Loc, Name>)> {
-    preceded_cut(
-        ("def", ws),
-        seq!( name, _:ws,annotation,_:(ws,"=",ws), expression),
-    )
-    .context(StrContext::Label("definition"))
-    .parse_next(input)
+    commit_after("def", seq!(name, annotation, _:"=", expression))
+        .context(StrContext::Label("definition"))
+        .parse_next(input)
 }
 
-fn list<'s, P: Parser<I, O, Error>, I, O>(
-    item: P,
-) -> impl Parser<I, Vec<O>, Error> + use<'s, P, I, O>
+fn list<P, I, O>(item: P) -> impl Parser<I, Vec<O>, Error> + use<P, I, O>
 where
-    I: Stream<Token = char> + StreamIsPartial + Compare<&'s str>,
+    P: Parser<I, O, Error>,
+    I: Stream + StreamIsPartial + for<'a> Compare<&'a str>,
     Vec<O>: Accumulate<O>,
 {
-    terminated(separated(1.., item, (ws, ",", ws)), (ws, opt(",")))
+    terminated(separated(1.., item, ","), opt(","))
 }
 
 fn typ(input: &mut Input) -> Result<Type<Loc, Name>> {
     // TODO, use `dispatch` to choose alternate based on peek prefix.
     // This should also help error messages.
+    // let s = dispatch! {peek(take::<usize, Input, Error>(2usize));
+    // "<>" => "<>"
+    // };
     alt((
         typ_name,
         typ_chan,
@@ -262,23 +223,22 @@ fn typ(input: &mut Input) -> Result<Type<Loc, Name>> {
 fn typ_name(input: &mut Input) -> Result<Type<Loc, Name>> {
     trace(
         "typ_name",
-        separated_pair(name, ws, type_args)
-            .with_span()
-            .map(|((name, typ_args), span)| Type::Name(Loc::from(span), name, typ_args)),
+        with_loc((name, type_args)).map(|((name, typ_args), loc)| Type::Name(loc, name, typ_args)),
     )
     .parse_next(input)
 }
 
 fn typ_chan(input: &mut Input) -> Result<Type<Loc, Name>> {
-    preceded_cut(("chan", ws), typ.context(StrContext::Label("chan type")))
-        .with_span()
-        .map(|(typ, span)| Type::Chan(Loc::from(span), Box::new(typ)))
-        .parse_next(input)
+    with_loc(commit_after(
+        "chan",
+        typ.context(StrContext::Label("chan type")),
+    ))
+    .map(|(typ, loc)| Type::Chan(Loc::from(loc), Box::new(typ)))
+    .parse_next(input)
 }
 
 fn typ_send(input: &mut Input) -> Result<Type<Loc, Name>> {
-    preceded_cut(("(", ws), (terminated(list(typ), (ws, ")", ws)), typ))
-        .with_span()
+    with_loc(commit_after("(", (terminated(list(typ), ")"), typ)))
         .map(|((args, then), span)| {
             args.into_iter().rev().fold(then, |arg, then| {
                 Type::Send(Loc::from(span.clone()), Box::new(arg), Box::new(then))
@@ -288,8 +248,7 @@ fn typ_send(input: &mut Input) -> Result<Type<Loc, Name>> {
 }
 
 fn typ_receive(input: &mut Input) -> Result<Type<Loc, Name>> {
-    preceded_cut(("[", ws), (terminated(list(typ), (ws, "]", ws)), typ))
-        .with_span()
+    with_loc(commit_after("[", (terminated(list(typ), "]"), typ)))
         .map(|((args, then), span)| {
             args.into_iter().rev().fold(then, |arg, then| {
                 Type::Receive(Loc::from(span.clone()), Box::new(arg), Box::new(then))
@@ -299,97 +258,87 @@ fn typ_receive(input: &mut Input) -> Result<Type<Loc, Name>> {
 }
 
 fn typ_either(input: &mut Input) -> Result<Type<Loc, Name>> {
-    preceded_cut(
+    with_loc(commit_after(
         "either",
-        seq!(
-            _:(ws, "{", ws),
-            repeat(0.., seq!(_:(".", ws), name, _:ws, typ, _:(ws, opt(",")))).fold(
+        (
+            "{",
+            repeat(0.., (".", name, typ, opt(","))).fold(
                 || IndexMap::new(),
-                |mut branches, (name, typ)| {
-                    branches.insert(name, typ);
-                    branches
-                }
-            ),
-            _:(ws, "}")
-        ),
-    )
-    .with_span()
-    .map(|((branches,), span)| Type::Either(Loc::from(span), branches))
-    .parse_next(input)
-}
-
-fn typ_choice(input: &mut Input) -> Result<Type<Loc, Name>> {
-    preceded_cut(
-        ("{", ws),
-        terminated(
-            repeat(
-                0..,
-                seq!(_:(".", ws), name, _:ws, typ_branch, _:(ws, opt(","))),
-            )
-            .fold(
-                || IndexMap::new(),
-                |mut branches, (name, typ)| {
+                |mut branches, (_, name, typ, _)| {
                     branches.insert(name, typ);
                     branches
                 },
             ),
-            (ws, "}"),
+            "}",
         ),
-    )
-    .with_span()
-    .map(|((branches), span)| Type::Choice(Loc::from(span), branches))
+    ))
+    .map(|((_, branches, _), span)| Type::Either(Loc::from(span), branches))
+    .parse_next(input)
+}
+
+fn typ_choice(input: &mut Input) -> Result<Type<Loc, Name>> {
+    with_loc(commit_after(
+        "{",
+        terminated(
+            repeat(0.., (("."), name, typ_branch, opt(","))).fold(
+                || IndexMap::new(),
+                |mut branches, (_, name, typ, _)| {
+                    branches.insert(name, typ);
+                    branches
+                },
+            ),
+            "}",
+        ),
+    ))
+    .map(|(branches, span)| Type::Choice(Loc::from(span), branches))
     .parse_next(input)
 }
 
 fn typ_break(input: &mut Input) -> Result<Type<Loc, Name>> {
-    "!".with_span()
+    with_loc("!")
         .map(|(_, span)| Type::Break(Loc::from(span)))
         .parse_next(input)
 }
 
 fn typ_continue(input: &mut Input) -> Result<Type<Loc, Name>> {
-    "?".with_span()
+    with_loc("?")
         .map(|(_, span)| Type::Continue(Loc::from(span)))
         .parse_next(input)
 }
 
 fn typ_recursive(input: &mut Input) -> Result<Type<Loc, Name>> {
-    preceded_cut(("recursive", ws), separated_pair(loop_label, ws, typ))
-        .with_span()
+    with_loc(commit_after("recursive", (loop_label, typ)))
         .map(|((label, typ), loc)| Type::Recursive(Loc::from(loc), label, Box::new(typ)))
         .parse_next(input)
 }
 
 fn typ_iterative<'s>(input: &mut Input) -> Result<Type<Loc, Name>> {
-    preceded_cut(
-        ("iterative", ws),
-        separated_pair(loop_label, ws, typ).context(StrContext::Label("iterative type body")),
-    )
-    .with_span()
+    with_loc(commit_after(
+        "iterative",
+        (loop_label, typ).context(StrContext::Label("iterative type body")),
+    ))
     .map(|((name, typ), span)| Type::Iterative(Loc::from(span), name, Box::new(typ)))
     .parse_next(input)
 }
 
 fn typ_self<'s>(input: &mut Input) -> Result<Type<Loc, Name>> {
-    preceded_cut(
-        ("self", ws),
+    with_loc(commit_after(
+        "self",
         loop_label.context(StrContext::Label("self type loop label")),
-    )
-    .with_span()
+    ))
     .map(|(label, span)| Type::Self_(Loc::from(span), label))
     .parse_next(input)
 }
 
 fn typ_send_type<'s>(input: &mut Input) -> Result<Type<Loc, Name>> {
-    preceded_cut(
-        ("(", ws, "type", ws),
+    with_loc(commit_after(
+        ("(", "type"),
         separated_pair(
             list(name).context(StrContext::Label("list of type names to send")),
-            (ws, ")", ws),
+            ")",
             typ,
         ),
-    )
-    .with_span()
+    ))
     .map(|((names, typ), span)| {
         names.into_iter().rev().fold(typ, |body, name| {
             Type::SendType(Loc::from(span.clone()), name, Box::new(body))
@@ -399,15 +348,14 @@ fn typ_send_type<'s>(input: &mut Input) -> Result<Type<Loc, Name>> {
 }
 
 fn typ_recv_type<'s>(input: &mut Input<'s>) -> Result<Type<Loc, Name>> {
-    preceded_cut(
-        ("[", ws, "type", ws),
+    with_loc(commit_after(
+        ("[", "type"),
         separated_pair(
             list(name).context(StrContext::Label("list of type names to receive")),
-            (ws, "]", ws),
+            "]",
             typ,
         ),
-    )
-    .with_span()
+    ))
     .map(|((names, typ), span)| {
         names.into_iter().rev().fold(typ, |body, name| {
             Type::ReceiveType(Loc::from(span.clone()), name, Box::new(body))
@@ -417,44 +365,44 @@ fn typ_recv_type<'s>(input: &mut Input<'s>) -> Result<Type<Loc, Name>> {
 }
 
 fn type_params<'s>(input: &mut Input) -> Result<Vec<Name>> {
-    opt(delimited(("<", ws), list(name), (ws, ">"))) // TODO should be able to use `<` to improve error message
+    opt(delimited("<", list(name), ">")) // TODO should be able to use `<` to improve error message
         .map(Option::unwrap_or_default)
         .parse_next(input)
 }
 
 fn type_args<'s>(input: &mut Input) -> Result<Vec<Type<Loc, Name>>> {
-    opt(delimited(("<", ws), list(typ), (ws, ">"))) // TODO should be able to use `<` to improve error message
+    opt(delimited("<", list(typ), ">")) // TODO should be able to use `<` to improve error message
         .map(Option::unwrap_or_default)
         .parse_next(input)
 }
 
 fn typ_branch<'s>(input: &mut Input<'s>) -> Result<Type<Loc, Name>> {
-    // TODO use `dispatch` to improve perf and errors.
     // try recv_type first so `(` is unambiguous on `typ_branch_received`
     alt((typ_branch_then, typ_branch_recv_type, typ_branch_receive)).parse_next(input)
 }
 
 fn typ_branch_then<'s>(input: &mut Input<'s>) -> Result<Type<Loc, Name>> {
-    preceded_cut(("=>", ws), typ).parse_next(input)
+    commit_after("=>", typ).parse_next(input)
 }
 
 fn typ_branch_receive<'s>(input: &mut Input<'s>) -> Result<Type<Loc, Name>> {
-    preceded_cut(("(", ws), seq!(list(typ), _:(ws, ")", ws), typ_branch))
-        .with_span()
-        .map(|((args, then), span)| {
-            args.into_iter().rev().fold(then, |acc, arg| {
-                Type::Receive(Loc::from(span.clone()), Box::new(arg), Box::new(acc))
-            })
+    with_loc(commit_after(
+        "(",
+        separated_pair(list(typ), ")", typ_branch),
+    ))
+    .map(|((args, then), span)| {
+        args.into_iter().rev().fold(then, |acc, arg| {
+            Type::Receive(Loc::from(span.clone()), Box::new(arg), Box::new(acc))
         })
-        .parse_next(input)
+    })
+    .parse_next(input)
 }
 
 fn typ_branch_recv_type<'s>(input: &mut Input<'s>) -> Result<Type<Loc, Name>> {
-    preceded(
-        ("(", ws, "type"),
-        cut_err(seq!(list(name), _:(ws, ")", ws), typ_branch)),
-    )
-    .with_span()
+    with_loc(preceded(
+        ("(", "type"),
+        cut_err(separated_pair(list(name), ")", typ_branch)),
+    ))
     .map(|((names, body), span)| {
         names.into_iter().rev().fold(body, |acc, name| {
             Type::ReceiveType(Loc::from(span.clone()), name, Box::new(acc))
@@ -464,49 +412,259 @@ fn typ_branch_recv_type<'s>(input: &mut Input<'s>) -> Result<Type<Loc, Name>> {
 }
 
 fn annotation(input: &mut Input) -> Result<Option<Type<Loc, Name>>> {
-    opt(preceded_cut((":", ws), typ)).parse_next(input)
+    opt(commit_after(":", typ)).parse_next(input)
 }
 
-/*
-pattern           = { pattern_name | pattern_receive | pattern_continue | pattern_recv_type }
-pattern_name      = { name ~ annotation }
-pattern_receive   = { "(" ~ pattern_list ~ ")" ~ pattern }
-pattern_continue  = { "!" }
-pattern_recv_type = { "(" ~ "type" ~ name_list ~ ")" ~ pattern }
- */
-
-fn expression(input: &mut Input) -> Result<Expression<Loc, Name>> {
-    // todo!()
-    fail.context(StrContext::Expected(
-        winnow::error::StrContextValue::Description("expression"),
+// pattern           = { pattern_name | pattern_receive | pattern_continue | pattern_recv_type }
+fn pattern(input: &mut Input) -> Result<Pattern<Loc, Name>> {
+    alt((
+        pattern_name,
+        pattern_receive_type,
+        pattern_receive,
+        pattern_continue,
     ))
     .parse_next(input)
 }
+
+fn pattern_name(input: &mut Input) -> Result<Pattern<Loc, Name>> {
+    with_loc((name, annotation))
+        .map(|((name, annotation), loc)| Pattern::Name(loc, name, annotation))
+        .parse_next(input)
+}
+
+fn pattern_receive(input: &mut Input) -> Result<Pattern<Loc, Name>> {
+    with_loc(commit_after("(", (list(pattern), ")", pattern)))
+        .map(|((patterns, _, rest), loc)| {
+            let mut res = rest;
+            for pattern in patterns.into_iter().rev() {
+                res = Pattern::Receive(loc.clone(), Box::new(pattern), Box::new(res));
+            }
+            res
+        })
+        .parse_next(input)
+}
+
+fn pattern_continue(input: &mut Input) -> Result<Pattern<Loc, Name>> {
+    with_loc("!")
+        .map(|(_, loc)| Pattern::Continue(loc))
+        .parse_next(input)
+}
+
+fn pattern_receive_type(input: &mut Input) -> Result<Pattern<Loc, Name>> {
+    with_loc(commit_after(("(", "type"), (list(name), ")", pattern)))
+        .map(|((names, _, rest), loc)| {
+            let mut res = rest;
+            for name in names.into_iter().rev() {
+                res = Pattern::ReceiveType(loc.clone(), name, Box::new(res));
+            }
+            res
+        })
+        .parse_next(input)
+}
+
+fn expression(input: &mut Input) -> Result<Expression<Loc, Name>> {
+    alt((
+        expr_let,
+        expr_do,
+        expr_fork,
+        application,
+        with_loc(construction).map(|(cons, loc)| Expression::Construction(loc, cons)),
+        delimited("{", expression, "}"),
+    ))
+    .parse_next(input)
+}
+
+fn expr_let(input: &mut Input) -> Result<Expression<Loc, Name>> {
+    with_loc(commit_after(
+        "let",
+        (pattern, "=", expression, "in", expression),
+    ))
+    .map(|((pattern, _, expression, _, body), loc)| {
+        Expression::Let(loc, pattern, Box::new(expression), Box::new(body))
+    })
+    .parse_next(input)
+}
+
+fn expr_do(input: &mut Input) -> Result<Expression<Loc, Name>> {
+    with_loc(commit_after("do", ("{", process, ("}", "in"), expression)))
+        .map(|((_, process, _, expression), loc)| {
+            Expression::Do(loc, Box::new(process), Box::new(expression))
+        })
+        .parse_next(input)
+}
+
+fn expr_fork(input: &mut Input) -> Result<Expression<Loc, Name>> {
+    commit_after("chan", (with_loc(name), annotation, "{", process, "}"))
+        .map(|((name, loc), annotation, _, process, _)| {
+            Expression::Fork(loc, name, annotation, Box::new(process))
+        })
+        .parse_next(input)
+}
+
+fn construction(input: &mut Input) -> Result<Construct<Loc, Name>> {
+    alt((
+        cons_begin,
+        cons_loop,
+        cons_then,
+        cons_choose,
+        cons_either,
+        cons_break,
+        cons_send_type,
+        cons_send,
+        cons_recv_type,
+        cons_receive,
+    ))
+    .parse_next(input)
+}
+
+fn cons_then(input: &mut Input) -> Result<Construct<Loc, Name>> {
+    with_loc(alt((
+        expr_fork,
+        expr_let,
+        expr_do,
+        application,
+        delimited("{", expression, "}"),
+    )))
+    .map(|(expr, loc)| Construct::Then(loc, Box::new(expr)))
+    .parse_next(input)
+}
+
+fn cons_send(input: &mut Input) -> Result<Construct<Loc, Name>> {
+    with_loc(commit_after("(", (list(expression), ")", construction)))
+        .map(|((arguments, _, mut construct), loc)| {
+            for argument in arguments.into_iter().rev() {
+                construct = Construct::Send(loc.clone(), Box::new(argument), Box::new(construct));
+            }
+            construct
+        })
+        .parse_next(input)
+}
+
+fn cons_receive(input: &mut Input) -> Result<Construct<Loc, Name>> {
+    with_loc(commit_after("[", (list(pattern), "]", construction)))
+        .map(|((patterns, _, mut construct), loc)| {
+            for pattern in patterns.into_iter().rev() {
+                construct = Construct::Receive(loc.clone(), pattern, Box::new(construct));
+            }
+            construct
+        })
+        .parse_next(input)
+}
+
+fn cons_choose(input: &mut Input) -> Result<Construct<Loc, Name>> {
+    with_loc(commit_after(".", (name, construction)))
+        .map(|((chosen, construct), loc)| Construct::Choose(loc, chosen, Box::new(construct)))
+        .parse_next(input)
+}
+
+fn cons_either(input: &mut Input) -> Result<Construct<Loc, Name>> {
+    with_loc(commit_after(
+        "{",
+        (
+            repeat(0.., (".", name, cons_branch, opt(","))).fold(
+                || IndexMap::new(),
+                |mut branches, (_, name, branch, _)| {
+                    branches.insert(name, branch);
+                    branches
+                },
+            ),
+            "}",
+        ),
+    ))
+    .map(|((branches, _), loc)| Construct::Either(loc, ConstructBranches(branches)))
+    .parse_next(input)
+}
+
+fn cons_break(input: &mut Input) -> Result<Construct<Loc, Name>> {
+    with_loc("!")
+        .map(|(_, loc)| Construct::Break(loc))
+        .parse_next(input)
+}
+
+fn cons_begin(input: &mut Input) -> Result<Construct<Loc, Name>> {
+    with_loc(commit_after("begin", (loop_label, construction)))
+        .map(|((label, construct), loc)| (Construct::Begin(loc, label, Box::new(construct))))
+        .parse_next(input)
+}
+
+fn cons_loop(input: &mut Input) -> Result<Construct<Loc, Name>> {
+    with_loc(commit_after("loop", loop_label))
+        .map(|(label, loc)| (Construct::Loop(loc, label)))
+        .parse_next(input)
+}
+
+fn cons_send_type(input: &mut Input) -> Result<Construct<Loc, Name>> {
+    with_loc(commit_after(("(", "type"), (list(typ), ")", construction)))
+        .map(|((names, _, mut construct), loc)| {
+            for name in names.into_iter().rev() {
+                construct = Construct::SendType(loc.clone(), name, Box::new(construct));
+            }
+            construct
+        })
+        .parse_next(input)
+}
+
+fn cons_recv_type(input: &mut Input) -> Result<Construct<Loc, Name>> {
+    with_loc(commit_after(("[", "type"), (list(name), "]", construction)))
+        .map(|((names, _, mut construct), loc)| {
+            for name in names.into_iter().rev() {
+                construct = Construct::ReceiveType(loc.clone(), name, Box::new(construct));
+            }
+            construct
+        })
+        .parse_next(input)
+}
+
+fn cons_branch(input: &mut Input) -> Result<ConstructBranch<Loc, Name>> {
+    alt((cons_branch_then, cons_branch_recv_type, cons_branch_receive)).parse_next(input)
+}
+
+fn cons_branch_then(input: &mut Input) -> Result<ConstructBranch<Loc, Name>> {
+    with_loc(commit_after("=>", expression))
+        .map(|(expression, loc)| ConstructBranch::Then(loc, expression))
+        .parse_next(input)
+}
+
+fn cons_branch_receive(input: &mut Input) -> Result<ConstructBranch<Loc, Name>> {
+    with_loc(commit_after("(", (list(pattern), ")", cons_branch)))
+        .map(|((patterns, _, mut branch), loc)| {
+            for pattern in patterns.into_iter().rev() {
+                branch = ConstructBranch::Receive(loc.clone(), pattern, Box::new(branch));
+            }
+            branch
+        })
+        .parse_next(input)
+}
+
+fn cons_branch_recv_type(input: &mut Input) -> Result<ConstructBranch<Loc, Name>> {
+    with_loc(commit_after(("(", "type"), (list(name), ")", cons_branch)))
+        .map(|((names, _, mut branch), loc)| {
+            for name in names.into_iter().rev() {
+                branch = ConstructBranch::ReceiveType(loc.clone(), name, Box::new(branch));
+            }
+            branch
+        })
+        .parse_next(input)
+}
+
+fn application(input: &mut Input) -> Result<Expression<Loc, Name>> {
+    with_loc((
+        alt((
+            with_loc(name).map(|(name, loc)| Expression::Reference(loc, name)),
+            delimited("{", expression, "}"),
+        )),
+        apply,
+    ))
+    .map(|((expr, apply), loc)| Expression::Application(loc, Box::new(expr), apply))
+    .parse_next(input)
+}
+
+// apply           = { apply_begin | apply_loop | apply_send | apply_choose | apply_either | apply_send_type | apply_noop }
+fn apply(input: &mut Input) -> Result<Apply<Loc, Name>> {
+    todo.parse_next(input)
+}
+
 /*
-expression = { expr_let | expr_do | expr_fork | application | construction | ("{" ~ expression ~ "}") }
-expr_let   = { "let" ~ pattern ~ "=" ~ expression ~ "in" ~ expression }
-expr_do    = { "do" ~ "{" ~ process ~ "}" ~ "in" ~ expression }
-expr_fork  = { "chan" ~ name ~ annotation ~ "{" ~ process ~ "}" }
-
-construction   = { cons_begin | cons_loop | cons_then | cons_send | cons_receive | cons_choose | cons_either | cons_break | cons_send_type | cons_recv_type }
-cons_then      = { expr_fork | expr_let | expr_do | application | ("{" ~ expression ~ "}") }
-cons_send      = { "(" ~ expression_list ~ ")" ~ construction }
-cons_receive   = { "[" ~ pattern_list ~ "]" ~ construction }
-cons_choose    = { "." ~ name ~ construction }
-cons_either    = { "{" ~ ("." ~ name ~ cons_branch ~ ","?)* ~ "}" }
-cons_break     = { "!" }
-cons_begin     = { "begin" ~ loop_label ~ construction }
-cons_loop      = { "loop" ~ loop_label }
-cons_send_type = { "(" ~ "type" ~ typ_list ~ ")" ~ construction }
-cons_recv_type = { "[" ~ "type" ~ name_list ~ "]" ~ construction }
-
-cons_branch           = { cons_branch_then | cons_branch_receive | cons_branch_recv_type }
-cons_branch_then      = { "=>" ~ expression }
-cons_branch_receive   = { "(" ~ pattern_list ~ ")" ~ cons_branch }
-cons_branch_recv_type = { "(" ~ "type" ~ name_list ~ ")" ~ cons_branch }
-
-application     = { (name | "{" ~ expression ~ "}") ~ apply }
-apply           = { apply_begin | apply_loop | apply_send | apply_choose | apply_either | apply_send_type | apply_noop }
 apply_noop      = { "" }
 apply_send      = { "(" ~ expression_list ~ ")" ~ apply }
 apply_choose    = { "." ~ name ~ apply }
@@ -520,7 +678,12 @@ apply_branch_then      = { name ~ "=>" ~ expression }
 apply_branch_receive   = { "(" ~ pattern_list ~ ")" ~ apply_branch }
 apply_branch_continue  = { "!" ~ "=>" ~ expression }
 apply_branch_recv_type = { "(" ~ "type" ~ name_list ~ ")" ~ apply_branch }
+  */
+fn process<'s>(input: &mut Input) -> Result<Process<Loc, Name>> {
+    todo.parse_next(input)
+}
 
+/*
 process        = { proc_let | proc_pass | proc_telltypes | command | proc_noop }
 proc_let       = { "let" ~ pattern ~ "=" ~ expression ~ process }
 proc_pass      = { "pass" }
@@ -554,12 +717,14 @@ cmd_branch_recv_type = { "(" ~ "type" ~ name_list ~ ")" ~ cmd_branch }
 */
 
 fn loop_label<'s>(input: &mut Input<'s>) -> Result<Option<Name>> {
-    opt(preceded((":", ws), name)).parse_next(input)
+    opt(preceded((":",), name)).parse_next(input)
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::par::lexer::lex;
+    use winnow::stream::TokenSlice;
 
     #[test]
     fn test_list() {
@@ -569,26 +734,31 @@ mod test {
         assert_eq!(p.parse("ab,ab,ab,"), Ok(vec!["ab", "ab", "ab"]));
         assert!(p.parse("ab,ab,ab,,").is_err());
         assert!(p.parse("ba").is_err());
-        let mut p = list(name);
-        assert_eq!(
-            p.parse(LocatingSlice::new("ab_12,asd, asdf3")),
-            Ok(vec![
-                Name {
-                    string: "ab_12".to_owned()
-                },
-                Name {
-                    string: "asd".to_owned()
-                },
-                Name {
-                    string: "asdf3".to_owned()
-                }
-            ])
-        );
+        let toks = lex::<Error>("ab_12,asd, asdf3").unwrap();
+        let toks = TokenSlice::new(&toks);
+        {
+            assert_eq!(
+                list(name).parse(toks),
+                Ok(vec![
+                    Name {
+                        string: "ab_12".to_owned()
+                    },
+                    Name {
+                        string: "asd".to_owned()
+                    },
+                    Name {
+                        string: "asdf3".to_owned()
+                    }
+                ])
+            );
+        }
     }
     #[test]
     fn test_loop_label() {
+        let toks = lex::<Error>(":one").unwrap();
+        let toks = TokenSlice::new(&toks);
         assert_eq!(
-            loop_label.with_span().parse(LocatingSlice::new(":one")),
+            with_span(loop_label).parse(toks),
             Ok((
                 Some(Name {
                     string: "one".to_owned()
@@ -600,12 +770,12 @@ mod test {
 
     #[test]
     fn t() {
-        match program(LocatingSlice::new(include_str!(
-            "../../examples/semigroup_queue.par"
-        ))) {
+        let toks = lex::<Error>(include_str!("../../examples/semigroup_queue.par")).unwrap();
+        let toks = TokenSlice::new(&toks);
+        match program(toks) {
             Ok(x) => eprintln!("{x:?}"),
             Err(e) => {
-                eprintln!("{e}");
+                eprintln!("{}", e.inner());
                 eprintln!("{:?}", e.into_inner().context().collect::<Vec<_>>())
             }
         }
