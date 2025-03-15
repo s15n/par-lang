@@ -96,9 +96,14 @@ where
     E: ParserError<Input<'a>>,
 {
     move |input: &mut Input<'a>| -> core::result::Result<(O, core::ops::Range<usize>), E> {
+        let last = input.last().cloned();
         let start = peek(any).parse_next(input)?.span.start;
         let out = parser.parse_next(input)?;
-        let end = peek(any).parse_next(input)?.span.end;
+        let end = peek::<_, &Token, E, _>(any)
+            .parse_next(input)
+            .unwrap_or(&last.unwrap()) // if input now empty, use that last token.
+            .span
+            .end;
         Ok((out, start..end))
     }
 }
