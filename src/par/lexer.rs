@@ -2,12 +2,10 @@ use super::{parse::Loc, parser::comment};
 use core::{ops::Range, str::FromStr};
 use winnow::{
     combinator::{alt, peek},
-    error::{ContextError as Error, ParserError},
-    stream::{
-        Checkpoint, Compare, CompareResult, Location, Offset, ParseSlice, Stream, TokenSlice,
-    },
+    error::ParserError,
+    stream::{ParseSlice, TokenSlice},
     token::{any, literal, take_while},
-    LocatingSlice, Parser, Result,
+    Parser, Result,
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -106,112 +104,6 @@ impl<'a, T: FromStr> ParseSlice<T> for &Token<'a> {
         self.raw.parse().ok()
     }
 }
-
-// #[derive(Debug)]
-// pub struct Input<'a> {
-//     initial: &'a [Token<'a>],
-//     input: &'a [Token<'a>],
-// }
-// impl<'a> Offset<&'a [Token<'a>]> for Input<'a> {
-//     fn offset_from(&self, start: &&'a [Token<'a>]) -> usize {
-//         start.offset_from(self.0)
-//     }
-// }
-// impl<'a> Offset<Token<'a>> for Token<'a> {
-//     fn offset_from(&self, start: &Token<'a>) -> usize {
-//         start.loc
-//     }
-// }
-// impl<'a> Offset<Checkpoint<&'a [Token<'a>], &'a [Token<'a>]>> for Input<'a> {
-//     fn offset_from(&self, start: &Checkpoint<&'a [Token<'a>], &'a [Token<'a>]>) -> usize {
-//         self.input.offset_from(start)
-//     }
-// }
-// impl<'a> Stream for Input<'a> {
-//     type Token = Token<'a>;
-//     type Slice = &'a [Token<'a>];
-//     type IterOffsets = std::iter::Enumerate<core::iter::Cloned<std::slice::Iter<'a, Token<'a>>>>;
-//     type Checkpoint = Checkpoint<&'a [Token<'a>], &'a [Token<'a>]>;
-
-//     fn iter_offsets(&self) -> Self::IterOffsets {
-//         self.input.iter_offsets()
-//     }
-
-//     fn eof_offset(&self) -> usize {
-//         self.input.eof_offset()
-//     }
-
-//     fn next_token(&mut self) -> Option<Self::Token> {
-//         self.input.next_token()
-//     }
-
-//     fn peek_token(&self) -> Option<Self::Token> {
-//         self.input.peek_token()
-//     }
-
-//     fn offset_for<P>(&self, predicate: P) -> Option<usize>
-//     where
-//         P: Fn(Self::Token) -> bool,
-//     {
-//         self.input.offset_for(predicate)
-//     }
-
-//     fn offset_at(&self, tokens: usize) -> std::result::Result<usize, winnow::error::Needed> {
-//         self.input.offset_at(tokens)
-//     }
-
-//     fn next_slice(&mut self, offset: usize) -> Self::Slice {
-//         self.input.next_slice(offset)
-//     }
-
-//     fn peek_slice(&self, offset: usize) -> Self::Slice {
-//         self.input.peek_slice(offset)
-//     }
-
-//     fn checkpoint(&self) -> Self::Checkpoint {
-//         self.input.checkpoint()
-//     }
-
-//     fn reset(&mut self, checkpoint: &Self::Checkpoint) {
-//         self.input.reset(checkpoint);
-//     }
-
-//     fn raw(&self) -> &dyn core::fmt::Debug {
-//         &self.input as &dyn core::fmt::Debug
-//     }
-// }
-// impl<'a> winnow::stream::StreamIsPartial for Input<'a> {
-//     type PartialState = ();
-
-//     fn complete(&mut self) -> Self::PartialState {
-//         self.input.complete()
-//     }
-
-//     fn restore_partial(&mut self, state: Self::PartialState) {
-//         self.input.restore_partial(state);
-//     }
-
-//     fn is_partial_supported() -> bool {
-//         false
-//     }
-// }
-// impl<'a> Location for Input<'a> {
-//     fn previous_token_end(&self) -> usize {
-//         self.input.offset_from(&self.initial)
-//     }
-
-//     fn current_token_start(&self) -> usize {
-//         self.input.offset_from(&self.initial)
-//     }
-// }
-// impl Compare<&'_ str> for Input<'_> {
-//     fn compare(&self, t: &str) -> CompareResult {
-//         match self.input.first().map(|tok| tok.raw == t) {
-//             Some(true) => CompareResult::Ok(1),
-//             None | Some(false) => CompareResult::Error,
-//         }
-//     }
-// }
 
 pub type Tokens<'i> = TokenSlice<'i, Token<'i>>;
 pub type Input<'a> = Tokens<'a>;
@@ -333,6 +225,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+    use winnow::error::ContextError as Error;
 
     #[test]
     fn tok() {
