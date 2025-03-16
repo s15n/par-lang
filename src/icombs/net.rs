@@ -161,6 +161,7 @@ pub struct Net {
 impl Net {
     fn interact(&mut self, a: Tree, b: Tree) {
         use Tree::*;
+        println!("Interacting {} and {}", self.show_tree(&a), self.show_tree(&b));
         match (a, b) {
             (Var(..), _) | (_, Var(..)) => unreachable!(),
             (Era, Era) => (),
@@ -169,8 +170,11 @@ impl Net {
                 self.link(*a1, Era);
             }
             (Con(a0, a1), Con(b0, b1)) | (Dup(a0, a1), Dup(b0, b1)) => {
+                println!("con con1");
                 self.link(*a0, *b0);
+                println!("con con2");
                 self.link(*a1, *b1);
+                println!("con con3");
             }
             (Con(a0, a1), Dup(b0, b1)) | (Dup(b0, b1), Con(a0, a1)) => {
                 let (a00, b00) = self.create_wire();
@@ -190,11 +194,15 @@ impl Net {
                 self.link(*a, Package(id));
                 self.link(*b, Package(id));
             }
+            (Package(_), Package(_)) => {
+                unreachable!("Packages should not interact with packages");
+            }
             (Package(id), a) | (a, Package(id)) => {
                 let b = self.dereference_package(id);
                 self.interact(a, b);
             }
         }
+        println!("Interaction complete");
     }
     pub fn freshen_variables(&mut self, tree: &mut Tree) {
         let mut package_to_net: BTreeMap<usize, usize> = BTreeMap::new();
@@ -370,6 +378,97 @@ impl Net {
             false
         } else {
             true
+        }
+    }
+    fn assert_no_vicious(&self) {
+        for (var,tree) in self.vars.iter() {
+            if let Some(tree) = tree {
+                self.assert_tree_not_contains(tree, var);
+            }
+        }
+    }
+
+    fn assert_tree_not_contains(&self, tree: &Tree, idx: &usize)
+    {
+        match tree {
+            Tree::Con(a, b) | Tree::Dup(a, b) => {
+                self.assert_tree_not_contains(a, idx);
+                self.assert_tree_not_contains(b, idx);
+            }
+            Tree::Var(id) => {
+                if id == idx {
+                    panic!("Vicious circle detected");
+                }
+                if let Some(Some(tree)) = self.vars.get(id) {
+                    self.assert_tree_not_contains(tree, idx);
+                }
+            }
+            _ => {}
+        }
+    }
+    pub fn assert_valid(&self) {
+        self.assert_no_vicious();
+        let mut vars = vec![];
+        for (a, b) in &self.redexes {
+            vars.append(&mut self.assert_tree_valid(a));
+            vars.append(&mut self.assert_tree_valid(b));
+        }
+        for tree in &self.ports {
+            vars.append(&mut self.assert_tree_valid(tree));
+        }
+
+        let vars_counter = vars.into_iter().fold(BTreeMap::new(), |mut acc, x| {
+            *acc.entry(x).or_insert(0) += 1;
+            acc
+        });
+        for (var, count) in vars_counter {
+            if count != 2 {
+                let name = number_to_string(var.clone());
+                println!("net = {}",self.show());
+                println!("num ports {}", self.ports.len());
+                return panic!("Variable {name} was used {count} times");
+            }
+        }
+
+        // Perhaps we should check that all packages are valid too
+        // Right now this creates nonsensical error messages
+        // And in any case, each package is checked when it is created
+    }
+    fn assert_tree_valid(&self, tree: &Tree) -> Vec<usize> {
+        match tree {
+            Tree::Con(a, b) => {
+                let mut a = self.assert_tree_valid(a.as_ref());
+                let mut b = self.assert_tree_valid(b.as_ref());
+                a.append(&mut b);
+                a
+            }
+            Tree::Dup(a, b) => {
+                // do the same thing as Con
+                let mut a = self.assert_tree_valid(a.as_ref());
+                let mut b = self.assert_tree_valid(b.as_ref());
+                a.append(&mut b);
+                a
+            }
+            Tree::Era => {
+                vec![]
+            }
+            Tree::Var(idx) => {
+                if let Some(Some(tree)) = self.vars.get(idx) {
+                    self.assert_tree_valid(tree)
+                } else{
+                    vec![idx.clone()]
+                }
+            }
+            Tree::Package(idx) => {
+                if self.packages.get(idx).is_some() {
+                    vec![]
+                } else {
+                    panic!("Package with id {idx} is not found")
+                }
+            }
+            Tree::Ext(_, _) => {
+                vec![]
+            }
         }
     }
 }

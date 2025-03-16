@@ -51,9 +51,75 @@ pub enum Var {
     Loop(Option<Name>),
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct LoopLabel(Option<Name>);
+
+pub struct Context {
+    vars: IndexMap<Var, (TypedTree, VariableKind)>,
+    loop_points: IndexMap<LoopLabel, Vec<LoopLabel>>,
+}
+
+pub struct PackData {
+    names: Vec<Var>,
+    types: Vec<Type<Loc, Name>>,
+    kinds: Vec<VariableKind>,
+    loop_points: IndexMap<LoopLabel, Vec<LoopLabel>>,
+}
+
+impl Context {
+    pub fn pack(&mut self, labels_in_scope: Option<&Vec<LoopLabel>>, net: &mut Net) -> (Tree, PackData) {
+        let mut m_trees = vec![];
+        let mut m_tys = vec![];
+        let mut m_vars  = vec![];
+        let mut m_kind = vec![];
+        for (name, (tree, kind)) in core::mem::take(&mut self.vars) {
+            if let Some(labels_in_scope) = labels_in_scope {
+                if let Var::Loop(label) = &name {
+                    if !labels_in_scope.contains(&LoopLabel(label.clone())) {
+                        net.link(tree.tree, Tree::e());
+                        continue;
+                    }
+                }
+            }
+            m_vars.push(name);
+            m_trees.push(tree.tree);
+            m_tys.push(tree.ty);
+            m_kind.push(kind);
+        }
+        let context_in = multiplex_trees(m_trees);
+        (context_in,
+         PackData {
+             names: m_vars,
+             types: m_tys,
+             kinds: m_kind,
+             loop_points: core::mem::take(&mut self.loop_points),
+         }
+        )
+    }
+
+    pub fn unpack(&mut self, packed: &PackData, net: &mut Net) -> Tree {
+        let mut m_trees = vec![];
+        for (name, (ty, kind)) in packed.names.iter().zip(packed.types.iter().zip(packed.kinds.iter())) {
+            let (v0, v1) = net.create_wire();
+            self.bind_variable_with_kind(&name,v0.with_type(ty.clone()),kind.clone());
+            m_trees.push(v1);
+        }
+        self.loop_points = packed.loop_points.clone();
+        let context_out = multiplex_trees(m_trees);
+        context_out
+    }
+
+    fn bind_variable_with_kind(&mut self, var: &Var, tree: TypedTree, kind: VariableKind) {
+        assert!(self
+            .vars
+            .insert(var.clone(), (tree, kind))
+            .is_none())
+    }
+}
+
 pub struct Compiler<'program> {
     net: Net,
-    vars: IndexMap<Var, (TypedTree, VariableKind)>,
+    context: Context,
     program: &'program CheckedProgram,
     global_name_to_id: IndexMap<Name, usize>,
     type_variables: IndexSet<Name>,
@@ -126,7 +192,9 @@ impl<'program> Compiler<'program> {
         if debug {
             println!("{}", self.net.show());
         }
+        self.net.assert_valid();
         self.net.normal();
+        self.net.assert_valid();
         if debug {
             println!("{}", self.net.show());
         }
@@ -148,28 +216,20 @@ impl<'program> Compiler<'program> {
             let (tree, kind) = self.use_name(name);
             vars.insert(Var::Name(name.clone()), (tree, kind));
         }
-        let var_keys: Vec<_> = self.vars.keys().cloned().collect();
-        for var in var_keys {
-            if let Var::Loop(label) = var {
-                let (tree, kind) = self.use_var(&Var::Loop(label.clone()));
-                vars.insert(Var::Loop(label.clone()), (tree, kind));
-            }
+        for(label, _) in self.context.loop_points.clone().iter() {
+            let (tree, kind) = self.use_var(&Var::Loop(label.0.clone()));
+            vars.insert(Var::Loop(label.0.clone()), (tree, kind));
         }
-        core::mem::swap(&mut vars, &mut self.vars);
+        let mut loop_points_before = self.context.loop_points.clone();
+        core::mem::swap(&mut vars, &mut self.context.vars);
         let t = f(self);
-        core::mem::swap(&mut vars, &mut self.vars);
-        // drop all replicables
-        for (name, (value, kind)) in vars.into_iter() {
-            if kind == VariableKind::Linear {
-                panic!("some variables were not closed: {:?}", name);
-            } else {
-                self.net.link(value.tree, Tree::e());
-            }
-        }
+        core::mem::swap(&mut vars, &mut self.context.vars);
+        core::mem::swap(&mut loop_points_before, &mut self.context.loop_points);
         t
     }
     fn bind_variable(&mut self, name: &Name, tree: TypedTree) {
         assert!(self
+            .context
             .vars
             .insert(Var::Name(name.clone()), (tree, VariableKind::Linear))
             .is_none())
@@ -183,14 +243,14 @@ impl<'program> Compiler<'program> {
     }
 
     fn use_var(&mut self, var: &Var) -> (TypedTree, VariableKind) {
-        if let Some((tree, kind)) = self.vars.swap_remove(var) {
+        if let Some((tree, kind)) = self.context.vars.swap_remove(var) {
             match kind {
                 VariableKind::Linear => (tree, kind),
                 kind => {
                     let (w0, w1) = self.net.create_wire();
                     let (v0, v1) = self.net.create_wire();
                     self.net.link(Tree::d(v0, w0), tree.tree);
-                    self.vars.insert(
+                    self.context.vars.insert(
                         var.clone(),
                         (
                             TypedTree {
@@ -215,12 +275,12 @@ impl<'program> Compiler<'program> {
     }
 
     fn use_name(&mut self, name: &Name) -> (TypedTree, VariableKind) {
-        if self.vars.contains_key(&Var::Name(name.clone())) {
+        if self.context.vars.contains_key(&Var::Name(name.clone())) {
             self.use_var(&Var::Name(name.clone()))
         } else if self.compile_global(name).is_some() {
             let value = self.compile_global(name).unwrap();
             let v = (value.clone(), VariableKind::Replicable);
-            self.vars.insert(Var::Name(name.clone()), v.clone());
+            self.context.vars.insert(Var::Name(name.clone()), v.clone());
             v
         } else {
             panic!("unknown variable {}", name)
@@ -241,7 +301,7 @@ impl<'program> Compiler<'program> {
     }
     fn show_state(&mut self) {
         println!("Variables:");
-        for (name, (value, kind)) in &self.vars {
+        for (name, (value, kind)) in &self.context.vars {
             println!(
                 "    {:?}: {:?} = {:?}",
                 name,
@@ -313,7 +373,8 @@ impl<'program> Compiler<'program> {
         match proc {
             Process::Let(_, key, _, _, value, rest) => {
                 let value = self.compile_expression(value);
-                self.vars
+                self.context
+                    .vars
                     .insert(Var::Name(key.clone()), (value, VariableKind::Linear));
                 self.compile_process(rest);
             }
@@ -335,6 +396,7 @@ impl<'program> Compiler<'program> {
                 let a = self.compile_expression(a);
                 let b = self.instantiate_variable(&name);
                 self.link_typed(a, b);
+                self.end_context();
             }
             // types get erased.
             Command::SendType(target_type, process) => {
@@ -416,17 +478,7 @@ impl<'program> Compiler<'program> {
             Command::Match(names, processes) => {
                 let old_tree = self.instantiate_variable(&name);
                 // Multiplex all other variables in the context.
-                let mut m_trees = vec![];
-                let mut m_tys = vec![];
-                let mut m_vars = vec![];
-                let mut m_kind = vec![];
-                for (k, (v, kind)) in core::mem::take(&mut self.vars) {
-                    m_vars.push(k);
-                    m_trees.push(v.tree);
-                    m_tys.push(v.ty);
-                    m_kind.push(kind);
-                }
-                let context_in = multiplex_trees(m_trees);
+                let (context_in, pack_data) = self.context.pack(None,&mut self.net);
 
                 let mut branches = vec![];
                 let Type::Either(_, required_branches) = self.normalize_type(ty.clone()) else {
@@ -435,6 +487,8 @@ impl<'program> Compiler<'program> {
                 let mut choice_and_process: Vec<_> = names.iter().zip(processes.iter()).collect();
                 choice_and_process.sort_by_key(|k| k.0);
 
+                let loop_points = self.context.loop_points.clone();
+
                 for ((choice_here, process), branch) in choice_and_process
                     .into_iter()
                     .zip(required_branches.values())
@@ -442,26 +496,8 @@ impl<'program> Compiler<'program> {
                     let (w0, w1) = self.create_typed_wire(branch.clone());
                     self.bind_variable(&name, w0);
 
-                    // multiplex the conetxt frmo the inside now
-                    let mut m_trees = vec![];
-                    for (name, (ty, kind)) in m_vars.iter().zip(m_tys.iter().zip(m_kind.iter())) {
-                        let (v0, v1) = self.net.create_wire();
-                        self.vars
-                            .insert(name.clone(), (v0.with_type(ty.clone()), kind.clone()));
-
-                        m_trees.push(v1);
-                    }
-                    let context_out = multiplex_trees(m_trees);
-
+                    let context_out = self.context.unpack(&pack_data, &mut self.net);
                     self.compile_process(process);
-                    // drop all replicables
-                    for (name, (value, kind)) in core::mem::take(&mut self.vars).into_iter() {
-                        if kind == VariableKind::Linear {
-                            panic!("some variables were not closed: {:?}", name);
-                        } else {
-                            self.net.link(value.tree, Tree::e());
-                        }
-                    }
                     branches.push((context_out, w1.tree))
                 }
                 let t = self.choice_instance(context_in, branches);
@@ -474,6 +510,7 @@ impl<'program> Compiler<'program> {
                 // name = *
                 let a = self.instantiate_variable(&name).tree;
                 self.net.link(a, Tree::e());
+                self.end_context();
             }
             Command::Continue(process) => {
                 // < name ? process >
@@ -485,9 +522,10 @@ impl<'program> Compiler<'program> {
                 self.compile_process(process);
             }
             Command::Begin(label, process) => {
+                let label = LoopLabel(label.clone());
                 let (def0, def1) = self.net.create_wire();
-                let prev = self.vars.insert(
-                    Var::Loop(label.clone()),
+                let prev = self.context.vars.insert(
+                    Var::Loop(label.0.clone()),
                     (
                         def0.with_type(Type::Break(External)),
                         VariableKind::Replicable,
@@ -496,31 +534,17 @@ impl<'program> Compiler<'program> {
                 if let Some((prev_tree, _)) = prev {
                     self.net.link(prev_tree.tree, Tree::Era);
                 }
-                self.vars.sort_keys();
-                let mut m_trees = vec![];
-                let mut m_tys = vec![];
-                let mut m_vars = vec![];
-                let mut m_kind = vec![];
-                for (k, (v, kind)) in core::mem::take(&mut self.vars) {
-                    m_vars.push(k);
-                    m_trees.push(v.tree);
-                    m_tys.push(v.ty);
-                    m_kind.push(kind);
-                }
-                let context_in = multiplex_trees(m_trees);
+                self.context.vars.sort_keys();
+                let mut labels_in_scope: Vec<_> = self.context.loop_points.keys().cloned().collect();
+                labels_in_scope.push(label.clone());
+                self.context.loop_points.insert(label.clone(), labels_in_scope);
 
+                let (context_in, pack_data) = self.context.pack(None,&mut self.net);
                 let (id, _) = self.in_package(
                     |this| {
-                        let mut m_trees = vec![];
-                        for (name, (ty, kind)) in m_vars.iter().zip(m_tys.iter().zip(m_kind.iter()))
-                        {
-                            let (v0, v1) = this.net.create_wire();
-                            this.vars
-                                .insert(name.clone(), (v0.with_type(ty.clone()), kind.clone()));
-                            m_trees.push(v1);
-                        }
+                        let context_out = this.context.unpack(&pack_data, &mut this.net);
                         this.compile_process(process);
-                        multiplex_trees(m_trees).with_type(Type::Break(External))
+                        context_out.with_type(Type::Break(External))
                     },
                     None,
                     true,
@@ -529,29 +553,38 @@ impl<'program> Compiler<'program> {
                 self.net.link(context_in, Tree::Package(id));
             }
             Command::Loop(label) => {
-                let (tree, _) = self.use_var(&Var::Loop(label.clone()));
-                self.vars.sort_keys();
-                let mut m_trees = vec![];
-                let mut m_tys = vec![];
-                let mut m_vars = vec![];
-                let mut m_kind = vec![];
-                for (k, (v, kind)) in core::mem::take(&mut self.vars) {
-                    m_vars.push(k);
-                    m_trees.push(v.tree);
-                    m_tys.push(v.ty);
-                    m_kind.push(kind);
-                }
-                let context_in = multiplex_trees(m_trees);
+                let label = LoopLabel(label.clone());
+                let (tree, _) = self.use_var(&Var::Loop(label.0.clone()));
+                let labels_in_scope = self.context.loop_points.get(&label).unwrap().clone();
+                self.context.vars.sort_keys();
+                let (context_in, pack_data) = self.context.pack(Some(&labels_in_scope), &mut self.net);
                 self.net.link(tree.tree, context_in);
             }
         }
     }
+
+    fn end_context(&mut self) {
+        // drop all replicables
+        for (name, (value, kind)) in core::mem::take(&mut self.context.vars).into_iter() {
+            if kind == VariableKind::Linear {
+                panic!("some variables were not closed: {:?}", name);
+            } else {
+                println!("delete var: {:?}", name);
+                self.net.link(value.tree, Tree::e());
+            }
+        }
+        self.context.loop_points = Default::default();
+    }
 }
+
 
 pub fn compile_file(program: &CheckedProgram) -> IcCompiled {
     let mut compiler = Compiler {
         net: Net::default(),
-        vars: IndexMap::default(),
+        context: Context {
+            vars: IndexMap::default(),
+            loop_points: IndexMap::default(),
+        },
         global_name_to_id: Default::default(),
         id_to_package: Default::default(),
         id_to_ty: Default::default(),

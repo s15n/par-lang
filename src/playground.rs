@@ -414,7 +414,9 @@ impl Playground {
     }
 
     fn recompile(&mut self) {
-        self.compiled = Some(Compiled::from_string(self.code.as_str()));
+        stacker::grow(32 * 1024 * 1024, || {
+            self.compiled = Some(Compiled::from_string(self.code.as_str()));
+        });
         self.compiled_code = Arc::from(self.code.as_str());
     }
 

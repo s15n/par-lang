@@ -561,7 +561,8 @@ impl ReadbackImplLevel {
                 };
                 res
             }
-            _ => unreachable!(),
+            Type::Self_(_, _) => Ok,
+            _ => unreachable!("Type not implemented: {typ:?}"),
         }
     }
     fn show_message(&self, ui: &mut Ui) {
