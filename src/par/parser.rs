@@ -10,8 +10,8 @@ use super::{
 use indexmap::IndexMap;
 use winnow::{
     combinator::{
-        alt, cut_err, delimited, dispatch, empty, fail, not, opt, peek, preceded, repeat,
-        separated, seq, terminated, todo, trace,
+        alt, cut_err, delimited, empty, fail, not, opt, peek, preceded, repeat, separated, seq,
+        terminated, todo, trace,
     },
     error::{ContextError, ErrMode, ModalError, ParserError, StrContext},
     stream::{Accumulate, Compare, Range, Stream, StreamIsPartial},
@@ -440,12 +440,11 @@ fn pattern_name(input: &mut Input) -> Result<Pattern<Loc, Name>> {
 
 fn pattern_receive(input: &mut Input) -> Result<Pattern<Loc, Name>> {
     with_loc(commit_after("(", (list(pattern), ")", pattern)))
-        .map(|((patterns, _, rest), loc)| {
-            let mut res = rest;
+        .map(|((patterns, _, mut rest), loc)| {
             for pattern in patterns.into_iter().rev() {
-                res = Pattern::Receive(loc.clone(), Box::new(pattern), Box::new(res));
+                rest = Pattern::Receive(loc.clone(), Box::new(pattern), Box::new(rest));
             }
-            res
+            rest
         })
         .parse_next(input)
 }
@@ -458,12 +457,11 @@ fn pattern_continue(input: &mut Input) -> Result<Pattern<Loc, Name>> {
 
 fn pattern_receive_type(input: &mut Input) -> Result<Pattern<Loc, Name>> {
     with_loc(commit_after(("(", "type"), (list(name), ")", pattern)))
-        .map(|((names, _, rest), loc)| {
-            let mut res = rest;
+        .map(|((names, _, mut rest), loc)| {
             for name in names.into_iter().rev() {
-                res = Pattern::ReceiveType(loc.clone(), name, Box::new(res));
+                rest = Pattern::ReceiveType(loc.clone(), name, Box::new(rest));
             }
-            res
+            rest
         })
         .parse_next(input)
 }
@@ -856,24 +854,22 @@ fn cmd_link(input: &mut Input) -> Result<Command<Loc, Name>> {
 
 fn cmd_send(input: &mut Input) -> Result<Command<Loc, Name>> {
     with_loc(commit_after("(", (list(expression), ")", cmd)))
-        .map(|((expressions, _, cmd), loc)| {
-            let mut result = cmd;
+        .map(|((expressions, _, mut cmd), loc)| {
             for expression in expressions.into_iter().rev() {
-                result = Command::Send(loc.clone(), Box::new(expression), Box::new(result));
+                cmd = Command::Send(loc.clone(), Box::new(expression), Box::new(cmd));
             }
-            result
+            cmd
         })
         .parse_next(input)
 }
 
 fn cmd_receive(input: &mut Input) -> Result<Command<Loc, Name>> {
     with_loc(commit_after("[", (list(pattern), "]", cmd)))
-        .map(|((patterns, _, cmd), loc)| {
-            let mut result = cmd;
+        .map(|((patterns, _, mut cmd), loc)| {
             for pattern in patterns.into_iter().rev() {
-                result = Command::Receive(loc.clone(), pattern, Box::new(result));
+                cmd = Command::Receive(loc.clone(), pattern, Box::new(cmd));
             }
-            result
+            cmd
         })
         .parse_next(input)
 }
@@ -918,24 +914,22 @@ fn cmd_loop(input: &mut Input) -> Result<Command<Loc, Name>> {
 
 fn cmd_send_type(input: &mut Input) -> Result<Command<Loc, Name>> {
     with_loc(commit_after(("(", "type"), (list(typ), ")", cmd)))
-        .map(|((types, _, cmd), loc)| {
-            let mut result = cmd;
+        .map(|((types, _, mut cmd), loc)| {
             for typ in types.into_iter().rev() {
-                result = Command::SendType(loc.clone(), typ, Box::new(result));
+                cmd = Command::SendType(loc.clone(), typ, Box::new(cmd));
             }
-            result
+            cmd
         })
         .parse_next(input)
 }
 
 fn cmd_recv_type(input: &mut Input) -> Result<Command<Loc, Name>> {
     with_loc(commit_after(("[", "type"), (list(name), "]", cmd)))
-        .map(|((names, _, cmd), loc)| {
-            let mut result = cmd;
+        .map(|((names, _, mut cmd), loc)| {
             for name in names.into_iter().rev() {
-                result = Command::ReceiveType(loc.clone(), name, Box::new(result));
+                cmd = Command::ReceiveType(loc.clone(), name, Box::new(cmd));
             }
-            result
+            cmd
         })
         .parse_next(input)
 }
@@ -975,12 +969,11 @@ fn cmd_branch_then(input: &mut Input) -> Result<CommandBranch<Loc, Name>> {
 
 fn cmd_branch_receive(input: &mut Input) -> Result<CommandBranch<Loc, Name>> {
     with_loc(commit_after("(", (list(pattern), ")", cmd_branch)))
-        .map(|((patterns, _, branch), loc)| {
-            let mut result = branch;
+        .map(|((patterns, _, mut branch), loc)| {
             for pattern in patterns.into_iter().rev() {
-                result = CommandBranch::Receive(loc.clone(), pattern, Box::new(result));
+                branch = CommandBranch::Receive(loc.clone(), pattern, Box::new(branch));
             }
-            result
+            branch
         })
         .parse_next(input)
 }
@@ -993,12 +986,11 @@ fn cmd_branch_continue(input: &mut Input) -> Result<CommandBranch<Loc, Name>> {
 
 fn cmd_branch_recv_type(input: &mut Input) -> Result<CommandBranch<Loc, Name>> {
     with_loc(commit_after(("(", "type"), (list(name), ")", cmd_branch)))
-        .map(|((names, _, branch), loc)| {
-            let mut result = branch;
+        .map(|((names, _, mut branch), loc)| {
             for name in names.into_iter().rev() {
-                result = CommandBranch::ReceiveType(loc.clone(), name, Box::new(result));
+                branch = CommandBranch::ReceiveType(loc.clone(), name, Box::new(branch));
             }
-            result
+            branch
         })
         .parse_next(input)
 }
