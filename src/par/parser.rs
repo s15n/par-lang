@@ -1,6 +1,7 @@
 use super::{
     language::{
-        Apply, Construct, ConstructBranch, ConstructBranches, Expression, Pattern, Process,
+        Apply, ApplyBranch, ApplyBranches, Command, CommandBranch, CommandBranches, Construct,
+        ConstructBranch, ConstructBranches, Expression, Pattern, Process,
     },
     lexer::{Input, Token, TokenKind},
     parse::{Loc, Name, Program},
@@ -9,8 +10,8 @@ use super::{
 use indexmap::IndexMap;
 use winnow::{
     combinator::{
-        alt, cut_err, delimited, dispatch, fail, not, opt, peek, preceded, repeat, separated, seq,
-        terminated, todo, trace,
+        alt, cut_err, delimited, dispatch, empty, fail, not, opt, peek, preceded, repeat,
+        separated, seq, terminated, todo, trace,
     },
     error::{ContextError, ErrMode, ModalError, ParserError, StrContext},
     stream::{Accumulate, Compare, Range, Stream, StreamIsPartial},
@@ -664,65 +665,346 @@ fn application(input: &mut Input) -> Result<Expression<Loc, Name>> {
     .parse_next(input)
 }
 
-// apply           = { apply_begin | apply_loop | apply_send | apply_choose | apply_either | apply_send_type | apply_noop }
 fn apply(input: &mut Input) -> Result<Apply<Loc, Name>> {
-    todo.parse_next(input)
+    alt((
+        apply_begin,
+        apply_loop,
+        apply_choose,
+        apply_either,
+        apply_send_type,
+        apply_send,
+        apply_noop,
+    ))
+    .parse_next(input)
 }
 
-/*
-apply_noop      = { "" }
-apply_send      = { "(" ~ expression_list ~ ")" ~ apply }
-apply_choose    = { "." ~ name ~ apply }
-apply_either    = { "{" ~ ("." ~ name ~ apply_branch ~ ","?)* ~ "}" }
-apply_begin     = { "begin" ~ loop_label ~ apply }
-apply_loop      = { "loop" ~ loop_label }
-apply_send_type = { "(" ~ "type" ~ typ_list ~ ")" ~ apply }
-
-apply_branch           = { apply_branch_then | apply_branch_receive | apply_branch_continue | apply_branch_recv_type }
-apply_branch_then      = { name ~ "=>" ~ expression }
-apply_branch_receive   = { "(" ~ pattern_list ~ ")" ~ apply_branch }
-apply_branch_continue  = { "!" ~ "=>" ~ expression }
-apply_branch_recv_type = { "(" ~ "type" ~ name_list ~ ")" ~ apply_branch }
-  */
-fn process<'s>(input: &mut Input) -> Result<Process<Loc, Name>> {
-    todo.parse_next(input)
+fn apply_send(input: &mut Input) -> Result<Apply<Loc, Name>> {
+    with_loc(commit_after("(", (list(expression), ")", apply)))
+        .map(|((arguments, _, mut apply), loc)| {
+            for argument in arguments.into_iter().rev() {
+                apply = Apply::Send(loc.clone(), Box::new(argument), Box::new(apply));
+            }
+            apply
+        })
+        .parse_next(input)
 }
 
-/*
-process        = { proc_let | proc_pass | proc_telltypes | command | proc_noop }
-proc_let       = { "let" ~ pattern ~ "=" ~ expression ~ process }
-proc_pass      = { "pass" }
-proc_telltypes = { "telltypes" ~ process }
-proc_noop      = { "" }
+fn apply_choose(input: &mut Input) -> Result<Apply<Loc, Name>> {
+    with_loc(commit_after(".", (name, apply)))
+        .map(|((chosen, then), loc)| Apply::Choose(loc, chosen, Box::new(then)))
+        .parse_next(input)
+}
 
-command       = { name ~ cmd }
-cmd           = { cmd_link | cmd_send | cmd_receive | cmd_choose | cmd_either | cmd_break | cmd_continue | cmd_begin | cmd_loop | cmd_send_type | cmd_recv_type | cmd_then }
-cmd_then      = { process }
-cmd_link      = { "<>" ~ expression }
-cmd_send      = { "(" ~ expression_list ~ ")" ~ cmd }
-cmd_receive   = { "[" ~ pattern_list ~ "]" ~ cmd }
-cmd_choose    = { "." ~ name ~ cmd }
-cmd_either    = { "{" ~ cmd_branches ~ "}" ~ pass_process? }
-cmd_break     = { "!" }
-cmd_continue  = { "?" ~ process }
-cmd_begin     = { "begin" ~ loop_label ~ cmd }
-cmd_loop      = { "loop" ~ loop_label }
-cmd_send_type = { "(" ~ "type" ~ typ_list ~ ")" ~ cmd }
-cmd_recv_type = { "[" ~ "type" ~ name_list ~ "]" ~ cmd }
+fn apply_either(input: &mut Input) -> Result<Apply<Loc, Name>> {
+    with_loc(commit_after(
+        "{",
+        (
+            repeat(0.., (".", name, apply_branch, opt(","))).fold(
+                || IndexMap::new(),
+                |mut branches, (_, name, branch, _)| {
+                    branches.insert(name, branch);
+                    branches
+                },
+            ),
+            "}",
+        ),
+    ))
+    .map(|((branches, _), loc)| Apply::Either(loc, ApplyBranches(branches)))
+    .parse_next(input)
+}
 
-pass_process = { proc_let | proc_pass | proc_telltypes | command }
+fn apply_begin(input: &mut Input) -> Result<Apply<Loc, Name>> {
+    with_loc(commit_after("begin", (loop_label, apply)))
+        .map(|((label, then), loc)| Apply::Begin(loc, label, Box::new(then)))
+        .parse_next(input)
+}
 
-cmd_branches         = { ("." ~ name ~ cmd_branch)* }
-cmd_branch           = { cmd_branch_then | cmd_branch_receive | cmd_branch_continue | cmd_branch_recv_type }
-cmd_branch_then      = { "=>" ~ "{" ~ process ~ "}" }
-cmd_branch_receive   = { "(" ~ pattern_list ~ ")" ~ cmd_branch }
-cmd_branch_continue  = { "!" ~ "=>" ~ "{" ~ process ~ "}" }
-cmd_branch_recv_type = { "(" ~ "type" ~ name_list ~ ")" ~ cmd_branch }
+fn apply_loop(input: &mut Input) -> Result<Apply<Loc, Name>> {
+    with_loc(commit_after("loop", loop_label))
+        .map(|(label, loc)| Apply::Loop(loc, label))
+        .parse_next(input)
+}
 
-*/
+fn apply_send_type(input: &mut Input) -> Result<Apply<Loc, Name>> {
+    with_loc(commit_after(("(", "type"), (list(typ), ")", apply)))
+        .map(|((types, _, mut apply), loc)| {
+            for typ in types.into_iter().rev() {
+                apply = Apply::SendType(loc.clone(), typ, Box::new(apply));
+            }
+            apply
+        })
+        .parse_next(input)
+}
+
+fn apply_noop(input: &mut Input) -> Result<Apply<Loc, Name>> {
+    with_loc(empty)
+        .map(|((), loc)| Apply::Noop(loc))
+        .parse_next(input)
+}
+
+fn apply_branch(input: &mut Input) -> Result<ApplyBranch<Loc, Name>> {
+    alt((
+        apply_branch_then,
+        apply_branch_recv_type,
+        apply_branch_receive,
+        apply_branch_continue,
+    ))
+    .parse_next(input)
+}
+
+fn apply_branch_then(input: &mut Input) -> Result<ApplyBranch<Loc, Name>> {
+    (with_loc(name), cut_err(("=>", expression)))
+        .map(|((name, loc), (_, expression))| ApplyBranch::Then(loc, name, expression))
+        .parse_next(input)
+}
+
+fn apply_branch_receive(input: &mut Input) -> Result<ApplyBranch<Loc, Name>> {
+    with_loc(commit_after("(", (list(pattern), ")", apply_branch)))
+        .map(|((patterns, _, mut branch), loc)| {
+            for pattern in patterns.into_iter().rev() {
+                branch = ApplyBranch::Receive(loc.clone(), pattern, Box::new(branch));
+            }
+            branch
+        })
+        .parse_next(input)
+}
+
+fn apply_branch_continue(input: &mut Input) -> Result<ApplyBranch<Loc, Name>> {
+    with_loc(commit_after("!", ("=>", expression)))
+        .map(|((_, expression), loc)| ApplyBranch::Continue(loc, expression))
+        .parse_next(input)
+}
+
+fn apply_branch_recv_type(input: &mut Input) -> Result<ApplyBranch<Loc, Name>> {
+    with_loc(commit_after(("(", "type"), (list(name), ")", apply_branch)))
+        .map(|((names, _, mut branch), loc)| {
+            for name in names.into_iter().rev() {
+                branch = ApplyBranch::ReceiveType(loc.clone(), name, Box::new(branch))
+            }
+            branch
+        })
+        .parse_next(input)
+}
+
+fn process(input: &mut Input) -> Result<Process<Loc, Name>> {
+    alt((proc_let, proc_pass, proc_telltypes, command, proc_noop))
+        .context(StrContext::Label("process"))
+        .parse_next(input)
+}
+
+fn proc_let(input: &mut Input) -> Result<Process<Loc, Name>> {
+    with_loc(commit_after("let", (pattern, "=", expression, process)))
+        .map(|((pattern, _, expression, process), loc)| {
+            Process::Let(loc, pattern, Box::new(expression), Box::new(process))
+        })
+        .parse_next(input)
+}
+
+fn proc_pass(input: &mut Input) -> Result<Process<Loc, Name>> {
+    with_loc("pass")
+        .map(|(_, loc)| Process::Pass(loc))
+        .parse_next(input)
+}
+
+fn proc_telltypes(input: &mut Input) -> Result<Process<Loc, Name>> {
+    with_loc(commit_after("telltypes", process))
+        .map(|(process, loc)| Process::Telltypes(loc, Box::new(process)))
+        .parse_next(input)
+}
+
+fn proc_noop(input: &mut Input) -> Result<Process<Loc, Name>> {
+    with_loc(empty)
+        .map(|((), loc)| Process::Noop(loc))
+        .parse_next(input)
+}
+
+fn command(input: &mut Input) -> Result<Process<Loc, Name>> {
+    (name, cmd)
+        .map(|(name, cmd)| Process::Command(name, cmd))
+        .parse_next(input)
+}
+
+fn cmd(input: &mut Input) -> Result<Command<Loc, Name>> {
+    alt((
+        cmd_link,
+        cmd_choose,
+        cmd_either,
+        cmd_break,
+        cmd_continue,
+        cmd_begin,
+        cmd_loop,
+        cmd_send_type,
+        cmd_send,
+        cmd_recv_type,
+        cmd_receive,
+        cmd_then,
+    ))
+    .parse_next(input)
+}
+
+fn cmd_then(input: &mut Input) -> Result<Command<Loc, Name>> {
+    process
+        .map(|x| Command::Then(Box::new(x)))
+        .parse_next(input)
+}
+
+fn cmd_link(input: &mut Input) -> Result<Command<Loc, Name>> {
+    with_loc(commit_after("<>", expression))
+        .map(|(expression, loc)| Command::Link(loc, Box::new(expression)))
+        .parse_next(input)
+}
+
+fn cmd_send(input: &mut Input) -> Result<Command<Loc, Name>> {
+    with_loc(commit_after("(", (list(expression), ")", cmd)))
+        .map(|((expressions, _, cmd), loc)| {
+            let mut result = cmd;
+            for expression in expressions.into_iter().rev() {
+                result = Command::Send(loc.clone(), Box::new(expression), Box::new(result));
+            }
+            result
+        })
+        .parse_next(input)
+}
+
+fn cmd_receive(input: &mut Input) -> Result<Command<Loc, Name>> {
+    with_loc(commit_after("[", (list(pattern), "]", cmd)))
+        .map(|((patterns, _, cmd), loc)| {
+            let mut result = cmd;
+            for pattern in patterns.into_iter().rev() {
+                result = Command::Receive(loc.clone(), pattern, Box::new(result));
+            }
+            result
+        })
+        .parse_next(input)
+}
+
+fn cmd_choose(input: &mut Input) -> Result<Command<Loc, Name>> {
+    with_loc(commit_after(".", (name, cmd)))
+        .map(|((name, cmd), loc)| Command::Choose(loc, name, Box::new(cmd)))
+        .parse_next(input)
+}
+
+fn cmd_either(input: &mut Input) -> Result<Command<Loc, Name>> {
+    with_loc(commit_after("{", (cmd_branches, "}", opt(pass_process))))
+        .map(|((branches, _, pass_process), loc)| {
+            Command::Either(loc, branches, pass_process.map(Box::new))
+        })
+        .parse_next(input)
+}
+
+fn cmd_break(input: &mut Input) -> Result<Command<Loc, Name>> {
+    with_loc("!")
+        .map(|(_, loc)| Command::Break(loc))
+        .parse_next(input)
+}
+
+fn cmd_continue(input: &mut Input) -> Result<Command<Loc, Name>> {
+    with_loc(("?", process))
+        .map(|((_, process), loc)| Command::Continue(loc, Box::new(process)))
+        .parse_next(input)
+}
+
+fn cmd_begin(input: &mut Input) -> Result<Command<Loc, Name>> {
+    with_loc(commit_after("begin", (loop_label, cmd)))
+        .map(|((label, cmd), loc)| Command::Begin(loc, label, Box::new(cmd)))
+        .parse_next(input)
+}
+
+fn cmd_loop(input: &mut Input) -> Result<Command<Loc, Name>> {
+    with_loc(commit_after("loop", loop_label))
+        .map(|(label, loc)| Command::Loop(loc, label))
+        .parse_next(input)
+}
+
+fn cmd_send_type(input: &mut Input) -> Result<Command<Loc, Name>> {
+    with_loc(commit_after(("(", "type"), (list(typ), ")", cmd)))
+        .map(|((types, _, cmd), loc)| {
+            let mut result = cmd;
+            for typ in types.into_iter().rev() {
+                result = Command::SendType(loc.clone(), typ, Box::new(result));
+            }
+            result
+        })
+        .parse_next(input)
+}
+
+fn cmd_recv_type(input: &mut Input) -> Result<Command<Loc, Name>> {
+    with_loc(commit_after(("[", "type"), (list(name), "]", cmd)))
+        .map(|((names, _, cmd), loc)| {
+            let mut result = cmd;
+            for name in names.into_iter().rev() {
+                result = Command::ReceiveType(loc.clone(), name, Box::new(result));
+            }
+            result
+        })
+        .parse_next(input)
+}
+
+fn pass_process(input: &mut Input) -> Result<Process<Loc, Name>> {
+    alt((proc_let, proc_pass, proc_telltypes, command)).parse_next(input)
+}
+
+fn cmd_branches(input: &mut Input) -> Result<CommandBranches<Loc, Name>> {
+    repeat(0.., (".", name, cmd_branch))
+        .fold(
+            || IndexMap::new(),
+            |mut branches, (_, name, branch)| {
+                branches.insert(name, branch);
+                branches
+            },
+        )
+        .map(CommandBranches)
+        .parse_next(input)
+}
+
+fn cmd_branch(input: &mut Input) -> Result<CommandBranch<Loc, Name>> {
+    alt((
+        cmd_branch_then,
+        cmd_branch_continue,
+        cmd_branch_recv_type,
+        cmd_branch_receive,
+    ))
+    .parse_next(input)
+}
+
+fn cmd_branch_then(input: &mut Input) -> Result<CommandBranch<Loc, Name>> {
+    commit_after("=>", ("{", process, "}"))
+        .map(|(_, process, _)| CommandBranch::Then(process))
+        .parse_next(input)
+}
+
+fn cmd_branch_receive(input: &mut Input) -> Result<CommandBranch<Loc, Name>> {
+    with_loc(commit_after("(", (list(pattern), ")", cmd_branch)))
+        .map(|((patterns, _, branch), loc)| {
+            let mut result = branch;
+            for pattern in patterns.into_iter().rev() {
+                result = CommandBranch::Receive(loc.clone(), pattern, Box::new(result));
+            }
+            result
+        })
+        .parse_next(input)
+}
+
+fn cmd_branch_continue(input: &mut Input) -> Result<CommandBranch<Loc, Name>> {
+    with_loc(commit_after("!", ("=>", "{", process, "}")))
+        .map(|((_, _, process, _), loc)| CommandBranch::Continue(loc, process))
+        .parse_next(input)
+}
+
+fn cmd_branch_recv_type(input: &mut Input) -> Result<CommandBranch<Loc, Name>> {
+    with_loc(commit_after(("(", "type"), (list(name), ")", cmd_branch)))
+        .map(|((names, _, branch), loc)| {
+            let mut result = branch;
+            for name in names.into_iter().rev() {
+                result = CommandBranch::ReceiveType(loc.clone(), name, Box::new(result));
+            }
+            result
+        })
+        .parse_next(input)
+}
 
 fn loop_label<'s>(input: &mut Input<'s>) -> Result<Option<Name>> {
-    opt(preceded((":",), name)).parse_next(input)
+    opt(preceded(":", name)).parse_next(input)
 }
 
 #[cfg(test)]
