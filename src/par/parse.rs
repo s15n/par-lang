@@ -409,9 +409,18 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Expression<Loc, Name>
 
         Rule::application => {
             let mut pairs = pair.into_inner();
-            let (loc, object_name) = parse_name(&mut pairs)?;
+            let expr = Box::new({
+                let pair = pairs.next().unwrap();
+                match pair.as_rule() {
+                    Rule::name => {
+                        Expression::Reference(loc.clone(), parse_name(&mut Pairs::single(pair))?.1)
+                    }
+                    Rule::expression => parse_expression(&mut Pairs::single(pair))?,
+                    _ => unreachable!(),
+                }
+            });
             let apply = parse_apply(&mut pairs)?;
-            Ok(Expression::Application(loc, object_name, apply))
+            Ok(Expression::Application(loc, expr, apply))
         }
 
         Rule::expression => parse_expression(&mut Pairs::single(pair)),
@@ -714,8 +723,6 @@ fn parse_process(pairs: &mut Pairs<'_, Rule>) -> Result<Process<Loc, Name>, Pars
                 Box::new(process),
             ))
         }
-
-        Rule::proc_pass => Ok(Process::Pass(loc)),
 
         Rule::proc_telltypes => {
             let mut pairs = pair.into_inner();
