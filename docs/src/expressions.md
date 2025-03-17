@@ -10,6 +10,16 @@
 
 Some expressions are evaluated strictly, some lazily. todo: which
 
+Every expression desugars to a [channel expression](#channel-expressions). In the most simple way, that is
+```par
+expr
+// is equivalent to
+chan dual {
+  dual <> expr
+}
+```
+This can now be further translated into process syntax by rewriting the [link](./statements/commands.md#link-commands) `dual <> expr`. Rules for that are provided in every expression rule.
+
 ## Primary Expressions
 
 > **<sup>Syntax</sup>**\
@@ -31,27 +41,123 @@ dec apply_id : [type T] [T] T
 def apply_id = [type T] [x] {[y] y}(x)
 ```
 
+Primary expressions can be linked via:
+```par
+dual <> id // can't be further simplified
+
+dual <> {expr}
+// is just
+dual <> expr
+```
+
 ## Let Expressions
 
 > **<sup>Syntax</sup>**\
 > _LetExpression_ : `let` [_Pattern_] `=` _Expression_ `in` _Expression_
 
-The second expression must use all bindings of the pattern (which must be irrefutable) due to linearity.
+The second expression must use all bindings of the pattern (which must be [irrefutable](patterns.md#irrefutable-note)) due to linearity.
+
+Let expressions can be linked via:
+```par
+dual <> let p = x in y
+// is equivalent to
+let p = x
+dual <> y
+```
 
 ## Do Expressions
 
 > **<sup>Syntax</sup>**\
 > _DoExpression_ : `do` `{` [_Process_] `}` `in` _Expression_
 
-Do expressions are syntax sugar for channel expressions (todo: specify how). Linearity requires that all leftover bindings from the process must be used in the expression at the end.
+Do expressions allow [process syntax](statements.md) inside an expression context:
+```par
+do { 
+  commands... 
+} in result
+// is equivalent to
+chan return {
+  commands...
+  return <> result
+}
+```
+Linearity requires that all leftover bindings from the process must be used in the expression at the end.
+
+Do expressions are useful for...
+```par
+// ...binding multiple values with let
+do {
+  let v1 = e1
+  ...
+  let vn = en
+} in result
+// is preferred over
+let v1 = e1 in
+...
+let vn = en in
+result
+
+// ...destructing values
+do {
+  drop(x1)?
+  drop(x2)?
+} in result
+```
+Expressions construct, commands destruct. 
+Because of this, when a value is destructed, process syntax (for example via a do expression) is the way to go.
+
+Do expressions can be linked via:
+```par
+dual <> do { proc } in y
+// is equivalent to
+proc
+dual <> y
+```
 
 ## Channel Expressions
 
 > **<sup>Syntax</sup>**\
 > _ChanExpression_ : `chan` [ID] [_Annotation_]<sup>?</sup> `{` [_Process_] `}`
 
-The name declared after the channel may be used inside the process and must be fully destructed there.
+The name declared after the channel may be used inside the process and must be fully destructed inside or moved out of there.
 
 The expression `chan a: A { ... }` has type `chan A`. Conversely, if `chan b { ... }` has type `B`, `b` has type `chan B`.
+
+Channel expressions are the only expression which is not syntax sugar. Under the hood, all expressions are syntax sugar for channel expressions.
+
+Par even has an intermediate representation in which all expressions are channel expressions.
+
+A channel expression constructs a value by destructing a value of its dual. For example:
+```par
+dec is_even : [Nat] Bool
+def is_even = chan return: (Nat) chan Bool {
+  // destruct return in this process
+
+  return[n]
+  // return is now of type chan Bool
+  // and n is of type Nat
+
+  // destruct n
+  n begin {
+    .zero! => {
+      // fully destruct return
+      return.true!
+    }
+    .succ => {
+      // n is now its former predecessor
+      n {
+        .zero! => {
+          // n was 1
+          return.false!
+        }
+        .succ => {
+          n loop
+        }
+      }
+    }
+  }
+}
+```
+Learn more about destructing values using commands [here](./statements/commands.md)
 
 [_Pattern_]: ./patterns.md

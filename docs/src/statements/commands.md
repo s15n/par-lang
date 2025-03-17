@@ -17,7 +17,16 @@
 > &nbsp;&nbsp; | [_Loop_](#recursive-commands)
 >
 > _Receiver_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; [ID]
+> &nbsp;&nbsp; &nbsp;&nbsp; [ID] \
+> &nbsp;&nbsp; | _Command_
+
+Nonterminating commands can be chained.
+```par
+rec cmd1 cmd2
+// is just
+rec cmd1
+rec cmd2
+```
 
 ## Link Commands
 
@@ -36,6 +45,8 @@ def f: A = chan return: chan A {
 }
 ```
 
+Rewrite rules for all expressions can be found at their respective rules (for [applications](../expressions/application.md) they are grouped at the start).
+
 ## The Break Command
 
 > **<sup>Syntax</sup>**\
@@ -48,7 +59,7 @@ def f: A = chan return: chan A {
 </sup>*
 
 A break command destructs a `?` and ends the process.
-It is used in channels, as destructing a `?` is constructing its dual `!`.
+It is used with `chan`, as destructing a `?` is constructing its dual `!` there.
 ```par
 def unit: ! = chan bottom: ? {
   bottom!
@@ -116,7 +127,7 @@ do {
 // evaluates to .false!
 ```
 
-It can also be used in channels: Destructing `[A] chan B` to construct `(A) B`
+It can also be used with `chan`: Destructing `[A] chan B` to dually construct `(A) B`
 ```par
 def true_false: (Bool) Bool = chan return: [Bool] chan Bool {
   return(.true!)
@@ -158,7 +169,7 @@ def reverse = [type A, B] [pair] do {
 } in (pair) first
 ```
 
-It can also be used in channels: Destructing `(A) chan B` to construct `[A] B`
+It can also be used with `chan`: Destructing `(A) chan B` to dually construct `[A] B`
 ```par
 def negate: [Bool] Bool = chan return: (Bool) chan Bool {
   // receive the argument
@@ -206,7 +217,7 @@ def first_two = [type T] [stream] do {
   stream.close?
 } in (first, second)!
 ```
-It can also be used in channels: Destructing a choice type to construct an either type:
+It can also be used with `chan`: Destructing a choice type to dually construct an either type:
 ```par
 // chan Bool is equal to
 type ChanBool = {
@@ -282,7 +293,7 @@ def drop_bool: [Bool] ! = [b] do {
   }
 } in !
 ```
-It can also be used in channels: Destructing an either type to construct a choice type:
+It can also be used with `chan`: Destructing an either type to dually construct a choice type:
 ```par
 // choice of two
 type BoolChoice<A, B> = {
@@ -326,7 +337,7 @@ def negate_choice = chan return: ChanBoolChoice<Bool, Bool> {
 | [Expression](../expressions/application.md#recursive-destructions)
 </sup>*
 
-If no loop label is present, `loop` corresponds to the innermost `begin`. Else to the `begin` with the same loop label.
+A `loop` corresponds to the innermost `begin` with the same loop label. `loop` without a label can only correspond to `begin` without a label.
 
 A recursive command can destruct a recursive type:
 ```par
@@ -345,6 +356,7 @@ def list_and: [List<Bool>] Bool = [list] do {
         .true! => {}
         .false! => {
           drop_bool(result)?
+          // reassign result here
           let result: Bool = .false!
         }
       }
@@ -370,7 +382,28 @@ could have been replaced with
 }
 ```
 
-A recursive command can also be used in channels: Destructing a recursive (here: either) type to construct an iterative (here: choice) type:
+A very important concept is that all values which were consumed between `begin` and `loop` must be reassigned (like `result` in the example). This even allows variables to change in between the iterations:
+```par
+def first_nats: [Nat] List<Nat> = [n] do {
+  // initialize "mutable" value
+  let list: List<Nat> = .empty!
+  n begin {
+    .zero! => {
+      // also reassign, but for after `in`
+      let list = .item(.zero!) list
+    }
+    .succ pred => {
+      // here pred gets reassigned
+      let (pred, p)! = copy_nat(pred)
+      // and list gets reassigned as well
+      let list = .item(.succ p) list
+      pred loop
+    }
+  } 
+} in list
+```
+
+A recursive command can also be used with `chan`: Destructing a recursive (here: either) type to dually construct an iterative (here: choice) type:
 ```par
 // chan Stream<Bool> is
 type ChanStreamBool = recursive either {
@@ -462,7 +495,7 @@ def just_true = do {
 } in f
 ```
 
-It can also be used in channels: Destructing `[type X] chan T` to construct `(type X) T`
+It can also be used with `chan`: Destructing `[type X] chan T` to dually construct `(type X) T`
 ```par
 type Any = (type T) T
 
@@ -507,7 +540,7 @@ def complicated_any_id: (Any) Any = [x] do {
 } in (type X) y
 ```
 
-It can also be used in channels: Destructing `(type T) chan R` to construct `[T] R`
+It can also be used with `chan`: Destructing `(type T) chan R` to dually construct `[T] R`
 ```par
 def id: [type T] [T] T = chan return: (type T) (T) chan T {
   return[type T]

@@ -4,8 +4,6 @@ Par (<span style="font-family: Noto Sans">⅋</span>) is a concurrent programmin
 
 This reference contains not only the complete grammar and specification of Par but also an extensive collection of examples, explanations and best practices.
 
-When you're done reading this introduction, just go on to the chapter about [types](types.md), this is where the interesting stuff begins.
-
 ## Overview
 
 Par is a multi-layer language with an intermediate representation in itself.
@@ -117,7 +115,3 @@ To ask questions or discuss ideas, visit the [Discord](https://discord.gg/8Ksype
 For a quick but in-depth tutorial, read the [Readme](https://github.com/faiface/par-lang).
 
 An then, there's the document you're currently reading, of course.
-
----
-
-Jump directly to the chapter about [types](types.md)

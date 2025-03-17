@@ -21,11 +21,23 @@
 *<sup>
 [Type](../types.md#the-unit-type)
 | [Pattern](../patterns.md#todo)
-| [Statement](../statements/commands.md#todo)
-| [Destructing Statement](../statements/commands.md#todo)
+| [Statement](../statements/commands.md#the-break-command)
+| [Destructing Statement](../statements/commands.md#the-continue-command)
 </sup>*
 
 The unit expression `!` is of the [unit type](../types.md#the-unit-type) `!`.
+
+It's the only value of its type:
+```par
+def unit: ! = !
+```
+
+Unit expressions can be linked via:
+```par
+dual <> !
+// is equivalent to
+dual!
+```
 
 
 ## Pair Expressions
@@ -36,11 +48,21 @@ The unit expression `!` is of the [unit type](../types.md#the-unit-type) `!`.
 *<sup>
 [Type](../types.md#pair-types)
 | [Pattern](../patterns.md#todo)
-| [Statement](../statements/commands.md#todo)
-| [Destructing Statement](../statements/commands.md#todo)
+| [Statement](../statements/commands.md#send-commands)
+| [Destructing Statement](../statements/commands.md#receive-commands)
 </sup>*
 
 If `a` is of type `A` and `b` is of type `B`, the pair expression `(a) b` is of the [pair type](../types.md#pair-types) `(A) B`.
+
+todo
+
+Pair expressions can be linked via:
+```par
+dual <> (a) b
+// is equivalent to
+dual(a)
+dual <> b
+```
 
 
 ## Function Expressions
@@ -51,11 +73,21 @@ If `a` is of type `A` and `b` is of type `B`, the pair expression `(a) b` is of 
 *<sup>
 [Type](../types.md#function-types)
 | [Destructing Expression](application.md#function-calls)
-| [Statement](../statements/commands.md#todo)
-| [Destructing Statement](../statements/commands.md#todo)
+| [Statement](../statements/commands.md#receive-commands)
+| [Destructing Statement](../statements/commands.md#send-commands)
 </sup>*
 
-If `p` is an irrefutable pattern for type `A` and `b` (wich must use the bindings of `p`) is of type `B`, the function expression `[p] b` is of the [function type](../types.md#function-types) `[A] B`.
+If `p` is an [irrefutable](patterns.md#irrefutable-note) pattern for type `A` and `b` (wich must use the bindings of `p`) is of type `B`, the function expression `[p] b` is of the [function type](../types.md#function-types) `[A] B`.
+
+todo
+
+Function expressions can be linked via:
+```par
+dual <> [p] b
+// is equivalent to
+dual[p]
+dual <> b
+```
 
 ## Either Selections
 
@@ -65,12 +97,22 @@ If `p` is an irrefutable pattern for type `A` and `b` (wich must use the binding
 *<sup>
 [Type](../types.md#either-types)
 | [Destructing Expression](application.md#either-destructions)
-| [Statement](../statements/commands.md#todo)
-| [Destructing Statement](../statements/commands.md#todo)
+| [Statement](../statements/commands.md#signal-commands)
+| [Destructing Statement](../statements/commands.md#match-commands)
 </sup>*
 
 The type of an either selection cannot be inferred from itself. \
 A selection of the [either type](../types.md#either-types) `either { .a A, .b B }` is either `.a a` if `a` is of type `A` or `.b b` if `b` is of type `B`.
+
+todo
+
+Either selections can be linked via:
+```par
+dual <> .a a
+// is equivalent to
+dual.a
+dual <> a
+```
 
 
 ## Choice Constructions
@@ -86,12 +128,27 @@ A selection of the [either type](../types.md#either-types) `either { .a A, .b B 
 *<sup>
 [Type](../types.md#choice-types)
 | [Destructing Expression](application.md#choice-selections)
-| [Statement](../statements/commands.md#todo)
-| [Destructing Statement](../statements/commands.md#todo)
+| [Statement](../statements/commands.md#match-commands)
+| [Destructing Statement](../statements/commands.md#signal-commands)
 </sup>*
 
 If `a` is of type `A` and `b` is of type `B`, the choice construction `{ .a => a, .b => b }` is of the [choice type](../types.md#choice-types) `{ .a => A, .b => B }`.
 
+Some patterns can be used on the left side:
+- `{ .a(p) => a }` is equivalent to `{ .a => [p] a }`
+- `{ .a(type T) => a }` is equivalent to `{ .a => [type T] a }`
+
+todo
+
+Choice constructions can be linked via:
+```par
+dual <> { .a => a, .b => b }
+// is equivalent to
+dual { 
+  .a => { dual <> a }
+  .b => { dual <> b }
+}
+```
 
 ## Iterative Constructions
 
@@ -104,38 +161,68 @@ If `a` is of type `A` and `b` is of type `B`, the choice construction `{ .a => a
 
 *<sup>
 [Type](../types.md#iterative-types)
-| [Statement](../statements/commands.md#todo)
+| [Statement](../statements/commands.md#recursive-commands)
 </sup>*
 
 If --- given every `loop` in `a` is of type `iterative A` --- `a` is of type `A`, the iterative construction `begin a` is of the [iterative type](../types.md#iterative-types) `iterative A`.
 
-If no loop label is present, `loop` corresponds to the innermost `begin`. Else to the `begin` with the same loop label.
+A `loop` corresponds to the innermost `begin` with the same loop label. `loop` without a label can only correspond to `begin` without a label.
+
+todo
+
+Iterative constructions can be linked via:
+```par
+dual <> begin a
+// is equivalent to
+dual begin
+dual <> a // with loop in a replaced by begin a
+```
 
 
 ## Existential Constructions
 
 > **<sup>Syntax</sup>**\
-> _PairExpression_ : `(` `type` [_TypeList_] `)` [_Expression_]
+> _ExistentialConstruction_ : `(` `type` [_TypeList_] `)` [_Expression_]
 
 *<sup>
 [Type](../types.md#existential-types)
 | [Pattern](../patterns.md#todo)
-| [Statement](../statements/commands.md#todo)
-| [Destructing Statement](../statements/commands.md#todo)
+| [Statement](../statements/commands.md#send-type-commands)
+| [Destructing Statement](../statements/commands.md#receive-type-commands)
 </sup>*
 
 If `a` is of type `A`, the existential construction `(type T) a` is of the [existential type](../types.md#existential-types) `(type T) A`.
 
+todo
+
+Existential constructions can be linked via:
+```par
+dual <> (type T) a
+// is equivalent to
+dual(type T)
+dual <> a
+```
+
 ## Universal Constructions
 
 > **<sup>Syntax</sup>**\
-> _PairExpression_ : `[` `type` [_ID_List_] `]` [_Expression_]
+> _UniversalConstruction_ : `[` `type` [_ID_List_] `]` [_Expression_]
 
 *<sup>
 [Type](../types.md#universal-types)
 | [Destructing Expression](application.md#universal-specializations)
-| [Statement](../statements/commands.md#todo)
-| [Destructing Statement](../statements/commands.md#todo)
+| [Statement](../statements/commands.md#receive-type-commands)
+| [Destructing Statement](../statements/commands.md#send-type-commands)
 </sup>*
 
 If `a` is of type `A`, the universal construction `[type T] a` (where `a` can use the type `T`) is of the [universal type](../types.md#universal-types) `[type T] A`.
+
+todo
+
+Universal constructions can be linked via:
+```par
+dual <> [type T] a
+// is equivalent to
+dual[type T]
+dual <> a
+```

@@ -10,8 +10,8 @@
 > &nbsp;&nbsp; | [_Unit_](#the-unit-pattern) \
 > &nbsp;&nbsp; | [_PairPattern_](#pair-patterns) <!--\
 > &nbsp;&nbsp; | [_VariantPattern_](#variant-patterns) \
-> &nbsp;&nbsp; | [_BlankPattern_](#the-blank-pattern) -->\
-> &nbsp;&nbsp; | [_GroupedPattern_](#grouped-patterns) \
+> &nbsp;&nbsp; | [_BlankPattern_](#the-blank-pattern) \
+> &nbsp;&nbsp; | [_GroupedPattern_](#grouped-patterns) -->\
 > &nbsp;&nbsp; | [_ExistentialPattern_](#existential-patterns)
 >
 > _PatternList_ :\
@@ -19,7 +19,7 @@
 
 There are two properties of a pattern: What names it *binds* and whether it's *refutable*.
 
-<div class="warning" style="--warning-border: var(--note-border)">
+<div id="irrefutable-note" class="warning" style="--warning-border: var(--note-border)">
 
 Currently, all patterns are irrefutable. Because of plans to extend the patterns system (see the [Future](#future) section) this word (irrefutable) is used throughout this part of the reference. It can be safely ignored for now.
 </div>
@@ -92,29 +92,23 @@ The pattern `name` or `name: T` is always irrefutable and binds `name` to `x` wh
 
 The pattern `name` can be used on a value which type is known. Otherwise, `name: T` must be used, which can only be used on a value of type `T`.
 
+Binding patterns are the most used patterns.
 ```par
-let x = y in x
-// is just
-y
-
-// it is most often used for function expressions
-let lambda = [x] expr_using_x
-
-// or the similar pair destructions
-let tuple: (A, B, C)! = (a, b, c)!
-tuple[first]
-// now first is a
-// and tuple is (b, c)!
+// break up an expression
+do {
+  let v1 = e1
+  let v2 = e2
+} in // expression using v1 and v2
 ```
 
 If the type of the value matched is already known, a type annotation would have to match it.
 Such an annotation can be useful for declaring functions, though:
 ```par
 // no extra type annotation/declaration needed
-def negate = [b: Bool] b {
+def negate = [b: Bool] let result: Bool = b {
   .true! => .false!
   .false! => .true!
-}
+} in result
 ```
 
 <!--If a subpattern is present, however, `name @ subp` matches exactly when `subp` matches. Generally, it is refutable. When matching `x`, it binds `name` to `x`. All bindings of `subp` are consumed by `name`, i.e. they can't be used anymore. For that reason, the [blank pattern](#the-blank-pattern) `_` may be used inside `subp`.
@@ -213,7 +207,6 @@ def get_second = [type T] [list] list {
   other => (.none!) other
 }
 ```
--->
 
 ## Grouped Patterns
 
@@ -221,6 +214,7 @@ def get_second = [type T] [list] list {
 > _GroupedPattern_ : `{` _Pattern_ `}`
 
 A grouped pattern is equivalent to its body.
+-->
 
 ## Existential Patterns
 
