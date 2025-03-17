@@ -17,9 +17,6 @@ use crate::{
     },
     par::{
         language::Internal,
-        parse::{Loc, Program},
-        process::Expression,
-        types::Type,
     },
     playground::{self, CheckedProgram},
     readback::{NameRequiredTraits, ReadbackState},

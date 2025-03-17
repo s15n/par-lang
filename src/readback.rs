@@ -544,15 +544,7 @@ impl ReadbackImplLevel {
             Type::Break(_) | Type::Continue(_) => Ok,
             Type::Recursive(_, _, body) => ReadbackImplLevel::from_type(body, prog, type_variables),
             Type::Iterative(_, _, body) => ReadbackImplLevel::from_type(body, prog, type_variables),
-            Type::SendType(_, name, body) => {
-                ReadbackImplLevel::from_type(
-                    &Type::Name(Default::default(), name.clone(), Default::default()),
-                    prog,
-                    type_variables,
-                ) & ReadbackImplLevel::from_type(body, prog, type_variables)
-                    & QuantifiedTypes
-            }
-            Type::ReceiveType(_, name, body) => {
+            Type::ReceiveType(_, name, body) | Type::SendType(_, name, body) => {
                 let inserted = type_variables.insert(name.clone());
                 let res =
                     ReadbackImplLevel::from_type(body, prog, type_variables) & QuantifiedTypes;
