@@ -8,7 +8,7 @@ use winnow::{
     Parser, Result,
 };
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TokenKind {
     LParen,
     RParen,
@@ -28,13 +28,20 @@ pub enum TokenKind {
     Quest,
     Link,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token<'i> {
     pub kind: TokenKind,
     pub raw: &'i str,
     pub loc: super::parse::Loc,
     pub span: Range<usize>,
 }
+// More useful in winnow debug view
+// impl core::fmt::Debug for Token<'_> {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         format!("{}", self.raw).fmt(f)
+//         // f.debug_struct("Token").field("kind", &self.kind).field("raw", &self.raw).field("loc", &self.loc).field("span", &self.span).finish()
+//     }
+// }
 impl PartialEq<TokenKind> for Token<'_> {
     fn eq(&self, other: &TokenKind) -> bool {
         self.kind == *other
@@ -85,14 +92,6 @@ where
         literal(*self).parse_next(input).map(|t| &t[0])
     }
 }
-// impl<'i, E> Parser<Tokens<'i>, Token<'i>, E> for TokenKind
-// where
-//     E: ParserError<Tokens<'i>>,
-// {
-//     fn parse_next(&mut self, input: &mut Tokens<'i>) -> Result<Token<'i>, E> {
-//         literal(*self).parse_next(input).map(|t| t[0].clone())
-//     }
-// }
 
 impl<'a, T: FromStr> ParseSlice<T> for Token<'a> {
     fn parse_slice(&self) -> Option<T> {
