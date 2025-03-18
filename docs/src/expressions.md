@@ -4,9 +4,9 @@
 > _Expression_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; [_Construction_] \
 > &nbsp;&nbsp; | [_Application_] \
-> &nbsp;&nbsp; | [_LetExpression_] \
-> &nbsp;&nbsp; | [_DoExpression_] \
-> &nbsp;&nbsp; | [_ChanExpression_]
+> &nbsp;&nbsp; | [_LetExpression_](#let-expressions) \
+> &nbsp;&nbsp; | [_DoExpression_](#do-expressions) \
+> &nbsp;&nbsp; | [_ChanExpression_](#channel-expressions)
 
 Some expressions are evaluated strictly, some lazily. todo: which
 
@@ -161,3 +161,8 @@ def is_even = chan return: (Nat) chan Bool {
 Learn more about destructing values using commands [here](./statements/commands.md)
 
 [_Pattern_]: ./patterns.md
+[_Construction_]: ./expressions/construction.md
+[_Application_]: ./expressions/application.md
+[ID]: ./lexical.md#names
+[_Process_]: ./statements.md
+[_Annotation_]: ./types.md

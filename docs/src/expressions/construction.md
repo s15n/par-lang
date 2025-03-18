@@ -2,15 +2,15 @@
 
 > **<sup>Syntax</sup>**\
 > _Construction_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; [_Unit_] \
-> &nbsp;&nbsp; | [_PairExpression_] \
-> &nbsp;&nbsp; | [_FunctionExpression_] \
-> &nbsp;&nbsp; | [_EitherSelection_] \
-> &nbsp;&nbsp; | [_ChoiceConstruction_] \
-> &nbsp;&nbsp; | [_IterativeConstruction_] \
-> &nbsp;&nbsp; | [_Loop_] \
-> &nbsp;&nbsp; | [_ExistentialConstruction_] \
-> &nbsp;&nbsp; | [_UniversalConstruction_]
+> &nbsp;&nbsp; &nbsp;&nbsp; [_Unit_](#the-unit-expression) \
+> &nbsp;&nbsp; | [_PairExpression_](#pair-expressions) \
+> &nbsp;&nbsp; | [_FunctionExpression_](#function-expressions) \
+> &nbsp;&nbsp; | [_EitherSelection_](#either-selections) \
+> &nbsp;&nbsp; | [_ChoiceConstruction_](#choice-constructions) \
+> &nbsp;&nbsp; | [_IterativeConstruction_](#iterative-constructions) \
+> &nbsp;&nbsp; | [_Loop_](#iterative-constructions) \
+> &nbsp;&nbsp; | [_ExistentialConstruction_](#existential-constructions) \
+> &nbsp;&nbsp; | [_UniversalConstruction_](#universal-constructions)
 
 
 ## The Unit Expression
@@ -226,3 +226,11 @@ dual <> [type T] a
 dual[type T]
 dual <> a
 ```
+
+[_Expression_]: ../expressions.md
+[_ExpressionList_]: ../expressions.md
+[_PatternList_]: ../patterns.md
+[_Label_]: ../types.md
+[_ID_List_]: ../lexical.md#names
+[_LoopLabel_]: ../statements/commands.md#recursive-commands
+[_TypeList_]: ../types.md

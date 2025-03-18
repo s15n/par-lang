@@ -74,3 +74,4 @@ type Option<T> = either {
 [_PatternList_]: ./patterns.md
 [_PatternNoTopAlt_]: ./patterns.md
 [_Expression_]: ./expressions.md
+[_Annotation_]: statements.md#let-statements

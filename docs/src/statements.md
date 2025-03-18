@@ -36,7 +36,8 @@ It is used in the following places:
 ## Let Statements
 
 > **<sup>Syntax</sup>**\
-> _LetStatement_ : `let` [_Pattern_] `=` [_Expression_]
+> _LetStatement_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; `let` [_Pattern_] `=` [_Expression_]
 
 Let statements are used to create values in processes. They are the only constructive statements, as commands always destruct.
 
@@ -68,3 +69,4 @@ def just_true = chan return: chan Bool {
 [_Pattern_]: patterns.md
 [_Expression_]: expressions.md
 [_TerminatingCommand_]: ./statements/commands.md
+[_Type_]: types.md

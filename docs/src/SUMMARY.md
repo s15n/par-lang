@@ -2,8 +2,8 @@
 
 [Introduction](./introduction.md)
 
-- [Lexical Structure]()
-- [Source Files]()
+- [Lexical Structure](./lexical.md)
+- [Source Files](./source-files.md)
 - [Items](./items.md)
 - [Types](./types.md)
 - [Expressions](./expressions.md)
@@ -12,7 +12,7 @@
 - [Patterns](./patterns.md)
 - [Statements](./statements.md)
   - [Commands](./statements/commands.md)
-- [Future]()
-- [Appendix]()
+- [Future](./future.md)
+- [Appendix](./appendix.md)
   - [Notation](./notation.md)
-  - [Contributors]()
+  - [Glossary](./glossary.md)

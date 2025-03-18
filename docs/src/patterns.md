@@ -265,3 +265,6 @@ def any_test: Any = do {
 ## Future
 
 More extensive pattern matching, along with more types of patterns is planned in the future. See [here](future.md) for more.
+
+[ID]: ./lexical.md#names
+[_Annotation_]: ./types.md

@@ -29,6 +29,9 @@ At the heart of Par lies its type system, representing linear logic.
 > _TypeArguments_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; `<` _TypeList_ `>`
 >
+> _Annotation_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; `:` _Type_
+>
 > _Label_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; `.` [ID]
 
@@ -751,6 +754,6 @@ def j = [type A] [annihilate] chan a {
 
 So the dual of a type can be used to destruct a value.
 
-[ID]: ./lexical.md
-[_ID_List_]: ./lexical.md
-[_LoopLabel_]: ./expressions.md
+[ID]: ./lexical.md#names
+[_ID_List_]: ./lexical.md#names
+[_LoopLabel_]: ./statements/commands.md#recursive-commands

@@ -551,8 +551,11 @@ def id: [type T] [T] T = chan return: (type T) (T) chan T {
 }
 ```
 
-[ID]: ../lexical.md
+[ID]: ../lexical.md#names
 [_Expression_]: ../expressions.md
 [_ExpressionList_]: ../expressions.md
 [_PatternList_]: ../patterns.md
-[_ID_List_]: ../lexical.md
+[_ID_List_]: ../lexical.md#names
+[_Label_]: ../types.md
+[_ReceivePatterns_]: ../expressions/construction.md#choice-constructions
+[_Process_]: ../statements.md

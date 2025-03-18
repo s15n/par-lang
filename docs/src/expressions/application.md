@@ -3,15 +3,15 @@
 > **<sup>Syntax</sup>**\
 > _Application_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; _Applicable_ \
-> &nbsp;&nbsp; | [_MatchExpression_] \
-> &nbsp;&nbsp; | [_LoopApplication_]
+> &nbsp;&nbsp; | [_MatchExpression_](#match-expressions) \
+> &nbsp;&nbsp; | [_LoopApplication_](#recursive-destructions)
 >
 > _Applicable_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; [_PrimaryExpression_] \
-> &nbsp;&nbsp; | [_FunctionCall_] \
-> &nbsp;&nbsp; | [_ChoiceSelection_] \
-> &nbsp;&nbsp; | [_RecursiveDestruction_] \
-> &nbsp;&nbsp; | [_UniversalSpecialization_]
+> &nbsp;&nbsp; | [_FunctionCall_](#function-calls) \
+> &nbsp;&nbsp; | [_ChoiceSelection_](#choice-selections) \
+> &nbsp;&nbsp; | [_RecursiveDestruction_](#recursive-destructions) \
+> &nbsp;&nbsp; | [_UniversalSpecialization_](#universal-specializations)
 
 While [constructions](construction.md) construct values, applications destruct them.
 
@@ -79,7 +79,7 @@ y.label
 > _MatchExpression_ : _Applicable_ `{` (_Pattern_ `=>` _Expression_ `,`<sup>?</sup>)<sup>\*</sup> `}`
 -->
 > **<sup>Syntax</sup>**\
-> _MatchExpression_ : _Applicable_ `{` ([_Label_] (`(` [_ReceivePatterns_] `)`)<sup>\*</sup> ([ID] | `!`) `=>` _Expression_ `,`<sup>?</sup>)<sup>\*</sup> `}`
+> _MatchExpression_ : _Applicable_ `{` ([_Label_] (`(` [_ReceivePatterns_] `)`)<sup>\*</sup> ([ID] | `!`) `=>` [_Expression_] `,`<sup>?</sup>)<sup>\*</sup> `}`
 
 *<sup>
 [Destructs Type](../types.md#either-types)
@@ -146,4 +146,11 @@ With [totality](../future.md), `loop` can only be called on a direct descendant 
 If `x` is of the universal type `[type T] R`, the specialization `f(type X)` is of type `R`.
 
 
-[ID]: ../lexical.md#todo
+[ID]: ../lexical.md#names
+[_PrimaryExpression_]: ../expressions.md#primary-expressions
+[_Expression_]: ../expressions.md
+[_ExpressionList_]: ../expressions.md
+[_Label_]: ../types.md
+[_ReceivePatterns_]: construction.md#choice-constructions
+[_LoopLabel_]: ../statements/commands.md#recursive-commands
+[_TypeList_]: ../types.md
