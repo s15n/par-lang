@@ -11,7 +11,7 @@ use indexmap::IndexMap;
 use winnow::{
     combinator::{
         alt, cut_err, delimited, empty, fail, not, opt, peek, preceded, repeat, separated, seq,
-        terminated, todo, trace,
+        terminated, trace,
     },
     error::{ContextError, ErrMode, ModalError, ParserError, StrContext},
     stream::{Accumulate, Compare, Range, Stream, StreamIsPartial},

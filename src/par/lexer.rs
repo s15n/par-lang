@@ -206,7 +206,7 @@ where
                 let raw = any::<&str, Error>.take().parse_next(input)?;
                 Some((raw, TokenKind::Quest))
             }
-            _ => return Err(ParserError::from_input(dbg!(input))),
+            _ => return Err(ParserError::from_input(input)),
         }) else {
             idx += 1;
             continue;
