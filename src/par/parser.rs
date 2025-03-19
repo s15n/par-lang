@@ -154,9 +154,27 @@ where
     E: ParserError<Input<'a>> + ModalError,
 {
     move |input: &mut Input<'a>| -> core::result::Result<(O, Loc), E> {
-        let tok: &Token<'_> = peek(any).parse_next(input)?;
+        let loc = match peek(any::<_, E>).parse_next(input) {
+            Ok(x) => x.loc.clone(),
+            Err(e) => {
+                let checkpoint = input.checkpoint();
+                input.reset_to_start();
+                let Some(last) = input.last() else {
+                    return Err(e);
+                };
+                let res = match last.loc {
+                    Loc::Code { line, column } => Loc::Code {
+                        line,
+                        column: column + 1,
+                    },
+                    Loc::External => Loc::External,
+                };
+                input.reset(&checkpoint);
+                res
+            }
+        };
         let out = parser.parse_next(input)?;
-        Ok((out, tok.loc.clone()))
+        Ok((out, loc))
     }
 }
 pub fn with_span<'a, O, E>(
@@ -627,7 +645,8 @@ fn cons_receive(input: &mut Input) -> Result<Construct<Loc, Name>> {
 }
 
 fn cons_choose(input: &mut Input) -> Result<Construct<Loc, Name>> {
-    with_loc(commit_after(t("."), (name, construction)))
+    // Note this can't be a commit_after because its possible that this is not a choose construction, and instead a branch of an either.
+    with_loc(preceded(t("."), (name, construction)))
         .map(|((chosen, construct), loc)| Construct::Choose(loc, chosen, Box::new(construct)))
         .parse_next(input)
 }
