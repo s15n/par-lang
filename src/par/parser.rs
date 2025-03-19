@@ -271,6 +271,27 @@ where
     terminated(separated(1.., item, t(",")), opt(t(",")))
 }
 
+fn either_body<'i, P, O>(
+    branch: P,
+) -> impl Parser<Input<'i>, IndexMap<Name, O>, Error> + use<'i, P, O>
+where
+    P: Parser<Input<'i>, O, Error>,
+{
+    commit_after(
+        t("{"),
+        terminated(
+            repeat(0.., (t("."), name, branch, opt(t(",")))).fold(
+                || IndexMap::new(),
+                |mut branches, (_, name, branch, _)| {
+                    branches.insert(name, branch);
+                    branches
+                },
+            ),
+            t("}"),
+        ),
+    )
+}
+
 fn typ(input: &mut Input) -> Result<Type<Loc, Name>> {
     // TODO, use `dispatch` to choose alternate based on peek prefix.
     // This should also help error messages.
@@ -334,40 +355,15 @@ fn typ_receive(input: &mut Input) -> Result<Type<Loc, Name>> {
 }
 
 fn typ_either(input: &mut Input) -> Result<Type<Loc, Name>> {
-    with_loc(commit_after(
-        t("either"),
-        (
-            t("{"),
-            repeat(0.., (t("."), name, typ, opt(t(",")))).fold(
-                || IndexMap::new(),
-                |mut branches, (_, name, typ, _)| {
-                    branches.insert(name, typ);
-                    branches
-                },
-            ),
-            t("}"),
-        ),
-    ))
-    .map(|((_, branches, _), span)| Type::Either(Loc::from(span), branches))
-    .parse_next(input)
+    with_loc(commit_after(t("either"), either_body(typ)))
+        .map(|(branches, span)| Type::Either(Loc::from(span), branches))
+        .parse_next(input)
 }
 
 fn typ_choice(input: &mut Input) -> Result<Type<Loc, Name>> {
-    with_loc(commit_after(
-        t("{"),
-        terminated(
-            repeat(0.., ((t(".")), name, typ_branch, opt(t(",")))).fold(
-                || IndexMap::new(),
-                |mut branches, (_, name, typ, _)| {
-                    branches.insert(name, typ);
-                    branches
-                },
-            ),
-            t("}"),
-        ),
-    ))
-    .map(|(branches, span)| Type::Choice(Loc::from(span), branches))
-    .parse_next(input)
+    with_loc(either_body(typ_branch))
+        .map(|(branches, span)| Type::Choice(Loc::from(span), branches))
+        .parse_next(input)
 }
 
 fn typ_break(input: &mut Input) -> Result<Type<Loc, Name>> {
@@ -643,21 +639,9 @@ fn cons_choose(input: &mut Input) -> Result<Construct<Loc, Name>> {
 }
 
 fn cons_either(input: &mut Input) -> Result<Construct<Loc, Name>> {
-    with_loc(commit_after(
-        t("{"),
-        (
-            repeat(0.., (t("."), name, cons_branch, opt(t(",")))).fold(
-                || IndexMap::new(),
-                |mut branches, (_, name, branch, _)| {
-                    branches.insert(name, branch);
-                    branches
-                },
-            ),
-            t("}"),
-        ),
-    ))
-    .map(|((branches, _), loc)| Construct::Either(loc, ConstructBranches(branches)))
-    .parse_next(input)
+    with_loc(either_body(cons_branch))
+        .map(|(branches, loc)| Construct::Either(loc, ConstructBranches(branches)))
+        .parse_next(input)
 }
 
 fn cons_break(input: &mut Input) -> Result<Construct<Loc, Name>> {
@@ -785,21 +769,9 @@ fn apply_choose(input: &mut Input) -> Result<Apply<Loc, Name>> {
 }
 
 fn apply_either(input: &mut Input) -> Result<Apply<Loc, Name>> {
-    with_loc(commit_after(
-        t("{"),
-        (
-            repeat(0.., (t("."), name, apply_branch, opt(t(",")))).fold(
-                || IndexMap::new(),
-                |mut branches, (_, name, branch, _)| {
-                    branches.insert(name, branch);
-                    branches
-                },
-            ),
-            t("}"),
-        ),
-    ))
-    .map(|((branches, _), loc)| Apply::Either(loc, ApplyBranches(branches)))
-    .parse_next(input)
+    with_loc(either_body(apply_branch))
+        .map(|(branches, loc)| Apply::Either(loc, ApplyBranches(branches)))
+        .parse_next(input)
 }
 
 fn apply_begin(input: &mut Input) -> Result<Apply<Loc, Name>> {
@@ -982,11 +954,11 @@ fn cmd_choose(input: &mut Input) -> Result<Command<Loc, Name>> {
 }
 
 fn cmd_either(input: &mut Input) -> Result<Command<Loc, Name>> {
-    with_loc(commit_after(
-        t("{"),
-        (cmd_branches, t("}"), opt(pass_process)),
+    with_loc((
+        either_body(cmd_branch).map(CommandBranches),
+        opt(pass_process),
     ))
-    .map(|((branches, _, pass_process), loc)| {
+    .map(|((branches, pass_process), loc)| {
         Command::Either(loc, branches, pass_process.map(Box::new))
     })
     .parse_next(input)
@@ -1040,19 +1012,6 @@ fn cmd_recv_type(input: &mut Input) -> Result<Command<Loc, Name>> {
 
 fn pass_process(input: &mut Input) -> Result<Process<Loc, Name>> {
     alt((proc_let, proc_pass, proc_telltypes, command)).parse_next(input)
-}
-
-fn cmd_branches(input: &mut Input) -> Result<CommandBranches<Loc, Name>> {
-    repeat(0.., (t("."), name, cmd_branch))
-        .fold(
-            || IndexMap::new(),
-            |mut branches, (_, name, branch)| {
-                branches.insert(name, branch);
-                branches
-            },
-        )
-        .map(CommandBranches)
-        .parse_next(input)
 }
 
 fn cmd_branch(input: &mut Input) -> Result<CommandBranch<Loc, Name>> {
