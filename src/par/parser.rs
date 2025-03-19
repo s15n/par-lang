@@ -1086,7 +1086,7 @@ mod test {
         assert_eq!(p.parse("ab,ab,ab,").unwrap(), vec!["ab", "ab", "ab"]);
         assert!(p.parse("ab,ab,ab,,").is_err());
         assert!(p.parse("ba").is_err());
-        let toks = lex::<Error>("ab_12,asd, asdf3").unwrap();
+        let toks = lex::<Error>("ab_12,asd, asdf3");
         let toks = Input::new(&toks);
         {
             assert_eq!(
@@ -1107,7 +1107,7 @@ mod test {
     }
     #[test]
     fn test_loop_label() {
-        let toks = lex::<Error>(":one").unwrap();
+        let toks = lex::<Error>(":one");
         let toks = Input::new(&toks);
         assert_eq!(
             with_span(loop_label).parse(toks).unwrap(),
@@ -1145,7 +1145,7 @@ mod test {
     #[test]
     fn test1() {
         let input = include_str!("../../examples/semigroup_queue.par");
-        let toks = lex::<Error>(input).unwrap();
+        let toks = lex::<Error>(input);
         let toks_slice = Input::new(&toks);
         let res = program(toks_slice);
         match res.clone() {

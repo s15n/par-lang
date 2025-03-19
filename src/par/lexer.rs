@@ -27,6 +27,7 @@ pub enum TokenKind {
     Bang,
     Quest,
     Link,
+    Unknown,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token<'i> {
@@ -60,6 +61,7 @@ impl From<TokenKind> for &'static str {
             TokenKind::RAngle => ">",
             TokenKind::Colon => ":",
             TokenKind::Ident => "",
+            TokenKind::Unknown => "",
             TokenKind::Comma => ",",
             TokenKind::Dot => ".",
             TokenKind::Arrow => "=>",
@@ -107,124 +109,130 @@ impl<'a, T: FromStr> ParseSlice<T> for &Token<'a> {
 pub type Tokens<'i> = TokenSlice<'i, Token<'i>>;
 pub type Input<'a> = Tokens<'a>;
 
-pub fn lex<'s, Error>(input: &'s str) -> Result<Vec<Token<'s>>, Error>
+pub fn lex<'s, Error>(input: &'s str) -> Vec<Token<'s>>
 where
     Error: ParserError<&'s str> + std::fmt::Debug,
 {
-    let mut input = input;
-    let input = &mut input;
-    let mut row = 0;
-    let mut last_newline = input.len();
-    let mut tokens = Vec::new();
-    let mut idx = 0;
-    while let Ok(c) = peek(any::<&str, Error>).parse_next(input) {
-        let column = last_newline - input.len(); // starting column
-        let Some((raw, kind)) = (match c {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '_' => {
-                let ident = take_while(
-                    0..,
-                    |c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_'),
-                )
-                .take()
-                .parse_next(input)?;
-                Some((ident, TokenKind::Ident))
-            }
-            '\n' => {
-                let _ = any::<&str, Error>.parse_next(input);
-                row += 1;
-                last_newline = input.len();
-                idx += 1;
-                None
-            }
-            ' ' | '\t' | '\r' => {
-                let _ = any::<&str, Error>.parse_next(input);
-                idx += 1;
-                None
-            }
-            ':' => {
-                let raw = any::<&str, Error>.take().parse_next(input)?;
-                Some((raw, TokenKind::Colon))
-            }
-            '[' => {
-                let raw = any::<&str, Error>.take().parse_next(input)?;
-                Some((raw, TokenKind::LBrack))
-            }
-            ']' => {
-                let raw = any::<&str, Error>.take().parse_next(input)?;
-                Some((raw, TokenKind::RBrack))
-            }
-            '(' => {
-                let raw = any::<&str, Error>.take().parse_next(input)?;
-                Some((raw, TokenKind::LParen))
-            }
-            ')' => {
-                let raw = any::<&str, Error>.take().parse_next(input)?;
-                Some((raw, TokenKind::RParen))
-            }
-            '{' => {
-                let raw = any::<&str, Error>.take().parse_next(input)?;
-                Some((raw, TokenKind::LCurly))
-            }
-            '}' => {
-                let raw = any::<&str, Error>.take().parse_next(input)?;
-                Some((raw, TokenKind::RCurly))
-            }
-            '<' => Some(
-                alt((
-                    "<>".map(|raw| (raw, TokenKind::Link)),
-                    "<".map(|raw| (raw, TokenKind::LAngle)),
-                ))
-                .parse_next(input)?,
-            ),
-            '>' => {
-                let raw = any::<&str, Error>.take().parse_next(input)?;
-                Some((raw, TokenKind::RAngle))
-            }
-            '/' => {
-                let raw = comment().parse_next(input)?;
-                idx += raw.len();
-                None
-            }
-            ',' => {
-                let raw = any::<&str, Error>.take().parse_next(input)?;
-                Some((raw, TokenKind::Comma))
-            }
-            '.' => {
-                let raw = any::<&str, Error>.take().parse_next(input)?;
-                Some((raw, TokenKind::Dot))
-            }
-            '=' => Some(
-                alt((
-                    ("=>").map(|raw| (raw, TokenKind::Arrow)),
-                    ("=").map(|raw| (raw, TokenKind::Equal)),
-                ))
-                .parse_next(input)?,
-            ),
-            '!' => {
-                let raw = any::<&str, Error>.take().parse_next(input)?;
-                Some((raw, TokenKind::Bang))
-            }
-            '?' => {
-                let raw = any::<&str, Error>.take().parse_next(input)?;
-                Some((raw, TokenKind::Quest))
-            }
-            _ => return Err(ParserError::from_input(input)),
-        }) else {
-            continue;
-        };
-        tokens.push(Token {
-            kind,
-            raw,
-            // one-based row/column
-            loc: Loc::Code {
-                line: row + 1,
-                column: column + 1,
-            },
-            span: idx..idx + raw.len(),
-        });
-        idx += raw.len();
-    }
-    Ok(tokens)
+    (|input: &'s str| -> Result<Vec<Token<'s>>, Error> {
+        let mut input = input;
+        let input = &mut input;
+        let mut row = 0;
+        let mut last_newline = input.len();
+        let mut tokens = Vec::new();
+        let mut idx = 0;
+        while let Ok(c) = peek(any::<&str, Error>).parse_next(input) {
+            let column = last_newline - input.len(); // starting column
+            let Some((raw, kind)) = (match c {
+                'a'..='z' | 'A'..='Z' | '0'..='9' | '_' => {
+                    let ident = take_while(
+                        0..,
+                        |c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_'),
+                    )
+                    .take()
+                    .parse_next(input)?;
+                    Some((ident, TokenKind::Ident))
+                }
+                '\n' => {
+                    let _ = any::<&str, Error>.parse_next(input);
+                    row += 1;
+                    last_newline = input.len();
+                    idx += 1;
+                    None
+                }
+                ' ' | '\t' | '\r' => {
+                    let _ = any::<&str, Error>.parse_next(input);
+                    idx += 1;
+                    None
+                }
+                ':' => {
+                    let raw = any::<&str, Error>.take().parse_next(input)?;
+                    Some((raw, TokenKind::Colon))
+                }
+                '[' => {
+                    let raw = any::<&str, Error>.take().parse_next(input)?;
+                    Some((raw, TokenKind::LBrack))
+                }
+                ']' => {
+                    let raw = any::<&str, Error>.take().parse_next(input)?;
+                    Some((raw, TokenKind::RBrack))
+                }
+                '(' => {
+                    let raw = any::<&str, Error>.take().parse_next(input)?;
+                    Some((raw, TokenKind::LParen))
+                }
+                ')' => {
+                    let raw = any::<&str, Error>.take().parse_next(input)?;
+                    Some((raw, TokenKind::RParen))
+                }
+                '{' => {
+                    let raw = any::<&str, Error>.take().parse_next(input)?;
+                    Some((raw, TokenKind::LCurly))
+                }
+                '}' => {
+                    let raw = any::<&str, Error>.take().parse_next(input)?;
+                    Some((raw, TokenKind::RCurly))
+                }
+                '<' => Some(
+                    alt((
+                        "<>".map(|raw| (raw, TokenKind::Link)),
+                        "<".map(|raw| (raw, TokenKind::LAngle)),
+                    ))
+                    .parse_next(input)?,
+                ),
+                '>' => {
+                    let raw = any::<&str, Error>.take().parse_next(input)?;
+                    Some((raw, TokenKind::RAngle))
+                }
+                '/' => {
+                    let raw = comment().parse_next(input)?;
+                    idx += raw.len();
+                    None
+                }
+                ',' => {
+                    let raw = any::<&str, Error>.take().parse_next(input)?;
+                    Some((raw, TokenKind::Comma))
+                }
+                '.' => {
+                    let raw = any::<&str, Error>.take().parse_next(input)?;
+                    Some((raw, TokenKind::Dot))
+                }
+                '=' => Some(
+                    alt((
+                        ("=>").map(|raw| (raw, TokenKind::Arrow)),
+                        ("=").map(|raw| (raw, TokenKind::Equal)),
+                    ))
+                    .parse_next(input)?,
+                ),
+                '!' => {
+                    let raw = any::<&str, Error>.take().parse_next(input)?;
+                    Some((raw, TokenKind::Bang))
+                }
+                '?' => {
+                    let raw = any::<&str, Error>.take().parse_next(input)?;
+                    Some((raw, TokenKind::Quest))
+                }
+                _ => {
+                    let raw = any::<&str, Error>.take().parse_next(input)?;
+                    Some((raw, TokenKind::Unknown))
+                }
+            }) else {
+                continue;
+            };
+            tokens.push(Token {
+                kind,
+                raw,
+                // one-based row/column
+                loc: Loc::Code {
+                    line: row + 1,
+                    column: column + 1,
+                },
+                span: idx..idx + raw.len(),
+            });
+            idx += raw.len();
+        }
+        Ok(tokens)
+    })(input)
+    .expect("lexing failed")
 }
 
 #[cfg(test)]
@@ -236,10 +244,8 @@ mod test {
     fn tok() {
         let tokens = lex::<Error>(&mut "({[< ><>]}):abc_123: a\nab");
         assert_eq!(
-            tokens
-                .as_ref()
-                .map(|x| x.into_iter().map(|x| x.kind).collect()),
-            Ok(vec![
+            tokens.iter().map(|x| x.kind).collect::<Vec<_>>(),
+            vec![
                 TokenKind::LParen,
                 TokenKind::LCurly,
                 TokenKind::LBrack,
@@ -254,7 +260,7 @@ mod test {
                 TokenKind::Colon,
                 TokenKind::Ident,
                 TokenKind::Ident,
-            ])
+            ]
         );
         eprintln!("{:#?}", tokens);
     }
