@@ -15,7 +15,7 @@ use std::{
         Arc, Mutex,
     },
 };
-
+use crate::icombs::compiler::multiplex_trees;
 use crate::par::{
     language::Internal,
     parse::Loc,
@@ -323,41 +323,52 @@ impl SharedState {
         }
         .boxed()
     }
+    fn choice_instance(ctx_out: Tree, cases: Vec<(Tree, Tree)>) -> Tree {
+        Tree::c(
+            ctx_out,
+            multiplex_trees(cases.into_iter().map(|(a, b)| Tree::c(a, b)).collect()),
+        )
+    }
+    fn tree_to_num(tree: Tree) -> usize {
+        match tree {
+            Tree::Era => 1,
+            Tree::Con(a, b) => {
+                let a = Self::tree_to_num(*a);
+                let b = Self::tree_to_num(*b);
+                a + b
+            },
+            _ => unreachable!(),
+        }
+    }
     pub async fn as_either(&self, tree: Tree, variants: Vec<Name>) -> (Name, Tree) {
         // TODO: This as_either function is weaker than it should be
-        // It will not detect some invalid Either instances, where the context wires are plugged in incorrectly
-        let (context, possibilities) = self.as_con(tree).await;
-        let ctx_fut = async move {
-            // we do a strict read of the context to ensure there's a readback node plugged in to the other side
-            self.read_era(context).await;
-        }
-        .boxed();
-        let possibilities = self
-            .flatten_multiplexed(possibilities, variants.len())
-            .await;
-        let payload_fut = possibilities
-            .into_iter()
-            .zip(variants)
-            .map(|(possible, name)| {
-                async move {
-                    if let Err(e) = self.read_era(possible).await {
-                        let (_, payload) = self.as_con(e).await;
-                        Some((name, payload))
-                    } else {
-                        None
-                    }
+
+        let mut branches = vec![];
+        let (ctx0,ctx1) = {
+        let mut net = self.shared.net.lock().unwrap();
+            let (ctx0, ctx1) = net.create_wire();
+            for i in 0..variants.len() {
+                let (v0, v1) = net.create_wire();
+                let mut erasers = vec![];
+                for _ in 0..(i+1){
+                    erasers.push(Tree::e());
                 }
-                .boxed()
-            })
-            .collect::<FuturesUnordered<_>>()
-            .collect::<Vec<_>>();
-        let (_, payload) = join(ctx_fut, payload_fut).await;
-        for i in payload {
-            if let Some(i) = i {
-                return i;
+                branches.push((Tree::c(v0, multiplex_trees(erasers)), v1));
             }
+            (ctx0, ctx1)
+        };
+
+        let t = Self::choice_instance(ctx0, branches);
+        self.add_redex(tree, t).await;
+        let tree = self.read_port_as_tree(ctx1).await;
+        if let Tree::Con(payload, era_variant) = tree {
+            let variant = Self::tree_to_num(*era_variant)-1;
+            assert!(variant < variants.len());
+            let name = variants[variant].clone();
+            (name, *payload)
+        } else {
+            unreachable!()
         }
-        todo!("Couldn't read -either-; all variants were erasers")
     }
     pub async fn as_choice<Name>(
         &self,
