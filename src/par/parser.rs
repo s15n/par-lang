@@ -10,8 +10,8 @@ use super::{
 use indexmap::IndexMap;
 use winnow::{
     combinator::{
-        alt, cut_err, delimited, empty, not, opt, peek, preceded, repeat, separated, terminated,
-        trace,
+        alt, cut_err, delimited, empty, eof, not, opt, peek, preceded, repeat, separated,
+        terminated, trace,
     },
     error::{
         AddContext, ContextError, ErrMode, ModalError, ParserError, StrContext, StrContextValue,
@@ -215,10 +215,11 @@ pub fn program(
     Program<Name, Expression<Loc, Name>>,
     winnow::error::ParseError<Input, Error_>,
 > {
-    enum Either<A, B, C> {
+    enum Either<A, B, C, D> {
         A(A),
         B(B),
         C(C),
+        D(D),
     }
 
     repeat(
@@ -227,6 +228,14 @@ pub fn program(
             type_def.map(Either::A),
             declaration.map(Either::B),
             definition.map(Either::C),
+            cut_err(eof)
+                .context(StrContext::Expected(StrContextValue::StringLiteral("type")))
+                .context(StrContext::Expected(StrContextValue::StringLiteral("dec")))
+                .context(StrContext::Expected(StrContextValue::StringLiteral("def")))
+                .context(StrContext::Expected(StrContextValue::Description(
+                    "end of file",
+                )))
+                .map(Either::D),
         ))
         .context(StrContext::Label("item")),
     )
@@ -245,6 +254,7 @@ pub fn program(
                 acc.declarations.entry(name.clone()).or_insert(None);
                 acc.definitions.insert(name, expression);
             }
+            Either::D(_) => (),
         };
         acc
     })
@@ -283,7 +293,7 @@ where
     terminated(separated(1.., item, t(",")), opt(t(",")))
 }
 
-fn either_body<'i, P, O>(
+fn branches_body<'i, P, O>(
     branch: P,
 ) -> impl Parser<Input<'i>, IndexMap<Name, O>, Error> + use<'i, P, O>
 where
@@ -302,6 +312,7 @@ where
             t("}"),
         ),
     )
+    .context(StrContext::Label("either/choice branches"))
 }
 
 fn typ(input: &mut Input) -> Result<Type<Loc, Name>> {
@@ -367,13 +378,13 @@ fn typ_receive(input: &mut Input) -> Result<Type<Loc, Name>> {
 }
 
 fn typ_either(input: &mut Input) -> Result<Type<Loc, Name>> {
-    with_loc(commit_after(t("either"), either_body(typ)))
+    with_loc(commit_after(t("either"), branches_body(typ)))
         .map(|(branches, span)| Type::Either(Loc::from(span), branches))
         .parse_next(input)
 }
 
 fn typ_choice(input: &mut Input) -> Result<Type<Loc, Name>> {
-    with_loc(either_body(typ_branch))
+    with_loc(branches_body(typ_branch))
         .map(|(branches, span)| Type::Choice(Loc::from(span), branches))
         .parse_next(input)
 }
@@ -652,7 +663,7 @@ fn cons_choose(input: &mut Input) -> Result<Construct<Loc, Name>> {
 }
 
 fn cons_either(input: &mut Input) -> Result<Construct<Loc, Name>> {
-    with_loc(either_body(cons_branch))
+    with_loc(branches_body(cons_branch))
         .map(|(branches, loc)| Construct::Either(loc, ConstructBranches(branches)))
         .parse_next(input)
 }
@@ -782,7 +793,7 @@ fn apply_choose(input: &mut Input) -> Result<Apply<Loc, Name>> {
 }
 
 fn apply_either(input: &mut Input) -> Result<Apply<Loc, Name>> {
-    with_loc(either_body(apply_branch))
+    with_loc(branches_body(apply_branch))
         .map(|(branches, loc)| Apply::Either(loc, ApplyBranches(branches)))
         .parse_next(input)
 }
@@ -962,7 +973,7 @@ fn cmd_choose(input: &mut Input) -> Result<Command<Loc, Name>> {
 
 fn cmd_either(input: &mut Input) -> Result<Command<Loc, Name>> {
     with_loc((
-        either_body(cmd_branch).map(CommandBranches),
+        branches_body(cmd_branch).map(CommandBranches),
         opt(pass_process),
     ))
     .map(|((branches, pass_process), loc)| {
