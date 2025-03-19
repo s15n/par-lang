@@ -133,10 +133,12 @@ where
                 let _ = any::<&str, Error>.parse_next(input);
                 row += 1;
                 last_newline = input.len();
+                idx += 1;
                 None
             }
             ' ' | '\t' | '\r' => {
                 let _ = any::<&str, Error>.parse_next(input);
+                idx += 1;
                 None
             }
             ':' => {
@@ -179,7 +181,8 @@ where
                 Some((raw, TokenKind::RAngle))
             }
             '/' => {
-                let _ = comment().parse_next(input)?;
+                let raw = comment().parse_next(input)?;
+                idx += raw.len();
                 None
             }
             ',' => {
@@ -207,7 +210,6 @@ where
             }
             _ => return Err(ParserError::from_input(input)),
         }) else {
-            idx += 1;
             continue;
         };
         tokens.push(Token {
