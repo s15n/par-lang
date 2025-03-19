@@ -133,7 +133,7 @@ impl Tree {
     }
 }
 
-fn multiplex_trees(mut trees: Vec<Tree>) -> Tree {
+pub(crate) fn multiplex_trees(mut trees: Vec<Tree>) -> Tree {
     if trees.len() == 0 {
         Tree::e()
     } else if trees.len() == 1 {
