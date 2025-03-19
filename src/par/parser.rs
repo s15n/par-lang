@@ -49,7 +49,6 @@ impl<I: Stream, C: core::fmt::Debug> ParserError<I> for MyError<C> {
         self
     }
     fn or(mut self, other: Self) -> Self {
-        // dbg!(&self.context, &other.context);
         self.context.extend(other.context);
         self
     }

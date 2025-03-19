@@ -250,6 +250,6 @@ mod test {
                 TokenKind::Ident,
             ])
         );
-        _ = dbg!(tokens);
+        eprintln!("{:#?}", tokens);
     }
 }
