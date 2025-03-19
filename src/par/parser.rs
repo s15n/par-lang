@@ -1076,7 +1076,7 @@ fn loop_label<'s>(input: &mut Input<'s>) -> Result<Option<Name>> {
 mod test {
     use super::*;
     use crate::par::lexer::lex;
-    use miette::{Diagnostic, SourceOffset, SourceSpan};
+    use miette::{SourceOffset, SourceSpan};
 
     #[test]
     fn test_list() {
@@ -1122,25 +1122,25 @@ mod test {
 
     #[derive(Debug, miette::Diagnostic)]
     #[diagnostic(code(oops::my::bad), url(docsrs), severity(Error))]
-    struct MieteError<'s> {
+    struct SyntaxError<'s> {
         // #[diagnostic_source]
         // e: Error,
         #[source_code]
         source: &'s str,
-        #[label("this bit here")]
+        #[label("here")]
         span: SourceSpan,
         // can generate these with the miette! macro.
         #[related]
         related: Vec<miette::ErrReport>,
         #[help]
-        help: &'s str,
+        help: String,
     }
-    impl<'s> core::fmt::Display for MieteError<'s> {
+    impl<'s> core::fmt::Display for SyntaxError<'s> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            core::fmt::Debug::fmt(&self, f)
+            "Syntax Error".fmt(f)
         }
     }
-    impl<'s> core::error::Error for MieteError<'s> {}
+    impl<'s> core::error::Error for SyntaxError<'s> {}
 
     #[test]
     fn test1() {
@@ -1175,19 +1175,25 @@ mod test {
                 // )
                 /* .with_source_code("this other su") */
                 let error_tok = toks.get(e.offset()).unwrap_or(toks.last().unwrap()).clone();
-                let err = miette::Report::from(MieteError {
+                let err = miette::Report::from(SyntaxError {
                     source: input,
                     span: SourceSpan::new(
                         SourceOffset::from(error_tok.span.start),
                         error_tok.span.len(),
                     ),
                     related: vec![],
-                    help: "this is the help",
+                    help: e
+                        .inner()
+                        .context
+                        .iter()
+                        .map(|x| x.1.to_string().chars().chain(['\n']).collect::<String>())
+                        .collect::<String>(),
                 });
                 eprintln!("{err:?}");
                 // eprintln!("{:?}", e.into_inner().context().collect::<Vec<_>>());
                 eprintln!("old: {:?}", crate::par::parse::parse_program(input));
-                eprintln!("new: {:?}", e.into_inner());
+                eprintln!("\n---\n");
+                eprintln!("new: {:?}", e.into_inner().context);
             }
         }
     }
