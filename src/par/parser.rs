@@ -140,7 +140,6 @@ where
         "let",
         "do",
         "in",
-        "pass",
         "begin",
         "loop",
         "telltypes",
@@ -853,7 +852,7 @@ fn apply_branch_recv_type(input: &mut Input) -> Result<ApplyBranch<Loc, Name>> {
 }
 
 fn process(input: &mut Input) -> Result<Process<Loc, Name>> {
-    alt((proc_let, proc_pass, proc_telltypes, command, proc_noop))
+    alt((proc_let, proc_telltypes, command, proc_noop))
         .context(StrContext::Label("process"))
         .parse_next(input)
 }
@@ -867,12 +866,6 @@ fn proc_let(input: &mut Input) -> Result<Process<Loc, Name>> {
         Process::Let(loc, pattern, Box::new(expression), Box::new(process))
     })
     .parse_next(input)
-}
-
-fn proc_pass(input: &mut Input) -> Result<Process<Loc, Name>> {
-    with_loc(t("pass"))
-        .map(|(_, loc)| Process::Pass(loc))
-        .parse_next(input)
 }
 
 fn proc_telltypes(input: &mut Input) -> Result<Process<Loc, Name>> {
@@ -1010,7 +1003,7 @@ fn cmd_recv_type(input: &mut Input) -> Result<Command<Loc, Name>> {
 }
 
 fn pass_process(input: &mut Input) -> Result<Process<Loc, Name>> {
-    alt((proc_let, proc_pass, proc_telltypes, command)).parse_next(input)
+    alt((proc_let, proc_telltypes, command)).parse_next(input)
 }
 
 fn cmd_branch(input: &mut Input) -> Result<CommandBranch<Loc, Name>> {
