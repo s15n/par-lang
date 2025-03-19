@@ -92,11 +92,7 @@ where
     I: Stream + StreamIsPartial + for<'s> Compare<&'s str>,
     E: AddContext<I, StrContext> + ParserError<I>,
 {
-    move |input: &mut I| {
-        token
-            .context(StrContext::Expected(StrContextValue::StringLiteral(token)))
-            .parse_next(input)
-    }
+    token.context(StrContext::Expected(StrContextValue::StringLiteral(token)))
 }
 
 /// Like regular `preceded` but cuts if `parser` after `ignored` fails, assuming that it should be unambiguous.
