@@ -316,7 +316,7 @@ fn typ_chan(input: &mut Input) -> Result<Type<Loc, Name>> {
 fn typ_send(input: &mut Input) -> Result<Type<Loc, Name>> {
     with_loc(commit_after(t("("), (terminated(list(typ), t(")")), typ)))
         .map(|((args, then), span)| {
-            args.into_iter().rev().fold(then, |arg, then| {
+            args.into_iter().rev().fold(then, |then, arg| {
                 Type::Send(Loc::from(span.clone()), Box::new(arg), Box::new(then))
             })
         })
@@ -326,7 +326,7 @@ fn typ_send(input: &mut Input) -> Result<Type<Loc, Name>> {
 fn typ_receive(input: &mut Input) -> Result<Type<Loc, Name>> {
     with_loc(commit_after(t("["), (terminated(list(typ), t("]")), typ)))
         .map(|((args, then), span)| {
-            args.into_iter().rev().fold(then, |arg, then| {
+            args.into_iter().rev().fold(then, |then, arg| {
                 Type::Receive(Loc::from(span.clone()), Box::new(arg), Box::new(then))
             })
         })
