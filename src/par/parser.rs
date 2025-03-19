@@ -3,15 +3,16 @@ use super::{
         Apply, ApplyBranch, ApplyBranches, Command, CommandBranch, CommandBranches, Construct,
         ConstructBranch, ConstructBranches, Expression, Pattern, Process,
     },
-    lexer::{Input, Token, TokenKind},
+    lexer::{lex, Input, Token, TokenKind},
     parse::{Loc, Name, Program},
     types::Type,
 };
 use indexmap::IndexMap;
+use miette::{SourceOffset, SourceSpan};
 use winnow::{
     combinator::{
-        alt, cut_err, delimited, empty, eof, not, opt, peek, preceded, repeat, separated,
-        terminated, trace,
+        alt, cut_err, delimited, empty, not, opt, peek, preceded, repeat, separated, terminated,
+        trace,
     },
     error::{
         AddContext, ContextError, ErrMode, ModalError, ParserError, StrContext, StrContextValue,
@@ -87,7 +88,7 @@ impl<I: Stream, C> AddContext<I, C> for MyError<C> {
 pub type Result<O, E = MyError> = core::result::Result<O, ErrMode<E>>;
 
 /// Token with additional context of expecting the `token` value
-pub fn t<'i, I, E>(token: &'static str) -> impl Parser<I, I::Slice, E>
+fn t<'i, I, E>(token: &'static str) -> impl Parser<I, I::Slice, E>
 where
     I: Stream + StreamIsPartial + for<'s> Compare<&'s str>,
     E: AddContext<I, StrContext> + ParserError<I>,
@@ -96,7 +97,7 @@ where
 }
 
 /// Like regular `preceded` but cuts if `parser` after `ignored` fails, assuming that it should be unambiguous.
-pub fn commit_after<Input, Ignored, Output, Error, IgnoredParser, ParseNext>(
+fn commit_after<Input, Ignored, Output, Error, IgnoredParser, ParseNext>(
     mut ignored: IgnoredParser,
     parser: ParseNext,
 ) -> impl Parser<Input, Output, Error>
@@ -147,7 +148,7 @@ where
     .context(StrContext::Label("keyword"))
 }
 
-pub fn with_loc<'a, O, E>(
+fn with_loc<'a, O, E>(
     mut parser: impl Parser<Input<'a>, O, E>,
 ) -> impl Parser<Input<'a>, (O, Loc), E>
 where
@@ -177,7 +178,7 @@ where
         Ok((out, loc))
     }
 }
-pub fn with_span<'a, O, E>(
+fn with_span<'a, O, E>(
     mut parser: impl Parser<Input<'a>, O, E>,
 ) -> impl Parser<Input<'a>, (O, core::ops::Range<usize>), E>
 where
@@ -196,7 +197,7 @@ where
     }
 }
 
-pub fn name<'s>(input: &mut Input<'s>) -> Result<Name> {
+fn name<'s>(input: &mut Input<'s>) -> Result<Name> {
     preceded(not(keyword()), TokenKind::Ident.parse_to::<Name>())
         .context(StrContext::Expected(StrContextValue::CharLiteral('_')))
         .context(StrContext::Expected(StrContextValue::Description(
@@ -209,33 +210,33 @@ pub fn name<'s>(input: &mut Input<'s>) -> Result<Name> {
         .parse_next(input)
 }
 
-pub fn program(
-    input: Input,
-) -> std::result::Result<
-    Program<Name, Expression<Loc, Name>>,
-    winnow::error::ParseError<Input, Error_>,
-> {
-    enum Either<A, B, C, D> {
+struct ProgramParseError {
+    offset: usize,
+    error: Error_,
+}
+impl ProgramParseError {
+    fn offset(&self) -> usize {
+        self.offset
+    }
+    fn inner(&self) -> &Error_ {
+        &self.error
+    }
+}
+fn program(
+    mut input: Input,
+) -> std::result::Result<Program<Name, Expression<Loc, Name>>, ProgramParseError> {
+    enum Either<A, B, C> {
         A(A),
         B(B),
         C(C),
-        D(D),
     }
 
-    repeat(
+    let parser = repeat(
         0..,
         alt((
             type_def.map(Either::A),
             declaration.map(Either::B),
             definition.map(Either::C),
-            cut_err(eof)
-                .context(StrContext::Expected(StrContextValue::StringLiteral("type")))
-                .context(StrContext::Expected(StrContextValue::StringLiteral("dec")))
-                .context(StrContext::Expected(StrContextValue::StringLiteral("def")))
-                .context(StrContext::Expected(StrContextValue::Description(
-                    "end of file",
-                )))
-                .map(Either::D),
         ))
         .context(StrContext::Label("item")),
     )
@@ -254,30 +255,133 @@ pub fn program(
                 acc.declarations.entry(name.clone()).or_insert(None);
                 acc.definitions.insert(name, expression);
             }
-            Either::D(_) => (),
         };
         acc
-    })
-    .parse(input)
+    });
+
+    let start = input.checkpoint();
+    (
+        parser,
+        winnow::combinator::eof
+            .context(StrContext::Expected(StrContextValue::StringLiteral("type")))
+            .context(StrContext::Expected(StrContextValue::StringLiteral("dec")))
+            .context(StrContext::Expected(StrContextValue::StringLiteral("def")))
+            .context(StrContext::Expected(StrContextValue::Description(
+                "end of file",
+            ))),
+    )
+        .parse_next(&mut input)
+        .map(|(x, _)| x)
+        .map_err(|e| {
+            let e = e.into_inner().unwrap_or_else(|_err| {
+                panic!("complete parsers should not report `ErrMode::Incomplete(_)`")
+            });
+
+            ProgramParseError {
+                offset: winnow::stream::Offset::offset_from(&input, &start),
+                error: ParserError::append(e, &input, &start),
+            }
+        })
 }
 
-pub fn type_def(input: &mut Input) -> Result<(Name, (Vec<Name>, Type<Loc, Name>))> {
+#[derive(Debug, miette::Diagnostic)]
+#[diagnostic(severity(Error))]
+pub struct SyntaxError {
+    #[source_code]
+    source: String,
+    #[label]
+    span: SourceSpan,
+    // Generate these with the miette! macro.
+    #[related]
+    related: Vec<miette::ErrReport>,
+    #[help]
+    help: String,
+}
+impl core::fmt::Display for SyntaxError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        "Syntax error".fmt(f)
+    }
+}
+impl core::error::Error for SyntaxError {}
+
+pub fn set_miette_hook() {
+    miette::set_hook(Box::new(|_| {
+        Box::new(
+            miette::MietteHandlerOpts::new()
+                .terminal_links(true)
+                .unicode(true)
+                .color(false)
+                // .context_lines(1)
+                // .with_cause_chain()
+                .build(),
+        )
+    }))
+    .unwrap();
+}
+
+pub fn parse_program(
+    input: String,
+) -> std::result::Result<Program<Name, Expression<Loc, Name>>, miette::Report> {
+    let toks = lex(&input);
+    let e = match program(Input::new(&toks)) {
+        Ok(x) => return Ok(x),
+        Err(e) => e,
+    };
+    // Empty input doesn't error so this won't panic.
+    let error_tok = toks.get(e.offset()).unwrap_or(toks.last().unwrap()).clone();
+    Err(miette::Report::from(SyntaxError {
+        span: SourceSpan::new(SourceOffset::from(error_tok.span.start), {
+            match error_tok.span.len() {
+                // miette unicode format for 1 length span is a hard-to-notice line, so don't set length to 1.
+                x if x == 1 => 0,
+                x => x,
+            }
+        }),
+        related: {
+            let crate::par::parse::ParseError {
+                msg,
+                location: Loc::Code { line, column },
+            } = (match crate::par::parse::parse_program(&input) {
+                Ok(_) => unreachable!("pest parser didn't error but combinator parser did"),
+                Err(e) => e,
+            })
+            else {
+                unreachable!("parse error location not `Code`")
+            };
+            vec![miette::miette!(
+                labels = vec![miette::LabeledSpan::new_with_span(
+                    None,
+                    SourceOffset::from_location(&input, line, column)
+                )],
+                help = msg,
+                "pest error"
+            )]
+        },
+        help: e
+            .inner()
+            .context
+            .iter()
+            .map(|x| x.1.to_string().chars().chain(['\n']).collect::<String>())
+            .collect::<String>(),
+        source: input,
+    }))
+}
+
+fn type_def(input: &mut Input) -> Result<(Name, (Vec<Name>, Type<Loc, Name>))> {
     commit_after(t("type"), (name, type_params, t("="), typ))
         .map(|(name, type_params, _, typ)| (name, (type_params, typ)))
         .context(StrContext::Label("type definition"))
         .parse_next(input)
 }
 
-pub fn declaration(input: &mut Input) -> Result<(Name, Type<Loc, Name>)> {
+fn declaration(input: &mut Input) -> Result<(Name, Type<Loc, Name>)> {
     commit_after(t("dec"), (name, t(":"), typ))
         .map(|(name, _, typ)| (name, typ))
         .context(StrContext::Label("declaration"))
         .parse_next(input)
 }
 
-pub fn definition(
-    input: &mut Input,
-) -> Result<(Name, Option<Type<Loc, Name>>, Expression<Loc, Name>)> {
+fn definition(input: &mut Input) -> Result<(Name, Option<Type<Loc, Name>>, Expression<Loc, Name>)> {
     commit_after(t("def"), (name, annotation, t("="), expression))
         .map(|(name, annotation, _, expression)| (name, annotation, expression))
         .context(StrContext::Label("definition"))
@@ -1097,7 +1201,7 @@ mod test {
         assert_eq!(p.parse("ab,ab,ab,").unwrap(), vec!["ab", "ab", "ab"]);
         assert!(p.parse("ab,ab,ab,,").is_err());
         assert!(p.parse("ba").is_err());
-        let toks = lex::<Error>("ab_12,asd, asdf3");
+        let toks = lex("ab_12,asd, asdf3");
         let toks = Input::new(&toks);
         {
             assert_eq!(
@@ -1118,7 +1222,7 @@ mod test {
     }
     #[test]
     fn test_loop_label() {
-        let toks = lex::<Error>(":one");
+        let toks = lex(":one");
         let toks = Input::new(&toks);
         assert_eq!(
             with_span(loop_label).parse(toks).unwrap(),
@@ -1131,35 +1235,11 @@ mod test {
         );
     }
 
-    #[derive(Debug, miette::Diagnostic)]
-    #[diagnostic(severity(Error))]
-    struct SyntaxError<'s> {
-        // #[diagnostic_source]
-        // e: Error,
-        #[source_code]
-        source: &'s str,
-        #[label]
-        span: SourceSpan,
-        // can generate these with the miette! macro.
-        #[related]
-        related: Vec<miette::ErrReport>,
-        #[help]
-        help: String,
-    }
-    impl<'s> core::fmt::Display for SyntaxError<'s> {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            "Syntax Error".fmt(f)
-        }
-    }
-    impl<'s> core::error::Error for SyntaxError<'s> {}
-
     #[test]
     fn test1() {
-        let input = include_str!("../../examples/semigroup_queue.par");
-        let toks = lex::<Error>(input);
-        let toks_slice = Input::new(&toks);
-        let res = program(toks_slice);
-        match res.clone() {
+        let input = include_str!("../../examples/sample.par");
+        let res = parse_program(input.to_owned());
+        match res {
             Ok(new) => {
                 let old = crate::par::parse::parse_program(input).unwrap();
                 eprintln!("old: {:?}", old);
@@ -1168,60 +1248,8 @@ mod test {
                 // assert_eq!(format!("{:?}", old), format!("{:?}", new))
             }
             Err(e) => {
-                miette::set_hook(Box::new(|_| {
-                    Box::new(
-                        miette::MietteHandlerOpts::new()
-                            .terminal_links(true)
-                            .unicode(false)
-                            // .context_lines(1)
-                            // .with_cause_chain()
-                            .build(),
-                    )
-                }))
-                .unwrap();
-                // let diagnostic = miette::miette!(
-                //     labels = vec![miette::LabeledSpan::at_offset(e.offset(), "here")],
-                //     severity = miette::Severity::Advice,
-                //     "msg"
-                // )
-                /* .with_source_code("this other su") */
-                let error_tok = toks.get(e.offset()).unwrap_or(toks.last().unwrap()).clone();
-                let err = miette::Report::from(SyntaxError {
-                    source: input,
-                    span: SourceSpan::new(
-                        SourceOffset::from(error_tok.span.start),
-                        error_tok.span.len(),
-                    ),
-                    related: {
-                        let ParseError {
-                            msg,
-                            location: Loc::Code { line, column },
-                        } = (match crate::par::parse::parse_program(input) {
-                            Ok(_) => panic!(),
-                            Err(e) => e,
-                        })
-                        else {
-                            panic!()
-                        };
-                        vec![miette::miette!(
-                            labels = vec![miette::LabeledSpan::new_with_span(
-                                None,
-                                SourceOffset::from_location(input, line, column)
-                            )],
-                            "pest error: {}",
-                            msg
-                        )]
-                    },
-                    help: e
-                        .inner()
-                        .context
-                        .iter()
-                        .map(|x| x.1.to_string().chars().chain(['\n']).collect::<String>())
-                        .collect::<String>(),
-                });
-                eprintln!("{err:?}");
-                eprintln!("\n---\n");
-                eprintln!("raw context: {:?}", e.into_inner().context);
+                set_miette_hook();
+                eprintln!("{e:?}");
             }
         }
     }

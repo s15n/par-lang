@@ -2,7 +2,7 @@ use super::{parse::Loc, parser::comment};
 use core::{ops::Range, str::FromStr};
 use winnow::{
     combinator::{alt, peek},
-    error::ParserError,
+    error::{EmptyError, ParserError},
     stream::{ParseSlice, TokenSlice},
     token::{any, literal, take_while},
     Parser, Result,
@@ -109,10 +109,8 @@ impl<'a, T: FromStr> ParseSlice<T> for &Token<'a> {
 pub type Tokens<'i> = TokenSlice<'i, Token<'i>>;
 pub type Input<'a> = Tokens<'a>;
 
-pub fn lex<'s, Error>(input: &'s str) -> Vec<Token<'s>>
-where
-    Error: ParserError<&'s str> + std::fmt::Debug,
-{
+pub fn lex<'s>(input: &'s str) -> Vec<Token<'s>> {
+    type Error = EmptyError;
     (|input: &'s str| -> Result<Vec<Token<'s>>, Error> {
         let mut input = input;
         let input = &mut input;
@@ -238,11 +236,10 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use winnow::error::ContextError as Error;
 
     #[test]
     fn tok() {
-        let tokens = lex::<Error>(&mut "({[< ><>]}):abc_123: a\nab");
+        let tokens = lex(&mut "({[< ><>]}):abc_123: a\nab");
         assert_eq!(
             tokens.iter().map(|x| x.kind).collect::<Vec<_>>(),
             vec![

@@ -14,7 +14,8 @@ use crate::{
     interact::{Event, Handle, Request},
     par::{
         language::{CompileError, Internal},
-        parse::{parse_program, Loc, Name, ParseError, Program},
+        parse::{Loc, Name, Program},
+        parser::parse_program,
         process::Expression,
         runtime::{self, Context, Operation},
         types::{self, Type, TypeError},
@@ -41,8 +42,8 @@ pub(crate) struct Compiled {
 
 impl Compiled {
     pub(crate) fn from_string(source: &str) -> Result<Compiled, Error> {
-        parse_program(source)
-            .map_err(|error| Error::Parse(error))
+        parse_program(source.to_owned())
+            .map_err(Error::Parse)
             .and_then(|program| {
                 let type_defs = program
                     .type_defs
@@ -166,9 +167,9 @@ impl Checked {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) enum Error {
-    Parse(ParseError),
+    Parse(miette::Report),
     Compile(CompileError<Loc>),
     Type(TypeError<Loc, Internal<Name>>),
     Runtime(runtime::Error<Loc, Internal<Name>>),
@@ -581,11 +582,8 @@ impl Error {
     pub fn display(&self, code: &str) -> String {
         match self {
             Self::Parse(error) => {
-                format!(
-                    "{}\nSyntax error: {}.",
-                    Self::display_loc(code, &error.location),
-                    error.msg
-                )
+                // Show syntax error with miette's formatting
+                format!("{error:?}")
             }
 
             Self::Compile(CompileError::PassNotPossible(loc)) => {
