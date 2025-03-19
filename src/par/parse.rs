@@ -48,17 +48,6 @@ impl<'a> From<&'a Pair<'a, Rule>> for Loc {
         Loc::Code { line, column }
     }
 }
-impl From<core::ops::Range<usize>> for Loc {
-    fn from(range: core::ops::Range<usize>) -> Self {
-        // TODO obviously wrong.
-        // The better way to handle spans is to lex with span info and then parse the output token
-        // This is just here to get the parser working to see what it looks like.
-        Loc::Code {
-            line: range.start,
-            column: range.end,
-        }
-    }
-}
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Name {
