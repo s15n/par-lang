@@ -1068,22 +1068,22 @@ fn loop_label<'s>(input: &mut Input<'s>) -> Result<Option<Name>> {
 mod test {
     use super::*;
     use crate::par::lexer::lex;
-    use winnow::stream::TokenSlice;
+    use miette::{Diagnostic, SourceOffset, SourceSpan};
 
     #[test]
     fn test_list() {
         let mut p = list("ab");
-        assert_eq!(p.parse("ab"), Ok(vec!["ab"]));
-        assert_eq!(p.parse("ab,ab,ab"), Ok(vec!["ab", "ab", "ab"]));
-        assert_eq!(p.parse("ab,ab,ab,"), Ok(vec!["ab", "ab", "ab"]));
+        assert_eq!(p.parse("ab").unwrap(), vec!["ab"]);
+        assert_eq!(p.parse("ab,ab,ab").unwrap(), vec!["ab", "ab", "ab"]);
+        assert_eq!(p.parse("ab,ab,ab,").unwrap(), vec!["ab", "ab", "ab"]);
         assert!(p.parse("ab,ab,ab,,").is_err());
         assert!(p.parse("ba").is_err());
         let toks = lex::<Error>("ab_12,asd, asdf3").unwrap();
-        let toks = TokenSlice::new(&toks);
+        let toks = Input::new(&toks);
         {
             assert_eq!(
-                list(name).parse(toks),
-                Ok(vec![
+                list(name).parse(toks).unwrap(),
+                vec![
                     Name {
                         string: "ab_12".to_owned()
                     },
@@ -1093,34 +1093,93 @@ mod test {
                     Name {
                         string: "asdf3".to_owned()
                     }
-                ])
+                ]
             );
         }
     }
     #[test]
     fn test_loop_label() {
         let toks = lex::<Error>(":one").unwrap();
-        let toks = TokenSlice::new(&toks);
+        let toks = Input::new(&toks);
         assert_eq!(
-            with_span(loop_label).parse(toks),
-            Ok((
+            with_span(loop_label).parse(toks).unwrap(),
+            (
                 Some(Name {
                     string: "one".to_owned()
                 }),
                 0..4
-            ))
+            )
         );
     }
 
+    #[derive(Debug, miette::Diagnostic)]
+    #[diagnostic(code(oops::my::bad), url(docsrs), severity(Error))]
+    struct MieteError<'s> {
+        // #[diagnostic_source]
+        // e: Error,
+        #[source_code]
+        source: &'s str,
+        #[label("this bit here")]
+        span: SourceSpan,
+        // can generate these with the miette! macro.
+        #[related]
+        related: Vec<miette::ErrReport>,
+        #[help]
+        help: &'s str,
+    }
+    impl<'s> core::fmt::Display for MieteError<'s> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            core::fmt::Debug::fmt(&self, f)
+        }
+    }
+    impl<'s> core::error::Error for MieteError<'s> {}
+
     #[test]
-    fn t() {
-        let toks = lex::<Error>(include_str!("../../examples/semigroup_queue.par")).unwrap();
-        let toks = TokenSlice::new(&toks);
-        match program(toks) {
-            Ok(x) => eprintln!("{x:?}"),
+    fn test1() {
+        let input = include_str!("../../examples/semigroup_queue.par");
+        let toks = lex::<Error>(input).unwrap();
+        let toks_slice = Input::new(&toks);
+        let res = program(toks_slice);
+        match res.clone() {
+            Ok(new) => {
+                let old = crate::par::parse::parse_program(input).unwrap();
+                eprintln!("old: {:?}", old);
+                eprintln!("\n---\n");
+                eprintln!("new: {:?}", new);
+                assert_eq!(format!("{:?}", old), format!("{:?}", new))
+            }
             Err(e) => {
-                eprintln!("{}", e.inner());
-                eprintln!("{:?}", e.into_inner().context().collect::<Vec<_>>())
+                miette::set_hook(Box::new(|_| {
+                    Box::new(
+                        miette::MietteHandlerOpts::new()
+                            .terminal_links(true)
+                            .unicode(false)
+                            // .context_lines(1)
+                            // .with_cause_chain()
+                            .build(),
+                    )
+                }))
+                .unwrap();
+                // let diagnostic = miette::miette!(
+                //     labels = vec![miette::LabeledSpan::at_offset(e.offset(), "here")],
+                //     severity = miette::Severity::Advice,
+                //     "msg"
+                // )
+                /* .with_source_code("this other su") */
+                let error_tok = toks.get(e.offset()).unwrap_or(toks.last().unwrap()).clone();
+                let err = miette::Report::from(MieteError {
+                    source: input,
+                    span: SourceSpan::new(
+                        SourceOffset::from(error_tok.span.start),
+                        error_tok.span.len(),
+                    ),
+                    related: vec![],
+                    help: "this is the help",
+                });
+                eprintln!("{err:?}");
+                // eprintln!("{:?}", e.into_inner().context().collect::<Vec<_>>());
+                eprintln!("old: {:?}", crate::par::parse::parse_program(input));
+                eprintln!("new: {:?}", e.into_inner());
             }
         }
     }
