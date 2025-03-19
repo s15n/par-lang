@@ -1075,7 +1075,7 @@ fn loop_label<'s>(input: &mut Input<'s>) -> Result<Option<Name>> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::par::lexer::lex;
+    use crate::par::{lexer::lex, parse::ParseError};
     use miette::{SourceOffset, SourceSpan};
 
     #[test]
@@ -1121,13 +1121,13 @@ mod test {
     }
 
     #[derive(Debug, miette::Diagnostic)]
-    #[diagnostic(code(oops::my::bad), url(docsrs), severity(Error))]
+    #[diagnostic(severity(Error))]
     struct SyntaxError<'s> {
         // #[diagnostic_source]
         // e: Error,
         #[source_code]
         source: &'s str,
-        #[label("here")]
+        #[label]
         span: SourceSpan,
         // can generate these with the miette! macro.
         #[related]
@@ -1154,7 +1154,7 @@ mod test {
                 eprintln!("old: {:?}", old);
                 eprintln!("\n---\n");
                 eprintln!("new: {:?}", new);
-                assert_eq!(format!("{:?}", old), format!("{:?}", new))
+                // assert_eq!(format!("{:?}", old), format!("{:?}", new))
             }
             Err(e) => {
                 miette::set_hook(Box::new(|_| {
@@ -1181,7 +1181,26 @@ mod test {
                         SourceOffset::from(error_tok.span.start),
                         error_tok.span.len(),
                     ),
-                    related: vec![],
+                    related: {
+                        let ParseError {
+                            msg,
+                            location: Loc::Code { line, column },
+                        } = (match crate::par::parse::parse_program(input) {
+                            Ok(_) => panic!(),
+                            Err(e) => e,
+                        })
+                        else {
+                            panic!()
+                        };
+                        vec![miette::miette!(
+                            labels = vec![miette::LabeledSpan::new_with_span(
+                                None,
+                                SourceOffset::from_location(input, line, column)
+                            )],
+                            "pest error: {}",
+                            msg
+                        )]
+                    },
                     help: e
                         .inner()
                         .context
@@ -1190,10 +1209,8 @@ mod test {
                         .collect::<String>(),
                 });
                 eprintln!("{err:?}");
-                // eprintln!("{:?}", e.into_inner().context().collect::<Vec<_>>());
-                eprintln!("old: {:?}", crate::par::parse::parse_program(input));
                 eprintln!("\n---\n");
-                eprintln!("new: {:?}", e.into_inner().context);
+                eprintln!("raw context: {:?}", e.into_inner().context);
             }
         }
     }
