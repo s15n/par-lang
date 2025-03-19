@@ -26,11 +26,11 @@ use winnow::{
 pub struct MyError<C = StrContext> {
     context: Vec<(usize, ContextError<C>)>,
 }
-impl<C> MyError<C> {
-    fn eof_offset(&self) -> usize {
-        self.context.iter().map(|x| x.0).min().unwrap_or(usize::MAX)
-    }
-}
+// impl<C> MyError<C> {
+//     fn eof_offset(&self) -> usize {
+//         self.context.iter().map(|x| x.0).min().unwrap_or(usize::MAX)
+//     }
+// }
 pub type Error_ = MyError;
 pub type Error = ErrMode<Error_>;
 impl<I: Stream, C: core::fmt::Debug> ParserError<I> for MyError<C> {
@@ -178,6 +178,7 @@ where
         Ok((out, loc))
     }
 }
+#[allow(dead_code)]
 fn with_span<'a, O, E>(
     mut parser: impl Parser<Input<'a>, O, E>,
 ) -> impl Parser<Input<'a>, (O, core::ops::Range<usize>), E>
@@ -305,7 +306,7 @@ impl core::fmt::Display for SyntaxError {
 impl core::error::Error for SyntaxError {}
 
 pub fn set_miette_hook() {
-    miette::set_hook(Box::new(|_| {
+    _ = miette::set_hook(Box::new(|_| {
         Box::new(
             miette::MietteHandlerOpts::new()
                 .terminal_links(true)
@@ -315,8 +316,7 @@ pub fn set_miette_hook() {
                 // .with_cause_chain()
                 .build(),
         )
-    }))
-    .unwrap();
+    }));
 }
 
 pub fn parse_program(
@@ -1190,8 +1190,7 @@ fn loop_label<'s>(input: &mut Input<'s>) -> Result<Option<Name>> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::par::{lexer::lex, parse::ParseError};
-    use miette::{SourceOffset, SourceSpan};
+    use crate::par::lexer::lex;
 
     #[test]
     fn test_list() {
