@@ -213,7 +213,11 @@ where
         tokens.push(Token {
             kind,
             raw,
-            loc: Loc::Code { line: row, column },
+            // one-based row/column
+            loc: Loc::Code {
+                line: row + 1,
+                column: column + 1,
+            },
             span: idx..idx + raw.len(),
         });
         idx += raw.len();
