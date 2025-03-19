@@ -729,8 +729,6 @@ fn parse_process(pairs: &mut Pairs<'_, Rule>) -> Result<Process<Loc, Name>, Pars
             ))
         }
 
-        Rule::proc_pass => Ok(Process::Pass(loc)),
-
         Rule::proc_telltypes => {
             let mut pairs = pair.into_inner();
             let process = parse_process(&mut pairs)?;
