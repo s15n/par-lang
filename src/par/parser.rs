@@ -96,6 +96,15 @@ where
     token.context(StrContext::Expected(StrContextValue::StringLiteral(token)))
 }
 
+/// Like `t` for but for `n` tokens.
+macro_rules! tn {
+    ($($t:expr),+) => {
+        ($($t),+).context(StrContext::Expected(StrContextValue::Description(
+            stringify!($($t),+),
+        )))
+    };
+}
+
 /// Like regular `preceded` but cuts if `parser` after `ignored` fails, assuming that it should be unambiguous.
 fn commit_after<Input, Ignored, Output, Error, IgnoredParser, ParseNext>(
     mut ignored: IgnoredParser,
@@ -406,7 +415,7 @@ where
     commit_after(
         t("{"),
         terminated(
-            repeat(0.., (t("."), name, branch, opt(t(",")))).fold(
+            repeat(0.., (t("."), name, cut_err(branch), opt(t(",")))).fold(
                 || IndexMap::new(),
                 |mut branches, (_, name, branch, _)| {
                     branches.insert(name, branch);
@@ -531,7 +540,7 @@ fn typ_self<'s>(input: &mut Input) -> Result<Type<Loc, Name>> {
 
 fn typ_send_type<'s>(input: &mut Input) -> Result<Type<Loc, Name>> {
     with_loc(commit_after(
-        (t("("), t("type")),
+        tn!("(", "type"),
         (
             list(name).context(StrContext::Label("list of type names to send")),
             t(")"),
@@ -548,7 +557,7 @@ fn typ_send_type<'s>(input: &mut Input) -> Result<Type<Loc, Name>> {
 
 fn typ_recv_type<'s>(input: &mut Input<'s>) -> Result<Type<Loc, Name>> {
     with_loc(commit_after(
-        (t("["), t("type")),
+        tn!("[", "type"),
         (
             list(name).context(StrContext::Label("list of type names to receive")),
             t("]"),
@@ -596,7 +605,7 @@ fn typ_branch_receive<'s>(input: &mut Input<'s>) -> Result<Type<Loc, Name>> {
 
 fn typ_branch_recv_type<'s>(input: &mut Input<'s>) -> Result<Type<Loc, Name>> {
     with_loc(preceded(
-        (t("("), t("type")),
+        tn!("(", "type"),
         cut_err((list(name), t(")"), typ_branch)),
     ))
     .map(|((names, _, body), span)| {
@@ -647,7 +656,7 @@ fn pattern_continue(input: &mut Input) -> Result<Pattern<Loc, Name>> {
 
 fn pattern_receive_type(input: &mut Input) -> Result<Pattern<Loc, Name>> {
     with_loc(commit_after(
-        (t("("), t("type")),
+        tn!("(", "type"),
         (list(name), t(")"), pattern),
     ))
     .map(|((names, _, mut rest), loc)| {
@@ -792,7 +801,7 @@ fn cons_loop(input: &mut Input) -> Result<Construct<Loc, Name>> {
 
 fn cons_send_type(input: &mut Input) -> Result<Construct<Loc, Name>> {
     with_loc(commit_after(
-        (t("("), t("type")),
+        tn!("(", "type"),
         (list(typ), t(")"), construction),
     ))
     .map(|((names, _, mut construct), loc)| {
@@ -806,7 +815,7 @@ fn cons_send_type(input: &mut Input) -> Result<Construct<Loc, Name>> {
 
 fn cons_recv_type(input: &mut Input) -> Result<Construct<Loc, Name>> {
     with_loc(commit_after(
-        (t("["), t("type")),
+        tn!("[", "type"),
         (list(name), t("]"), construction),
     ))
     .map(|((names, _, mut construct), loc)| {
@@ -841,7 +850,7 @@ fn cons_branch_receive(input: &mut Input) -> Result<ConstructBranch<Loc, Name>> 
 
 fn cons_branch_recv_type(input: &mut Input) -> Result<ConstructBranch<Loc, Name>> {
     with_loc(commit_after(
-        (t("("), t("type")),
+        tn!("(", "type"),
         (list(name), t(")"), cons_branch),
     ))
     .map(|((names, _, mut branch), loc)| {
@@ -915,17 +924,14 @@ fn apply_loop(input: &mut Input) -> Result<Apply<Loc, Name>> {
 }
 
 fn apply_send_type(input: &mut Input) -> Result<Apply<Loc, Name>> {
-    with_loc(commit_after(
-        (t("("), t("type")),
-        (list(typ), t(")"), apply),
-    ))
-    .map(|((types, _, mut apply), loc)| {
-        for typ in types.into_iter().rev() {
-            apply = Apply::SendType(loc.clone(), typ, Box::new(apply));
-        }
-        apply
-    })
-    .parse_next(input)
+    with_loc(commit_after(tn!("(", "type"), (list(typ), t(")"), apply)))
+        .map(|((types, _, mut apply), loc)| {
+            for typ in types.into_iter().rev() {
+                apply = Apply::SendType(loc.clone(), typ, Box::new(apply));
+            }
+            apply
+        })
+        .parse_next(input)
 }
 
 fn apply_noop(input: &mut Input) -> Result<Apply<Loc, Name>> {
@@ -969,7 +975,7 @@ fn apply_branch_continue(input: &mut Input) -> Result<ApplyBranch<Loc, Name>> {
 
 fn apply_branch_recv_type(input: &mut Input) -> Result<ApplyBranch<Loc, Name>> {
     with_loc(commit_after(
-        (t("("), t("type")),
+        tn!("(", "type"),
         (list(name), t(")"), apply_branch),
     ))
     .map(|((names, _, mut branch), loc)| {
@@ -1111,7 +1117,7 @@ fn cmd_loop(input: &mut Input) -> Result<Command<Loc, Name>> {
 }
 
 fn cmd_send_type(input: &mut Input) -> Result<Command<Loc, Name>> {
-    with_loc(commit_after((t("("), t("type")), (list(typ), t(")"), cmd)))
+    with_loc(commit_after(tn!("(", "type"), (list(typ), t(")"), cmd)))
         .map(|((types, _, mut cmd), loc)| {
             for typ in types.into_iter().rev() {
                 cmd = Command::SendType(loc.clone(), typ, Box::new(cmd));
@@ -1122,7 +1128,7 @@ fn cmd_send_type(input: &mut Input) -> Result<Command<Loc, Name>> {
 }
 
 fn cmd_recv_type(input: &mut Input) -> Result<Command<Loc, Name>> {
-    with_loc(commit_after((t("["), t("type")), (list(name), t("]"), cmd)))
+    with_loc(commit_after(tn!("[", "type"), (list(name), t("]"), cmd)))
         .map(|((names, _, mut cmd), loc)| {
             for name in names.into_iter().rev() {
                 cmd = Command::ReceiveType(loc.clone(), name, Box::new(cmd));
@@ -1171,7 +1177,7 @@ fn cmd_branch_continue(input: &mut Input) -> Result<CommandBranch<Loc, Name>> {
 
 fn cmd_branch_recv_type(input: &mut Input) -> Result<CommandBranch<Loc, Name>> {
     with_loc(commit_after(
-        (t("("), t("type")),
+        tn!("(", "type"),
         (list(name), t(")"), cmd_branch),
     ))
     .map(|((names, _, mut branch), loc)| {
