@@ -620,7 +620,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                 loc,
                 name,
                 args.into_iter()
-                    .map(|arg| Ok(arg.expand_recursive_helper(top_label, top_body, type_defs)?))
+                    .map(|arg| Ok(arg.expand_recursive_helper(top_asc, top_label, top_body, type_defs)?))
                     .collect::<Result<_, _>>()?,
             ),
 
@@ -738,7 +738,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                 loc,
                 name,
                 args.into_iter()
-                    .map(|arg| Ok(arg.expand_iterative_helper(top_label, top_body, type_defs)?))
+                    .map(|arg| Ok(arg.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?))
                     .collect::<Result<_, _>>()?,
             ),
 
