@@ -796,7 +796,7 @@ impl Error {
         }
     }
 
-    fn display_loc(code: &str, loc: &Loc) -> String {
+    pub(crate) fn display_loc(code: &str, loc: &Loc) -> String {
         match loc {
             Loc::External => format!("<UI>"),
             Loc::Code { line, column } => {

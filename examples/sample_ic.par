@@ -176,3 +176,57 @@ def zip2 = [type T, U] [seq1: Seq<T>, seq2: Seq<U>] begin {
     seq2.next[y]
   } in ((x, y)!) loop
 }
+
+
+type List<T> = recursive either {
+  .empty!
+  .item(T) self
+}
+
+dec alternate : [type A, B] [List<A>, List<B>] recursive either {
+  .remainder either {
+    .left List<A>
+    .right List<B>
+  }
+  .choice {
+    .left => (A) self
+    .right => (B) self
+  }
+}
+type List<T> = recursive either {
+  .empty!
+  .item(T) self
+}
+
+type Alternate<A, B> = recursive either {
+  .remainder either {
+    .left List<A>
+    .right List<B>
+  }
+  .choice {
+    .left => (A) self
+    .right => (B) self
+  }
+}
+
+dec alternate : [type A, B] [List<A>, List<B>] Alternate<A, B>
+
+def alternate = [type A, B] [la, lb] la begin :a {
+  .empty! => .remainder .right lb,
+  .item(ha) la => lb begin :b {
+    .empty! => .remainder .left .item (ha) la,
+    .item (hb) lb => .choice {
+      .left => (ha) let lb: List<B> = .item (hb) lb in la loop:a
+      .right => (hb) lb loop:b
+    }
+  }
+}
+
+
+dec left_list  : List<Bool>
+dec right_list : List<Bool>
+
+def left_list  = .item(.true!).item(.true!).empty!
+def right_list = .item(.true!).empty!
+
+def alternate_applied = alternate(type Bool)(type Bool)(left_list)(right_list)

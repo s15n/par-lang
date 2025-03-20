@@ -15,9 +15,7 @@ use crate::{
         readback::{ReadbackResult, SharedState},
         Net,
     },
-    par::{
-        language::Internal,
-    },
+    par::language::Internal,
     playground::{self, CheckedProgram},
     readback::{NameRequiredTraits, ReadbackState},
     spawn::TokioSpawn,
@@ -245,19 +243,28 @@ macro_rules! test_family {
 #[tokio::test]
 async fn test_whole_programs() -> Result<(), String> {
     let mut failed = false;
-    let test_families = vec![test_family!(
-        "hello world",
-        include_str!("../examples/sample_ic.par"),
-        [
-            (".true!", "Bool", code ".true!")
-            ("not(true)", "Bool", code "false")
-            ("not(false)", "Bool", code "true")
-            ("xor(true)(true)", "Bool", code "false")
-            ("xor(true)(false)", "Bool", code "true")
-            ("xor(false)(true)", "Bool", code "true")
-            ("xor(true)(true)", "Bool", code "false")
-        ]
-    )];
+    let test_families = vec![
+        test_family!(
+            "IC tests",
+            include_str!("../examples/sample_ic.par"),
+            [
+                (".true!", "Bool", code ".true!")
+                ("not(true)", "Bool", code "false")
+                ("not(false)", "Bool", code "true")
+                ("xor(true)(true)", "Bool", code "false")
+                ("xor(true)(false)", "Bool", code "true")
+                ("xor(false)(true)", "Bool", code "true")
+                ("xor(true)(true)", "Bool", code "false")
+            ]
+        ),
+        test_family!("fibonacci", include_str!("../examples/fibonacci.par"), []),
+        test_family!(
+            "rock paper scissors",
+            include_str!("../examples/rock-paper-scissors.par"),
+            []
+        ),
+        test_family!("flatten", include_str!("../examples/flatten.par"), []),
+    ];
     for i in test_families {
         eprintln!("testing family: {}", i.name);
         use core::fmt::Write;
@@ -273,7 +280,10 @@ async fn test_whole_programs() -> Result<(), String> {
             }
         }
         let compiled = playground::Compiled::from_string(&source).unwrap();
-        let checked = compiled.checked.unwrap();
+        let checked = match compiled.checked {
+            Ok(o) => o,
+            Err(e) => return Err(e.pretty(|x| crate::playground::Error::display_loc(&source, x))),
+        };
         let ic_compiled = checked.ic_compiled.unwrap();
         let prog = (checked.program.clone());
         let mut spawner = Arc::new(TokioSpawn);

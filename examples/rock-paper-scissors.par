@@ -1,0 +1,118 @@
+type Nat = recursive either {
+  .zero!
+  .succ self
+}
+
+dec max_moves: Nat
+def max_moves = .succ.succ.succ.succ.succ.succ.succ.succ.succ.zero!
+
+dec destroy_nat: [Nat]!
+def destroy_nat = [nat] nat begin {
+  .zero! => !
+  .succ pred => destroy_nat(pred)
+}
+
+dec play_move: [Move] [Move] either { .win! .lose! .draw! }
+def play_move = [left] left {
+  .rock! => [right] right {
+    .rock! => .draw!
+    .paper! => .lose!
+    .scissors! => .win!
+  }
+  .paper! => [right] right {
+    .rock! => .win!
+    .paper! => .draw!
+    .scissors! => .lose!
+  }
+  .scissors! => [right] right {
+    .rock! => .lose!
+    .paper! => .win!
+    .scissors! => .draw!
+  }
+}
+
+type Move = either {
+  .rock!
+  .paper!
+  .scissors!
+}
+
+type Player = iterative :game {
+  .stop => !
+  .play_round => iterative :round {
+    .stop_round => self :game,
+    .play_move => (Move) {
+      .win  => self :game,
+      .lose => self :game,
+      .draw => self :round,
+    }
+  }
+}
+
+type Outcome = either {
+  .first_won!
+  .second_won!
+  .too_long!
+}
+
+type Game = iterative {
+  .stop => !
+  .play_round => (Outcome) self
+}
+
+dec start_game : [Player, Player] Game
+def start_game = chan game {
+  game[left]
+  game[right]
+  game begin :game
+  game {
+    .stop => {
+      left.stop?
+      right.stop?
+      game!
+    }
+    .play_round => {
+      left.play_round
+      right.play_round
+      let max_moves = max_moves
+      max_moves begin :round
+      max_moves {
+        .zero => {
+          max_moves?
+          left.stop_round
+          right.stop_round
+          game(.too_long!)
+          game loop :game
+        }
+        .succ => {
+          left.play_move[left_move]
+          right.play_move[right_move]
+          let outcome = play_move(left_move)(right_move)
+          outcome {
+            .win => {
+              left.win
+              right.lose
+              game(.first_won!)
+              pass
+            }
+            .lose => {
+              left.lose
+              right.win
+              game(.second_won!)
+              pass
+            }
+            .draw => {
+              left.draw
+              right.draw
+              outcome?
+              max_moves loop :round
+            }
+          }
+          outcome?
+          destroy_nat(max_moves)?
+          game loop :game
+        }
+      }
+    }
+  }
+}
