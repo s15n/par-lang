@@ -28,6 +28,8 @@ enum VariableKind {
     Replicable,
     // Replicable, and needs dereliction
     Boxed,
+    // Global, should not be stored in the context.
+    Global,
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +112,7 @@ impl Context {
     }
 
     fn bind_variable_with_kind(&mut self, var: &Var, tree: TypedTree, kind: VariableKind) {
+        assert_ne!(kind, VariableKind::Global);
         assert!(self
             .vars
             .insert(var.clone(), (tree, kind))
@@ -214,7 +217,9 @@ impl<'program> Compiler<'program> {
         let mut vars = IndexMap::new();
         for (name, _) in captures.names.iter() {
             let (tree, kind) = self.use_name(name);
-            vars.insert(Var::Name(name.clone()), (tree, kind));
+            if kind != VariableKind::Global {
+                vars.insert(Var::Name(name.clone()), (tree, kind));
+            }
         }
         for(label, _) in self.context.loop_points.clone().iter() {
             let (tree, kind) = self.use_var(&Var::Loop(label.0.clone()));
@@ -277,11 +282,8 @@ impl<'program> Compiler<'program> {
     fn use_name(&mut self, name: &Name) -> (TypedTree, VariableKind) {
         if self.context.vars.contains_key(&Var::Name(name.clone())) {
             self.use_var(&Var::Name(name.clone()))
-        } else if self.compile_global(name).is_some() {
-            let value = self.compile_global(name).unwrap();
-            let v = (value.clone(), VariableKind::Replicable);
-            self.context.vars.insert(Var::Name(name.clone()), v.clone());
-            v
+        } else if let Some(value) = self.compile_global(name) {
+            (value, VariableKind::Global)
         } else {
             panic!("unknown variable {}", name)
         }
