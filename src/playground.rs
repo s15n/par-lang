@@ -574,19 +574,8 @@ impl Error {
                 )
             }
 
-            Self::Compile(CompileError::PassNotPossible(loc)) => {
-                format!("{}\nNothing to `pass` to.", Self::display_loc(code, loc))
-            }
-
             Self::Compile(CompileError::MustEndProcess(loc)) => {
                 format!("{}\nThis process must end.", Self::display_loc(code, loc))
-            }
-
-            Self::Compile(CompileError::CannotEndInDoExpression(loc)) => {
-                format!(
-                    "{}\nCannot end process in `do` expression.",
-                    Self::display_loc(code, loc)
-                )
             }
 
             Self::Type(error) => error.pretty(|loc| Self::display_loc(code, loc)),
