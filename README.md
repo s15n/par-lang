@@ -15,8 +15,7 @@
 
 ## 🚀 Get started with the [Language Reference](https://faiface.github.io/par-lang/introduction.html)
 
-It contains instructions to install the **interactive playground,** and **a full guide** of the language and
-its type system.
+It contains **a full guide** of the language and its type system.
 
 **To run the playground:**
 
@@ -37,11 +36,11 @@ tackle a problem, there will likely be ways to express it.
 
 _(Dual types are on the same line.)_
 
-- **Pairs** (easily extensible to tuples), and **functions** (naturally curried).
-- **Eithers** (sum types), and **choices** (unusual, but powerful dispatchers).
-- **Recursive** (finite), and **iterative** (co-recursive, potentially infinite) types, with totality checking.
-- **Universally,** and **existentially** quantified generic functions and values.
-- **Unit,** and **continuation.**
+- [**Pairs**](https://faiface.github.io/par-lang/types.html#pair-types) (easily extensible to tuples), and [**functions**](https://faiface.github.io/par-lang/types.html#function-types) (naturally curried).
+- [**Eithers**](https://faiface.github.io/par-lang/types.html#either-types) (sum types), and [**choices**](https://faiface.github.io/par-lang/types.html#choice-types) (unusual, but powerful dispatchers).
+- [**Recursive**](https://faiface.github.io/par-lang/types.html#recursive-types) (finite), and [**iterative**](https://faiface.github.io/par-lang/types.html#iterative-types) (co-recursive, potentially infinite) types, with totality checking.
+- [**Universally,**](https://faiface.github.io/par-lang/types.html#universal-types) and [**existentially**](https://faiface.github.io/par-lang/types.html#existential-types) quantified generic functions and values.
+- [**Unit,**](https://faiface.github.io/par-lang/types.html#the-unit-type) and [**continuation.**](https://faiface.github.io/par-lang/types.html#the-bottom-type)
 
 These **orthogonal concepts** combine to give rise to a rich world of types and semantics.
 
