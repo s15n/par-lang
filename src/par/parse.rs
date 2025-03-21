@@ -430,9 +430,10 @@ fn parse_expression(pairs: &mut Pairs<'_, Rule>) -> Result<Expression<Loc, Name>
 
 fn parse_construct(pairs: &mut Pairs<'_, Rule>) -> Result<Construct<Loc, Name>, ParseError> {
     let pair = pairs.next().unwrap().into_inner().next().unwrap();
+    let rule = pair.as_rule();
     let loc = Loc::from(&pair);
 
-    match pair.as_rule() {
+    match rule {
         Rule::cons_then => {
             let mut pairs = Pairs::single(pair);
             let expression = parse_expression(&mut pairs)?;
@@ -481,11 +482,16 @@ fn parse_construct(pairs: &mut Pairs<'_, Rule>) -> Result<Construct<Loc, Name>, 
 
         Rule::cons_break => Ok(Construct::Break(loc)),
 
-        Rule::cons_begin => {
+        Rule::cons_begin | Rule::cons_unfounded => {
             let mut pairs = pair.into_inner();
             let label = parse_loop_label(&mut pairs)?;
             let construct = parse_construct(&mut pairs)?;
-            Ok(Construct::Begin(loc, label, Box::new(construct)))
+            Ok(Construct::Begin(
+                loc,
+                rule == Rule::cons_unfounded,
+                label,
+                Box::new(construct),
+            ))
         }
 
         Rule::cons_loop => {
@@ -601,9 +607,10 @@ fn parse_construct_branch(
 
 fn parse_apply(pairs: &mut Pairs<'_, Rule>) -> Result<Apply<Loc, Name>, ParseError> {
     let pair = pairs.next().unwrap().into_inner().next().unwrap();
+    let rule = pair.as_rule();
     let loc = Loc::from(&pair);
 
-    match pair.as_rule() {
+    match rule {
         Rule::apply_noop => Ok(Apply::Noop(loc)),
 
         Rule::apply_send => {
@@ -634,11 +641,16 @@ fn parse_apply(pairs: &mut Pairs<'_, Rule>) -> Result<Apply<Loc, Name>, ParseErr
             Ok(Apply::Either(loc, ApplyBranches(branches)))
         }
 
-        Rule::apply_begin => {
+        Rule::apply_begin | Rule::apply_unfounded => {
             let mut pairs = pair.into_inner();
             let label = parse_loop_label(&mut pairs)?;
             let then = parse_apply(&mut pairs)?;
-            Ok(Apply::Begin(loc, label, Box::new(then)))
+            Ok(Apply::Begin(
+                loc,
+                rule == Rule::apply_unfounded,
+                label,
+                Box::new(then),
+            ))
         }
 
         Rule::apply_loop => {
@@ -746,9 +758,10 @@ fn parse_process(pairs: &mut Pairs<'_, Rule>) -> Result<Process<Loc, Name>, Pars
 
 fn parse_command(pairs: &mut Pairs<'_, Rule>) -> Result<Command<Loc, Name>, ParseError> {
     let pair = pairs.next().unwrap().into_inner().next().unwrap();
+    let rule = pair.as_rule();
     let loc = Loc::from(&pair);
 
-    match pair.as_rule() {
+    match rule {
         Rule::cmd_then => {
             let mut pairs = pair.into_inner();
             let process = parse_process(&mut pairs)?;
@@ -810,11 +823,16 @@ fn parse_command(pairs: &mut Pairs<'_, Rule>) -> Result<Command<Loc, Name>, Pars
             Ok(Command::Continue(loc, Box::new(process)))
         }
 
-        Rule::cmd_begin => {
+        Rule::cmd_begin | Rule::cmd_unfounded => {
             let mut pairs = pair.into_inner();
             let label = parse_loop_label(&mut pairs)?;
             let command = parse_command(&mut pairs)?;
-            Ok(Command::Begin(loc, label, Box::new(command)))
+            Ok(Command::Begin(
+                loc,
+                rule == Rule::cmd_unfounded,
+                label,
+                Box::new(command),
+            ))
         }
 
         Rule::cmd_loop => {

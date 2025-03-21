@@ -738,6 +738,7 @@ fn par_syntax() -> Syntax {
             "in",
             "pass",
             "begin",
+            "unfounded",
             "loop",
             "telltypes",
             "either",

@@ -1280,7 +1280,7 @@ where
                 );
             }
         }
-        if !matches!(command, Command::Begin(_, _) | Command::Loop(_)) {
+        if !matches!(command, Command::Begin(_, _, _) | Command::Loop(_)) {
             if let Type::Recursive(_, top_asc, top_label, body) = typ {
                 return self.check_command(
                     inference_subject,
@@ -1453,7 +1453,7 @@ where
                 (Command::Continue(process), inferred_types)
             }
 
-            Command::Begin(label, process) => {
+            Command::Begin(unfounded, label, process) => {
                 let Type::Recursive(typ_loc, typ_asc, typ_label, typ_body) = typ else {
                     return Err(TypeError::InvalidOperation(
                         loc.clone(),
@@ -1463,7 +1463,10 @@ where
                 };
 
                 let mut typ_asc = typ_asc.clone();
-                typ_asc.insert(label.clone());
+
+                if !*unfounded {
+                    typ_asc.insert(label.clone());
+                }
 
                 self.invalidate_ascendent(label);
                 self.loop_points.insert(
@@ -1497,7 +1500,10 @@ where
                     Type::Iterative(loc.clone(), typ_asc, label.clone(), Box::new(body))
                 });
 
-                (Command::Begin(label.clone(), process), inferred_iterative)
+                (
+                    Command::Begin(*unfounded, label.clone(), process),
+                    inferred_iterative,
+                )
             }
 
             Command::Loop(label) => {
@@ -1748,17 +1754,21 @@ where
                 (Command::Continue(process), Type::Break(loc.clone()))
             }
 
-            Command::Begin(label, process) => {
+            Command::Begin(unfounded, label, process) => {
                 self.loop_points.insert(
                     label.clone(),
                     (subject.clone(), Arc::new(self.variables.clone())),
                 );
                 let (process, body) = self.infer_process(process, subject)?;
                 (
-                    Command::Begin(label.clone(), process),
+                    Command::Begin(*unfounded, label.clone(), process),
                     Type::Recursive(
                         loc.clone(),
-                        IndexSet::from([label.clone()]),
+                        if *unfounded {
+                            IndexSet::new()
+                        } else {
+                            IndexSet::from([label.clone()])
+                        },
                         label.clone(),
                         Box::new(body),
                     ),
