@@ -10,7 +10,6 @@ use std::hash::Hash;
 use super::net::{Net, Tree};
 use crate::par::parse::Loc::External;
 use crate::par::{
-    language::Internal,
     parse::Program,
     process::{Captures, Command, Expression, Process},
     types::Type,
@@ -32,7 +31,7 @@ enum VariableKind {
     Global,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Error {
     /// Error that is emitted when a variable that was never bound/captured is used
     UnboundVar(Loc),
@@ -40,6 +39,26 @@ pub enum Error {
     UnusedVar(Loc),
     UnexpectedType(Loc, Type<Loc, Name>),
     GlobalNotFound(Name),
+    DependencyCycle {
+        global: Name,
+        dependents: IndexSet<Name>,
+    },
+}
+
+impl Debug for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::UnboundVar(loc) => write!(f, "Unbound variable at {:?}", loc),
+            Error::UnusedVar(loc) => write!(f, "Unused variable at {:?}", loc),
+            Error::UnexpectedType(loc, ty) => write!(f, "Unexpected type at {:?}: {:?}", loc, ty),
+            Error::GlobalNotFound(name) => write!(f, "Global not found: {:?}", name),
+            Error::DependencyCycle { global, dependents } => write!(
+                f,
+                "Dependency cycle detected for global {:?} with dependents {:?}",
+                global, dependents
+            ),
+        }
+    }
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -146,6 +165,7 @@ pub struct Compiler<'program> {
     type_variables: IndexSet<Name>,
     id_to_ty: Vec<Type<Loc, Name>>,
     id_to_package: Vec<Tree>,
+    compile_global_stack: IndexSet<Name>,
 }
 
 impl Tree {
@@ -174,6 +194,12 @@ impl<'program> Compiler<'program> {
                 ty,
             });
         };
+        if !self.compile_global_stack.insert(name.clone()) {
+            return Err(Error::DependencyCycle {
+                global: name.clone(),
+                dependents: self.compile_global_stack.clone(),
+            });
+        }
         let global = self.program.definitions.get(name);
         let (global, typ) = match (global, self.program.declarations.get(name)) {
             (Some(a), Some(b)) => (a, b),
@@ -194,6 +220,7 @@ impl<'program> Compiler<'program> {
             debug,
         )?;
         self.global_name_to_id.insert(name.clone(), id);
+        self.compile_global_stack.shift_remove(name);
 
         Ok(Tree::Package(id).with_type(typ))
     }
@@ -611,7 +638,7 @@ impl<'program> Compiler<'program> {
     }
 }
 
-pub fn compile_file(program: &CheckedProgram) -> IcCompiled {
+pub fn compile_file(program: &CheckedProgram) -> Result<IcCompiled> {
     let mut compiler = Compiler {
         net: Net::default(),
         context: Context {
@@ -622,15 +649,16 @@ pub fn compile_file(program: &CheckedProgram) -> IcCompiled {
         id_to_package: Default::default(),
         id_to_ty: Default::default(),
         type_variables: Default::default(),
+        compile_global_stack: Default::default(),
         program,
     };
     for k in compiler.program.definitions.clone().keys() {
-        compiler.compile_global(k);
+        compiler.compile_global(k)?;
     }
-    IcCompiled {
+    Ok(IcCompiled {
         id_to_package: Arc::new(compiler.id_to_package.into_iter().enumerate().collect()),
         name_to_id: compiler.global_name_to_id,
-    }
+    })
 }
 
 #[derive(Clone, Default)]

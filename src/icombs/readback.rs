@@ -1,3 +1,9 @@
+use crate::icombs::compiler::multiplex_trees;
+use crate::par::{
+    language::Internal,
+    parse::Loc,
+    types::{Type, TypeDefs},
+};
 use futures::{
     channel::oneshot::{channel, Receiver, Sender},
     future::{join, select, BoxFuture, Either},
@@ -14,12 +20,6 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     },
-};
-use crate::icombs::compiler::multiplex_trees;
-use crate::par::{
-    language::Internal,
-    parse::Loc,
-    types::{Type, TypeDefs},
 };
 
 use super::{compiler::TypedTree, Name, Net, Tree};
@@ -336,7 +336,7 @@ impl SharedState {
                 let a = Self::tree_to_num(*a);
                 let b = Self::tree_to_num(*b);
                 a + b
-            },
+            }
             _ => unreachable!(),
         }
     }
@@ -344,13 +344,13 @@ impl SharedState {
         // TODO: This as_either function is weaker than it should be
 
         let mut branches = vec![];
-        let (ctx0,ctx1) = {
-        let mut net = self.shared.net.lock().unwrap();
+        let (ctx0, ctx1) = {
+            let mut net = self.shared.net.lock().unwrap();
             let (ctx0, ctx1) = net.create_wire();
             for i in 0..variants.len() {
                 let (v0, v1) = net.create_wire();
                 let mut erasers = vec![];
-                for _ in 0..(i+1){
+                for _ in 0..(i + 1) {
                     erasers.push(Tree::e());
                 }
                 branches.push((Tree::c(v0, multiplex_trees(erasers)), v1));
@@ -362,7 +362,7 @@ impl SharedState {
         self.add_redex(tree, t).await;
         let tree = self.read_port_as_tree(ctx1).await;
         if let Tree::Con(payload, era_variant) = tree {
-            let variant = Self::tree_to_num(*era_variant)-1;
+            let variant = Self::tree_to_num(*era_variant) - 1;
             assert!(variant < variants.len());
             let name = variants[variant].clone();
             (name, *payload)

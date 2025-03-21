@@ -161,7 +161,11 @@ pub struct Net {
 impl Net {
     fn interact(&mut self, a: Tree, b: Tree) {
         use Tree::*;
-        println!("Interacting {} and {}", self.show_tree(&a), self.show_tree(&b));
+        println!(
+            "Interacting {} and {}",
+            self.show_tree(&a),
+            self.show_tree(&b)
+        );
         match (a, b) {
             (Var(..), _) | (_, Var(..)) => unreachable!(),
             (Era, Era) => (),
@@ -381,15 +385,14 @@ impl Net {
         }
     }
     fn assert_no_vicious(&self) {
-        for (var,tree) in self.vars.iter() {
+        for (var, tree) in self.vars.iter() {
             if let Some(tree) = tree {
                 self.assert_tree_not_contains(tree, var);
             }
         }
     }
 
-    fn assert_tree_not_contains(&self, tree: &Tree, idx: &usize)
-    {
+    fn assert_tree_not_contains(&self, tree: &Tree, idx: &usize) {
         match tree {
             Tree::Con(a, b) | Tree::Dup(a, b) => {
                 self.assert_tree_not_contains(a, idx);
@@ -424,7 +427,7 @@ impl Net {
         for (var, count) in vars_counter {
             if count != 2 {
                 let name = number_to_string(var.clone());
-                println!("net = {}",self.show());
+                println!("net = {}", self.show());
                 println!("num ports {}", self.ports.len());
                 return panic!("Variable {name} was used {count} times");
             }
@@ -455,7 +458,7 @@ impl Net {
             Tree::Var(idx) => {
                 if let Some(Some(tree)) = self.vars.get(idx) {
                     self.assert_tree_valid(tree)
-                } else{
+                } else {
                     vec![idx.clone()]
                 }
             }

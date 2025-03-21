@@ -83,19 +83,20 @@ impl Compiled {
                         })
                     })
                     .collect::<Result<_, CompileError<Loc>>>();
-                match compile_result {
-                    Ok(compiled) => Ok(Compiled::from_program(Program {
-                        type_defs,
-                        declarations,
-                        definitions: compiled,
-                    })),
-                    Err(error) => Err(Error::Compile(error)),
-                }
+                compile_result
+                    .map_err(|error| Error::Compile(error))
+                    .and_then(|compiled| {
+                        Ok(Compiled::from_program(Program {
+                            type_defs,
+                            declarations,
+                            definitions: compiled,
+                        })?)
+                    })
             })
     }
     pub(crate) fn from_program(
         program: Program<Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
-    ) -> Self {
+    ) -> Result<Self, Error> {
         let pretty = program
             .definitions
             .iter()
@@ -126,11 +127,11 @@ impl Compiled {
                             new_program.definitions.insert(name.clone(), e);
                         }
                         Err(error) => {
-                            return Compiled {
+                            return Ok(Compiled {
                                 program,
                                 pretty,
                                 checked: Err(error),
-                            }
+                            })
                         }
                     }
                 }
@@ -143,11 +144,11 @@ impl Compiled {
                         context.add_declaration(name.clone(), inferred_type);
                     }
                     Err(error) => {
-                        return Compiled {
+                        return Ok(Compiled {
                             program,
                             pretty,
                             checked: Err(error),
-                        }
+                        })
                     }
                 },
             }
@@ -156,11 +157,15 @@ impl Compiled {
             globals: Arc::new(program.type_defs.clone()),
             vars: Default::default(),
         };
-        return Compiled {
-            program,
-            pretty,
-            checked: Ok(Checked::from_program(new_program)),
-        };
+        Checked::from_program(new_program)
+            .map_err(|err| Error::InetCompile(err))
+            .and_then(|checked| {
+                Ok(Compiled {
+                    program,
+                    pretty,
+                    checked: Ok(checked),
+                })
+            })
     }
 }
 
@@ -179,12 +184,14 @@ pub(crate) struct Checked {
 }
 
 impl Checked {
-    pub(crate) fn from_program(program: CheckedProgram) -> Self {
+    pub(crate) fn from_program(
+        program: CheckedProgram,
+    ) -> Result<Self, crate::icombs::compiler::Error> {
         // attempt to compile to interaction combinators
-        Checked {
-            ic_compiled: Some(compile_file(&program)),
+        Ok(Checked {
+            ic_compiled: Some(compile_file(&program)?),
             program: Arc::new(program),
-        }
+        })
     }
 }
 
@@ -192,6 +199,7 @@ impl Checked {
 pub(crate) enum Error {
     Parse(ParseError),
     Compile(CompileError<Loc>),
+    InetCompile(crate::icombs::compiler::Error),
     Type(TypeError<Loc, Internal<Name>>),
     Runtime(runtime::Error<Loc, Internal<Name>>),
 }
@@ -685,6 +693,10 @@ impl Error {
                     "{}\nCannot end process in `do` expression.",
                     Self::display_loc(code, loc)
                 )
+            }
+
+            Self::InetCompile(err) => {
+                format!("inet compilation error: {err:?}")
             }
 
             Self::Type(error) => error.pretty(|loc| Self::display_loc(code, loc)),
