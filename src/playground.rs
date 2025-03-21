@@ -34,7 +34,7 @@ pub struct Playground {
 
 #[derive(Clone)]
 pub(crate) struct Compiled {
-    pub(crate) program: Program<Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
+    pub(crate) program: Program<Loc, Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
     pub(crate) pretty: String,
     pub(crate) checked: Result<Checked, TypeError<Loc, Internal<Name>>>,
 }
@@ -47,32 +47,33 @@ impl Compiled {
                 let type_defs = program
                     .type_defs
                     .into_iter()
-                    .map(|(name, (params, typ))| {
+                    .map(|(loc, name, params, typ)| {
                         (
+                            loc,
                             Internal::Original(name),
-                            (
-                                params.into_iter().map(Internal::Original).collect(),
-                                typ.map_names(&mut Internal::Original),
-                            ),
+                            params.into_iter().map(Internal::Original).collect(),
+                            typ.map_names(&mut Internal::Original),
                         )
                     })
                     .collect();
                 let declarations = program
                     .declarations
                     .into_iter()
-                    .map(|(name, option_typ)| {
+                    .map(|(loc, name, typ)| {
                         (
+                            loc,
                             Internal::Original(name),
-                            option_typ.map(|typ| typ.map_names(&mut Internal::Original)),
+                            typ.map_names(&mut Internal::Original),
                         )
                     })
                     .collect();
                 let compile_result = program
                     .definitions
                     .into_iter()
-                    .map(|(name, def)| {
+                    .map(|(loc, name, def)| {
                         def.compile().map(|compiled| {
                             (
+                                loc,
                                 Internal::Original(name.clone()),
                                 compiled.optimize().fix_captures(&IndexMap::new()).0,
                             )
@@ -89,13 +90,14 @@ impl Compiled {
                 }
             })
     }
+
     pub(crate) fn from_program(
-        program: Program<Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
+        program: Program<Loc, Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
     ) -> Self {
         let pretty = program
             .definitions
             .iter()
-            .map(|(name, def)| {
+            .map(|(_, name, def)| {
                 let mut buf = String::new();
                 write!(&mut buf, "define {} = ", name).expect("write failed");
                 def.pretty(&mut buf, 0).expect("write failed");
@@ -105,47 +107,21 @@ impl Compiled {
             .collect();
 
         // attempt to type check
-        let mut new_program = Program::default();
-        let mut context = types::Context::new(
-            Arc::new(program.type_defs.clone()),
-            types::Declarations(program.declarations.clone()),
-        );
-
-        for (name, expression) in &program.definitions {
-            match program.declarations.get(name) {
-                Some(Some(declaration)) => {
-                    match context.check_expression(None, expression, declaration) {
-                        Ok(e) => {
-                            new_program.definitions.insert(name.clone(), e);
-                        }
-                        Err(error) => {
-                            return Compiled {
-                                program,
-                                pretty,
-                                checked: Err(error),
-                            }
-                        }
-                    }
+        let definitions = match types::Context::new_with_type_checking(&program) {
+            Ok(context) => context.get_checked_definitions(),
+            Err(error) => {
+                return Compiled {
+                    program,
+                    pretty,
+                    checked: Err(error),
                 }
-                Some(None) | None => match context.infer_expression(None, expression) {
-                    Ok((e, inferred_type)) => {
-                        new_program.definitions.insert(name.clone(), e);
-                        new_program
-                            .declarations
-                            .insert(name.clone(), Some(inferred_type.clone()));
-                        context.add_declaration(name.clone(), inferred_type);
-                    }
-                    Err(error) => {
-                        return Compiled {
-                            program,
-                            pretty,
-                            checked: Err(error),
-                        }
-                    }
-                },
             }
-        }
-        new_program.type_defs = program.type_defs.clone();
+        };
+        let new_program = Program {
+            type_defs: program.type_defs.clone(),
+            declarations: program.declarations.clone(),
+            definitions,
+        };
         return Compiled {
             program,
             pretty,
@@ -160,7 +136,11 @@ pub(crate) struct Checked {}
 impl Checked {
     pub(crate) fn from_program(
         // not used for anything, so there's no reason to store it ATM.
-        _: Program<Internal<Name>, Arc<Expression<Loc, Internal<Name>, Type<Loc, Internal<Name>>>>>,
+        _: Program<
+            Loc,
+            Internal<Name>,
+            Arc<Expression<Loc, Internal<Name>, Type<Loc, Internal<Name>>>>,
+        >,
     ) -> Self {
         Checked {}
     }
@@ -329,11 +309,11 @@ impl Playground {
     fn run(
         interact: &mut Option<Interact>,
         ui: &mut egui::Ui,
-        program: &Program<Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
+        program: &Program<Loc, Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
         compiled_code: Arc<str>,
     ) {
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for (internal_name, expression) in &program.definitions {
+            for (_, internal_name, expression) in &program.definitions {
                 if let Internal::Original(name) = internal_name {
                     if ui.button(&name.string).clicked() {
                         if let Some(int) = interact.take() {
@@ -348,7 +328,13 @@ impl Playground {
                                 }),
                                 Context::new(
                                     Arc::new(TokioSpawn),
-                                    Arc::new(program.definitions.clone()),
+                                    Arc::new(
+                                        program
+                                            .definitions
+                                            .iter()
+                                            .map(|(_, name, expr)| (name.clone(), expr.clone()))
+                                            .collect(),
+                                    ),
                                 ),
                                 expression,
                             ),

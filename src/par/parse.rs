@@ -72,13 +72,13 @@ pub struct ParseError {
 }
 
 #[derive(Clone, Debug)]
-pub struct Program<Name, Expr> {
-    pub type_defs: IndexMap<Name, (Vec<Name>, Type<Loc, Name>)>,
-    pub declarations: IndexMap<Name, Option<Type<Loc, Name>>>,
-    pub definitions: IndexMap<Name, Expr>,
+pub struct Program<Loc, Name, Expr> {
+    pub type_defs: Vec<(Loc, Name, Vec<Name>, Type<Loc, Name>)>,
+    pub declarations: Vec<(Loc, Name, Type<Loc, Name>)>,
+    pub definitions: Vec<(Loc, Name, Expr)>,
 }
 
-impl<Name, Expr> Default for Program<Name, Expr> {
+impl<Name, Expr> Default for Program<Loc, Name, Expr> {
     fn default() -> Self {
         Self {
             type_defs: Default::default(),
@@ -88,7 +88,9 @@ impl<Name, Expr> Default for Program<Name, Expr> {
     }
 }
 
-pub fn parse_program(source: &str) -> Result<Program<Name, Expression<Loc, Name>>, ParseError> {
+pub fn parse_program(
+    source: &str,
+) -> Result<Program<Loc, Name, Expression<Loc, Name>>, ParseError> {
     let mut pairs = match Par::parse(Rule::program, source) {
         Ok(mut pairs) => pairs.next().unwrap().into_inner(),
         Err(error) => {
@@ -102,36 +104,35 @@ pub fn parse_program(source: &str) -> Result<Program<Name, Expression<Loc, Name>
         }
     };
 
-    let mut type_defs = IndexMap::new();
-    let mut declarations = IndexMap::new();
-    let mut definitions = IndexMap::new();
+    let mut type_defs = Vec::new();
+    let mut declarations = Vec::new();
+    let mut definitions = Vec::new();
 
     while let Some(pair) = pairs.next() {
         match pair.as_rule() {
             Rule::type_def => {
                 let mut pairs = pair.into_inner();
-                let (_, name) = parse_name(&mut pairs)?;
+                let (loc, name) = parse_name(&mut pairs)?;
                 let params = parse_type_params(&mut pairs)?;
                 let typ = parse_type(&mut pairs)?;
-                type_defs.insert(name, (params, typ));
+                type_defs.push((loc, name, params, typ));
             }
 
             Rule::declaration => {
                 let mut pairs = pair.into_inner();
-                let (_, name) = parse_name(&mut pairs)?;
+                let (loc, name) = parse_name(&mut pairs)?;
                 let typ = parse_type(&mut pairs)?;
-                declarations.insert(name, Some(typ));
+                declarations.push((loc, name, typ));
             }
 
             Rule::definition => {
                 let mut pairs = pair.into_inner();
-                let (_, name) = parse_name(&mut pairs)?;
+                let (loc, name) = parse_name(&mut pairs)?;
                 if let Some(typ) = parse_annotation(&mut pairs)? {
-                    declarations.insert(name.clone(), Some(typ));
+                    declarations.push((loc.clone(), name.clone(), typ));
                 }
                 let expression = parse_expression(&mut pairs)?;
-                declarations.entry(name.clone()).or_insert(None);
-                definitions.insert(name, expression);
+                definitions.push((loc, name, expression));
             }
 
             Rule::EOI => break,

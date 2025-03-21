@@ -3,14 +3,24 @@ use std::{
     collections::HashSet,
     fmt::{self, Display, Write},
     hash::Hash,
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
-use super::process::{Captures, Command, Expression, Process};
+use super::{
+    parse::Program,
+    process::{Captures, Command, Expression, Process},
+};
 
 #[derive(Clone, Debug)]
 pub enum TypeError<Loc, Name> {
+    TypeNameAlreadyDefined(Loc, Loc, Name),
+    NameAlreadyDeclared(Loc, Loc, Name),
+    NameAlreadyDefined(Loc, Loc, Name),
+    DeclaredButNotDefined(Loc, Name),
+    NoMatchingRecursiveOrIterative(Loc, Option<Name>),
+    SelfUsedInNegativePosition(Loc, Option<Name>),
     TypeNameNotDefined(Loc, Name),
+    DependencyCycle(Loc, Vec<Name>),
     WrongNumberOfTypeArgs(Loc, Name, usize, usize),
     NameNotDefined(Loc, Name),
     ShadowedObligation(Loc, Name),
@@ -64,11 +74,48 @@ pub enum Type<Loc, Name> {
 
 #[derive(Clone, Debug)]
 pub struct TypeDefs<Loc, Name> {
-    globals: Arc<IndexMap<Name, (Vec<Name>, Type<Loc, Name>)>>,
+    globals: Arc<IndexMap<Name, (Loc, Vec<Name>, Type<Loc, Name>)>>,
     vars: IndexSet<Name>,
 }
 
 impl<Loc: Clone, Name: Clone + Eq + Hash> TypeDefs<Loc, Name> {
+    pub fn new_with_validation(
+        globals: &[(Loc, Name, Vec<Name>, Type<Loc, Name>)],
+    ) -> Result<Self, TypeError<Loc, Name>> {
+        let mut globals_map = IndexMap::new();
+        for (loc, name, params, typ) in globals {
+            if let Some((loc1, _, _)) =
+                globals_map.insert(name.clone(), (loc.clone(), params.clone(), typ.clone()))
+            {
+                return Err(TypeError::TypeNameAlreadyDefined(
+                    loc.clone(),
+                    loc1,
+                    name.clone(),
+                ));
+            }
+        }
+
+        let type_defs = Self {
+            globals: Arc::new(globals_map),
+            vars: IndexSet::new(),
+        };
+
+        for (name, (_, params, typ)) in type_defs.globals.iter() {
+            let mut type_defs = type_defs.clone();
+            for param in params {
+                type_defs.vars.insert(param.clone());
+            }
+            type_defs.validate_type(
+                typ,
+                &IndexSet::from([name.clone()]),
+                &IndexSet::new(),
+                &IndexSet::new(),
+            )?;
+        }
+
+        Ok(type_defs)
+    }
+
     pub fn get(
         &self,
         loc: &Loc,
@@ -87,7 +134,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> TypeDefs<Loc, Name> {
             return Ok(Type::Var(loc.clone(), name.clone()));
         }
         match self.globals.get(name) {
-            Some((params, typ)) => {
+            Some((_, params, typ)) => {
                 if params.len() != args.len() {
                     return Err(TypeError::WrongNumberOfTypeArgs(
                         loc.clone(),
@@ -127,7 +174,7 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> TypeDefs<Loc, Name> {
             ));
         }
         match self.globals.get(name) {
-            Some((params, typ)) => {
+            Some((_, params, typ)) => {
                 if params.len() != args.len() {
                     return Err(TypeError::WrongNumberOfTypeArgs(
                         loc.clone(),
@@ -145,10 +192,74 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> TypeDefs<Loc, Name> {
             None => Err(TypeError::TypeNameNotDefined(loc.clone(), name.clone())),
         }
     }
-}
 
-#[derive(Clone, Debug)]
-pub struct Declarations<Loc, Name>(pub IndexMap<Name, Option<Type<Loc, Name>>>);
+    fn validate_type(
+        &self,
+        typ: &Type<Loc, Name>,
+        deps: &IndexSet<Name>,
+        self_pos: &IndexSet<Option<Name>>,
+        self_neg: &IndexSet<Option<Name>>,
+    ) -> Result<(), TypeError<Loc, Name>> {
+        Ok(match typ {
+            Type::Chan(_, t) => self.validate_type(t, deps, self_neg, self_pos)?,
+            Type::Var(loc, name) => {
+                self.get(loc, name, &[])?;
+            }
+            Type::Name(loc, name, args) => {
+                let mut deps = deps.clone();
+                if !self.vars.contains(name) {
+                    if !deps.insert(name.clone()) {
+                        return Err(TypeError::DependencyCycle(
+                            loc.clone(),
+                            deps.into_iter().skip_while(|dep| dep != name).collect(),
+                        ));
+                    }
+                }
+                let t = self.get(loc, name, args)?;
+                self.validate_type(&t, &deps, self_pos, self_neg)?;
+            }
+            Type::Send(_, t, u) => {
+                self.validate_type(t, deps, self_pos, self_neg)?;
+                self.validate_type(u, deps, self_pos, self_neg)?;
+            }
+            Type::Receive(_, t, u) => {
+                self.validate_type(t, deps, self_neg, self_pos)?;
+                self.validate_type(u, deps, self_pos, self_neg)?;
+            }
+            Type::Either(_, branches) | Type::Choice(_, branches) => {
+                for (_, t) in branches {
+                    self.validate_type(t, deps, self_pos, self_neg)?;
+                }
+            }
+            Type::Break(_) | Type::Continue(_) => (),
+            Type::Recursive(_, _, label, body) | Type::Iterative(_, _, label, body) => {
+                let (mut self_pos, mut self_neg) = (self_pos.clone(), self_neg.clone());
+                self_pos.insert(label.clone());
+                self_neg.shift_remove(label);
+                self.validate_type(body, deps, &self_pos, &self_neg)?;
+            }
+            Type::Self_(loc, label) => {
+                if self_neg.contains(label) {
+                    return Err(TypeError::SelfUsedInNegativePosition(
+                        loc.clone(),
+                        label.clone(),
+                    ));
+                }
+                if !self_pos.contains(label) {
+                    return Err(TypeError::NoMatchingRecursiveOrIterative(
+                        loc.clone(),
+                        label.clone(),
+                    ));
+                }
+            }
+            Type::SendType(_, name, body) | Type::ReceiveType(_, name, body) => {
+                let mut with_var = self.clone();
+                with_var.vars.insert(name.clone());
+                with_var.validate_type(body, deps, self_pos, self_neg)?;
+            }
+        })
+    }
+}
 
 impl<Loc, Name> Type<Loc, Name> {
     pub fn get_loc(&self) -> &Loc {
@@ -620,7 +731,9 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                 loc,
                 name,
                 args.into_iter()
-                    .map(|arg| Ok(arg.expand_recursive_helper(top_asc, top_label, top_body, type_defs)?))
+                    .map(|arg| {
+                        Ok(arg.expand_recursive_helper(top_asc, top_label, top_body, type_defs)?)
+                    })
                     .collect::<Result<_, _>>()?,
             ),
 
@@ -738,7 +851,9 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                 loc,
                 name,
                 args.into_iter()
-                    .map(|arg| Ok(arg.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?))
+                    .map(|arg| {
+                        Ok(arg.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?)
+                    })
                     .collect::<Result<_, _>>()?,
             ),
 
@@ -876,9 +991,19 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
 #[derive(Clone, Debug)]
 pub struct Context<Loc, Name> {
     type_defs: TypeDefs<Loc, Name>,
-    declarations: Declarations<Loc, Name>,
+    declarations: Arc<IndexMap<Name, (Loc, Type<Loc, Name>)>>,
+    unchecked_definitions: Arc<IndexMap<Name, (Loc, Arc<Expression<Loc, Name, ()>>)>>,
+    checked_definitions: Arc<RwLock<IndexMap<Name, CheckedDef<Loc, Name>>>>,
+    current_deps: IndexSet<Name>,
     variables: IndexMap<Name, Type<Loc, Name>>,
     loop_points: IndexMap<Option<Name>, (Name, Arc<IndexMap<Name, Type<Loc, Name>>>)>,
+}
+
+#[derive(Clone, Debug)]
+struct CheckedDef<Loc, Name> {
+    loc: Loc,
+    def: Arc<Expression<Loc, Name, Type<Loc, Name>>>,
+    typ: Type<Loc, Name>,
 }
 
 impl<Loc, Name> Context<Loc, Name>
@@ -886,25 +1011,122 @@ where
     Loc: Clone + Eq + Hash,
     Name: Clone + Eq + Hash,
 {
-    pub fn new(
-        globals_type_defs: Arc<IndexMap<Name, (Vec<Name>, Type<Loc, Name>)>>,
-        declarations: Declarations<Loc, Name>,
-    ) -> Self {
-        Self {
-            type_defs: TypeDefs {
-                globals: globals_type_defs,
-                vars: IndexSet::new(),
-            },
-            declarations,
+    pub fn new_with_type_checking(
+        program: &Program<Loc, Name, Arc<Expression<Loc, Name, ()>>>,
+    ) -> Result<Self, TypeError<Loc, Name>> {
+        let type_defs = TypeDefs::new_with_validation(&program.type_defs)?;
+
+        let mut unchecked_definitions = IndexMap::new();
+        for (loc, name, expr) in &program.definitions {
+            if let Some((loc1, _)) =
+                unchecked_definitions.insert(name.clone(), (loc.clone(), expr.clone()))
+            {
+                return Err(TypeError::NameAlreadyDefined(
+                    loc.clone(),
+                    loc1.clone(),
+                    name.clone(),
+                ));
+            }
+        }
+
+        let mut declarations = IndexMap::new();
+        for (loc, name, typ) in &program.declarations {
+            if !unchecked_definitions.contains_key(name) {
+                return Err(TypeError::DeclaredButNotDefined(loc.clone(), name.clone()));
+            }
+            if let Some((loc1, _)) = declarations.insert(name.clone(), (loc.clone(), typ.clone())) {
+                return Err(TypeError::NameAlreadyDeclared(
+                    loc.clone(),
+                    loc1,
+                    name.clone(),
+                ));
+            }
+        }
+
+        let mut context = Context {
+            type_defs,
+            declarations: Arc::new(declarations),
+            unchecked_definitions: Arc::new(unchecked_definitions),
+            checked_definitions: Arc::new(RwLock::new(IndexMap::new())),
+            current_deps: IndexSet::new(),
             variables: IndexMap::new(),
             loop_points: IndexMap::new(),
+        };
+
+        let names_to_check = context
+            .unchecked_definitions
+            .iter()
+            .map(|(name, (loc, _))| (loc.clone(), name.clone()))
+            .collect::<Vec<_>>();
+        for (loc, name) in names_to_check {
+            context.check_definition(&loc, &name)?;
         }
+
+        Ok(context)
+    }
+
+    fn check_definition(
+        &mut self,
+        loc: &Loc,
+        name: &Name,
+    ) -> Result<Type<Loc, Name>, TypeError<Loc, Name>> {
+        if let Some(checked) = self.checked_definitions.read().unwrap().get(name) {
+            return Ok(checked.typ.clone());
+        }
+
+        let Some((loc_def, unchecked_def)) = self.unchecked_definitions.get(name).cloned() else {
+            return Err(TypeError::NameNotDefined(loc.clone(), name.clone()));
+        };
+
+        if !self.current_deps.insert(name.clone()) {
+            return Err(TypeError::DependencyCycle(
+                loc.clone(),
+                self.current_deps
+                    .iter()
+                    .cloned()
+                    .skip_while(|dep| dep != name)
+                    .collect(),
+            ));
+        }
+
+        let (checked_def, checked_type) = match self.declarations.get(name).cloned() {
+            Some((_, declared_type)) => {
+                let checked_def = self.check_expression(None, &unchecked_def, &declared_type)?;
+                (checked_def, declared_type)
+            }
+            None => self.infer_expression(None, &unchecked_def)?,
+        };
+
+        self.checked_definitions.write().unwrap().insert(
+            name.clone(),
+            CheckedDef {
+                loc: loc_def,
+                def: checked_def,
+                typ: checked_type.clone(),
+            },
+        );
+
+        Ok(checked_type)
+    }
+
+    pub fn get_checked_definitions(
+        &self,
+    ) -> Vec<(Loc, Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>)> {
+        self.checked_definitions
+            .read()
+            .unwrap()
+            .iter()
+            .map(|(name, checked)| (checked.loc.clone(), name.clone(), checked.def.clone()))
+            .collect()
     }
 
     pub fn split(&self) -> Self {
         Self {
             type_defs: self.type_defs.clone(),
             declarations: self.declarations.clone(),
+            unchecked_definitions: self.unchecked_definitions.clone(),
+            checked_definitions: self.checked_definitions.clone(),
+            current_deps: self.current_deps.clone(),
             variables: IndexMap::new(),
             loop_points: self.loop_points.clone(),
         }
@@ -917,14 +1139,7 @@ where
     pub fn get(&mut self, loc: &Loc, name: &Name) -> Result<Type<Loc, Name>, TypeError<Loc, Name>> {
         match self.get_variable(name) {
             Some(typ) => Ok(typ),
-            None => match self.declarations.0.get(name) {
-                Some(Some(typ)) => Ok(typ.clone()),
-                Some(None) => Err(TypeError::TypeMustBeKnownAtThisPoint(
-                    loc.clone(),
-                    name.clone(),
-                )),
-                None => Err(TypeError::NameNotDefined(loc.clone(), name.clone())),
-            },
+            None => self.check_definition(loc, name),
         }
     }
 
@@ -945,10 +1160,6 @@ where
         for (_, t) in &mut self.variables {
             t.invalidate_ascendent(label);
         }
-    }
-
-    pub fn add_declaration(&mut self, name: Name, typ: Type<Loc, Name>) {
-        self.declarations.0.insert(name, Some(typ));
     }
 
     pub fn capture(
@@ -1854,8 +2065,62 @@ fn indentation(f: &mut impl Write, indent: usize) -> fmt::Result {
 impl<Loc, Name: Display> TypeError<Loc, Name> {
     pub fn pretty(&self, display_loc: impl Fn(&Loc) -> String) -> String {
         match self {
+            Self::TypeNameAlreadyDefined(loc1, loc2, name) => {
+                format!(
+                    "{}\nType `{}` is already defined here:\n\n{}",
+                    display_loc(loc1),
+                    name,
+                    display_loc(loc2)
+                )
+            }
+            Self::NameAlreadyDeclared(loc1, loc2, name) => {
+                format!(
+                    "{}\n`{}` is already declared here:\n\n{}",
+                    display_loc(loc1),
+                    name,
+                    display_loc(loc2),
+                )
+            }
+            Self::NameAlreadyDefined(loc1, loc2, name) => {
+                format!(
+                    "{}\n`{}` is already defined here:\n\n{}",
+                    display_loc(loc1),
+                    name,
+                    display_loc(loc2),
+                )
+            }
+            Self::DeclaredButNotDefined(loc, name) => {
+                format!(
+                    "{}\n`{}` is declared here, but is missing a corresponding definition.",
+                    display_loc(loc),
+                    name
+                )
+            }
+            Self::NoMatchingRecursiveOrIterative(loc, _) => {
+                format!(
+                    "{}\nThis `self` has no matching `recursive` or `iterative`.",
+                    display_loc(loc)
+                )
+            }
+            Self::SelfUsedInNegativePosition(loc, _) => {
+                format!("{}\nThis `self` is used in a negative position.\n\nNegative self-references are not allowed.", display_loc(loc))
+            }
             Self::TypeNameNotDefined(loc, name) => {
                 format!("{}\nType `{}` is not defined.", display_loc(loc), name)
+            }
+            Self::DependencyCycle(loc, deps) => {
+                let mut deps_str = String::new();
+                for (i, dep) in deps.iter().enumerate() {
+                    if i > 0 {
+                        write!(&mut deps_str, " -> ").unwrap();
+                    }
+                    write!(&mut deps_str, "{}", dep).unwrap();
+                }
+                format!(
+                    "{}\nThere is a dependency cycle:\n\n  {}\n\nDependency cycles are not allowed.",
+                    display_loc(loc),
+                    deps_str
+                )
             }
             Self::WrongNumberOfTypeArgs(loc, name, required_number, provided_number) => {
                 format!(
