@@ -323,7 +323,7 @@ def negate_choice = chan return: ChanBoolChoice<Bool, Bool> {
 
 > **<sup>Syntax</sup>**\
 > _SendCommand_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; _Receiver_ `begin` _LoopLabel_<sup>?</sup>
+> &nbsp;&nbsp; &nbsp;&nbsp; _Receiver_ `unfounded`<sup>?</sup> `begin` _LoopLabel_<sup>?</sup>
 >
 > _LoopCommand_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; _Receiver_ `loop` _LoopLabel_<sup>?</sup>
@@ -338,6 +338,15 @@ def negate_choice = chan return: ChanBoolChoice<Bool, Bool> {
 </sup>*
 
 A `loop` corresponds to the innermost `begin` with the same loop label. `loop` without a label can only correspond to `begin` without a label.
+
+<div class="warning">
+
+Due to totality, `loop` can only be called on a descendant of the value `begin` was called on. I.e. on a value which type is a "`self`" correponding to the recursive type which `begin` was called on.
+
+If that is not the case, the unsafe `unfounded begin` must be used, which leaves it up to the programmer to ensure totality.
+
+For examples, see recursive destructing [expressions](../expressions/application.md#recursive-destructions).
+</div>
 
 A recursive command can destruct a recursive type:
 ```par

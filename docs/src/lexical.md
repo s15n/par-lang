@@ -60,7 +60,8 @@ Some invalid identifiers are:
 | `either` | [Either types](types.md#either-types) |
 | `recursive` | [Recursive types](types.md#recursive-types) |
 | `iterative` | [Iterative types](types.md#iterative-types) |
-| `self` | [Recursive](types.md#recursive-types) and [iterative](types.md#iterative-types) types
+| `self` | [Recursive](types.md#recursive-types) and [iterative](types.md#iterative-types) types |
+| `unfounded` | Escape totality checker in recursive [expressions](./expressions/application.md#recursive-destructions) and [statements](./statements/commands.md#recursive-commands) |
 
 ## Punctuation
 
@@ -72,11 +73,12 @@ Some invalid identifiers are:
 | `!` | Unit [type](./types.md#the-unit-type), [expression](./expressions/construction.md#the-unit-expression), [pattern](./patterns.md#the-unit-pattern), [Break command](./statements/commands.md#the-break-command) |
 | `?` | [Bottom type](./types.md#the-bottom-type), [Continue command](./statements/commands.md#the-continue-command) |
 | `.` | Labels of either or choice types, used in various places
+| `<>` | [Link commands](./statements/commands.md#link-commands) |
 | `<` | Type [parameters](items.md) and [arguments](types.md) |
 | `>` | Type [parameters](items.md) and [arguments](types.md) |
 | `=>` | Choice [types](./types.md#choice-types) and [constructions](./expressions/construction.md#choice-constructions), Match [expressions](./expressions/application.md#match-expressions) and [commands](./statements/commands.md#match-commands) |
-| `(` ... `)` | Pairs, functions |
-| `[` ... `]` | Functions, pairs |
+| `(` ... `)` | Pairs, function application |
+| `[` ... `]` | Functions, pair destruction |
 | `{` ... `}` | Either and choice types, processes |
 
 ## Whitespace

@@ -10,6 +10,13 @@ Process syntax is introduced by the _Proces_ Rule:
 
 > **<sup>Syntax</sup>**\
 > _Process_ : (_Statement_ (`;`<sup>?</sup> _Statement_) (`;`<sup>?</sup> _TerminatingStatement_)<sup>?</sup>)<sup>?</sup>
+>
+> _Statement_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; [_Command_] \
+> &nbsp;&nbsp; | [_LetStatement_]
+>
+> _TerminatingStatement_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; [_TerminatingCommand_]
 
 It is used in the following places:
 - [do expressions](./expressions.md#do-expressions):
@@ -25,13 +32,6 @@ It is used in the following places:
   The process here must use a terminating statement. It constructs `x` by destructing its dual, `dual`.
 
 
-> **<sup>Syntax</sup>**\
-> _Statement_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; [_Command_] \
-> &nbsp;&nbsp; | [_LetStatement_]
->
-> _TerminatingStatement_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; [_TerminatingCommand_]
 
 ## Let Statements
 

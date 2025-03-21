@@ -60,9 +60,8 @@ hljs.registerLanguage("par", function(hljs) {
       name: "Par",
       aliases: ["par"],
       keywords: {
-          keyword: "type either recursive iterative begin loop self trait for impl let derive in chan do pass todo dec def",
-          literal: "",
-          built_in: "Bool Nat List Option"
+          keyword: "type either recursive iterative begin loop self trait for impl let derive in chan do pass todo dec def unfounded",
+          literal: ""
       },
       illegal: "",
       contains: [
@@ -77,12 +76,16 @@ hljs.registerLanguage("par", function(hljs) {
               begin: /"(.|\n)*?"/
           }, 
           {
+              className: "type",
+              begin: /[A-Z][a-zA-Z0-9_]*/
+          }, 
+          {
               className: "name",
-              begin: /\.[a-zA-Z_][a-zA-Z0-9_\-]*/
+              begin: /\.[a-zA-Z_][a-zA-Z0-9_]*/
           }, 
           {
               className: "tag",
-              begin: /[#@][a-zA-Z_][a-zA-Z0-9_\-]*/
+              begin: /[#@][a-zA-Z_][a-zA-Z0-9_]*/
           },
           {
               className: "number",

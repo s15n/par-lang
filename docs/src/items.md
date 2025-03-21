@@ -6,6 +6,8 @@
 > &nbsp;&nbsp; | [_Declaration_](#definitions) \
 > &nbsp;&nbsp; | [_Definition_](#definitions)
 
+Items are the primary building block of Par programs.
+
 ## Definitions
 
 > **<sup>Syntax</sup>**\

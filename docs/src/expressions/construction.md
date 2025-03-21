@@ -20,7 +20,7 @@
 
 *<sup>
 [Type](../types.md#the-unit-type)
-| [Pattern](../patterns.md#todo)
+| [Pattern](../patterns.md#the-unit-pattern)
 | [Statement](../statements/commands.md#the-break-command)
 | [Destructing Statement](../statements/commands.md#the-continue-command)
 </sup>*
@@ -47,14 +47,47 @@ dual!
 
 *<sup>
 [Type](../types.md#pair-types)
-| [Pattern](../patterns.md#todo)
+| [Pattern](../patterns.md#pair-patterns)
 | [Statement](../statements/commands.md#send-commands)
 | [Destructing Statement](../statements/commands.md#receive-commands)
 </sup>*
 
+Having multiple expressions between `(` and `)` is just syntax sugar:
+```par
+(a, b) c
+// is equivalent to
+(a) (b) c
+```
+
 If `a` is of type `A` and `b` is of type `B`, the pair expression `(a) b` is of the [pair type](../types.md#pair-types) `(A) B`.
 
-todo
+```par
+let bool_pair: (Bool, Bool)! = (.true!, .false!)!
+```
+
+The difference between representing a pair of `A` and `B` as `(A, B)!` or `(A) B` is:
+- `(A1, ..., An)!`. is the default for regular tuples.
+  ```par
+  let zero_to_two: (Nat, Nat, Nat)! = (
+    .zero!,
+    .succ.zero!,
+    .succ.succ.zero!,
+  )!
+  ```
+
+- `(A1, ..., An) B` more specifically means "send `A1`, ..., and `An`, then continue as `B`". It's used when all but the last member of a tuple should be received separately and the receiver should continue as the last one. For example:
+  ```par
+  def length: [List] (Nat) List = [l] l begin {
+    .empty! => (.zero!) .empty!,
+    .item(head) tail => do {
+      // tail loop is of type (Nat) List
+      tail loop
+      // receive len_pred 
+      tail[len_pred]
+      // tail is now as before
+    } in (.succ len_pred) .item(head) tail
+  }
+  ```
 
 Pair expressions can be linked via:
 ```par
@@ -77,9 +110,21 @@ dual <> b
 | [Destructing Statement](../statements/commands.md#send-commands)
 </sup>*
 
+Having multiple patterns between `[` and `]` is just syntax sugar:
+```par
+[p, q] x
+// is equivalent to
+[p] [q] x
+```
+
 If `p` is an [irrefutable](patterns.md#irrefutable-note) pattern for type `A` and `b` (wich must use the bindings of `p`) is of type `B`, the function expression `[p] b` is of the [function type](../types.md#function-types) `[A] B`.
 
-todo
+We've already seen a lot of functions, so here's a simple one:
+```par
+def add2: [Nat] Nat = [n] .succ.succ n
+```
+
+Note that function expressions are the primary way of defining functions in par. Defining a function looks the same as defining any other value.
 
 Function expressions can be linked via:
 ```par
@@ -104,7 +149,25 @@ dual <> b
 The type of an either selection cannot be inferred from itself. \
 A selection of the [either type](../types.md#either-types) `either { .a A, .b B }` is either `.a a` if `a` is of type `A` or `.b b` if `b` is of type `B`.
 
-todo
+```par
+type Bool = either {
+  .true!,
+  .false!,
+}
+
+def true: Bool = .true!
+```
+[Recursive types](../types.md#recursive-types) have no special construction syntax, instead they are finitely constructed as their underlying type. Most often they're seen as `recursive either` types:
+```par
+type Nat = recursive either {
+  .zero!,
+  .succ self,
+}
+
+// construct a value of the recursive
+// Nat type like any other either type
+def two = .succ.succ.zero!
+```
 
 Either selections can be linked via:
 ```par
@@ -138,7 +201,18 @@ Some patterns can be used on the left side:
 - `{ .a(p) => a }` is equivalent to `{ .a => [p] a }`
 - `{ .a(type T) => a }` is equivalent to `{ .a => [type T] a }`
 
-todo
+Choice constructions look very similar to [match expressions](application.md#match-expressions) (intentionally!).
+```par
+type BoolChoice = {
+  .true => Bool,
+  .false => Bool,
+}
+
+def negate: BoolChoice = {
+  .true => .false!,
+  .false => .true!,
+}
+```
 
 Choice constructions can be linked via:
 ```par
@@ -168,7 +242,22 @@ If --- given every `loop` in `a` is of type `iterative A` --- `a` is of type `A`
 
 A `loop` corresponds to the innermost `begin` with the same loop label. `loop` without a label can only correspond to `begin` without a label.
 
-todo
+Iterative types are constructed with `begin`-`loop` and as such, their values are often infinite. This is not a problem, however, as they don't have special syntax for destruction, i.e. they can only be finitely destructed.
+```par
+type Omega = iterative {
+  .close => !,
+  .next => self,
+}
+
+// This value is infinite:
+// .next can be called as often
+// as one desires
+// (but only finitely many times)
+def omega: Omega = begin {
+  .close => !,
+  .next => loop,
+}
+```
 
 Iterative constructions can be linked via:
 ```par
@@ -186,14 +275,26 @@ dual <> a // with loop in a replaced by begin a
 
 *<sup>
 [Type](../types.md#existential-types)
-| [Pattern](../patterns.md#todo)
+| [Pattern](../patterns.md#existential-patterns)
 | [Statement](../statements/commands.md#send-type-commands)
 | [Destructing Statement](../statements/commands.md#receive-type-commands)
 </sup>*
 
+Having multiple types between `(` and `)` is just syntax sugar:
+```par
+(type A, B) c
+// is equivalent to
+(type A) (type B) c
+```
+
 If `a` is of type `A`, the existential construction `(type T) a` is of the [existential type](../types.md#existential-types) `(type T) A`.
 
-todo
+```par
+type Any = (type T) T
+
+let any_bool: Any = (type Bool) .true!
+let any_unit: Any = (type !) !
+```
 
 Existential constructions can be linked via:
 ```par
@@ -215,9 +316,22 @@ dual <> a
 | [Destructing Statement](../statements/commands.md#send-type-commands)
 </sup>*
 
+Having multiple names between `(` and `)` is just syntax sugar:
+```par
+[type T, U] x
+// is equivalent to
+[type T] [type U] x
+```
+
 If `a` is of type `A`, the universal construction `[type T] a` (where `a` can use the type `T`) is of the [universal type](../types.md#universal-types) `[type T] A`.
 
-todo
+Universal constructions are moslty used to define "generic functions":
+```par
+def empty_list : [type T] List<T> = [type T] .empty!
+
+// called via
+let bools: List<Bool> = empty_list(type Bool)
+```
 
 Universal constructions can be linked via:
 ```par

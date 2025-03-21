@@ -57,6 +57,22 @@ dual <> expr
 
 The second expression must use all bindings of the pattern (which must be [irrefutable](patterns.md#irrefutable-note)) due to linearity.
 
+Let expressions make code easier to read by creating an expression in multiple steps. Compare:
+```par
+let x = call_a_long_function(and_another_one(y))
+in (.true!, x, .false!)!
+// with
+(.true!, call_a_long_function(and_another_one(y)), .false!)!
+```
+But arguably even morer useful are the destruction-by-pattern capabilities let expressions offer:
+```par
+// this expression is not possible
+// without let or do expressions
+let (b1, b2)! = copy_bool(b)
+in (b1, not(b2))!
+```
+[Let statements](./statements.md#let-statements) are very similar, so when multiple let expressions in a row would be required, it's often more convenient to switch to those and put them inside [do expressions](#do-expressions).
+
 Let expressions can be linked via:
 ```par
 dual <> let p = x in y
