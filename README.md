@@ -32,7 +32,7 @@ _(Dual types are on the same line.)_
 
 - **Pairs** (easily extensible to tuples), and **functions** (naturally curried).
 - **Eithers** (sum types), and **choices** (unusual, but powerful dispatchers).
-- **Recursive,** (finite) and **iterative** (co-recursive, potentially infinite) types, with totality checking.
+- **Recursive** (finite), and **iterative** (co-recursive, potentially infinite) types, with totality checking.
 - **Universally,** and **existentially** quantified generic functions and values.
 - **Unit,** and **continuation.**
 
@@ -88,7 +88,7 @@ type Player = iterative :game {
 }
 ```
 
-## 🛡️ Total
+## 🛡️ Total*
 
 **No crashes.** Runtime exceptions are not supported, except for running out of memory.
 
