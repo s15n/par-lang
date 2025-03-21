@@ -45,7 +45,7 @@ use std::{
 
 use crate::icombs::Name;
 
-type Prog = Arc<Program<Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>>;
+type Prog = Arc<Program<Loc, Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>>;
 #[derive(Clone)]
 pub struct ReadbackStateInner {
     pub shared: SharedState,
@@ -482,11 +482,11 @@ pub fn prepare_type_for_readback(
                     type_defs.get(&loc, &name, &args).unwrap()
                 }
             }
-            Type::Recursive(_, label, body) => {
-                Type::expand_recursive(&label, &*body, &type_defs).unwrap()
+            Type::Recursive(_, asc, label, body) => {
+                Type::expand_recursive(&asc, &label, &*body, &type_defs).unwrap()
             }
-            Type::Iterative(_, label, body) => {
-                Type::expand_iterative(&label, &*body, &type_defs).unwrap()
+            Type::Iterative(_, asc, label, body) => {
+                Type::expand_iterative(&asc, &label, &*body, &type_defs).unwrap()
             }
             ty => break ty,
         };
@@ -542,8 +542,12 @@ impl ReadbackImplLevel {
                 .map(|x| ReadbackImplLevel::from_type(x, prog, type_variables))
                 .fold(Ok, ReadbackImplLevel::bitand),
             Type::Break(_) | Type::Continue(_) => Ok,
-            Type::Recursive(_, _, body) => ReadbackImplLevel::from_type(body, prog, type_variables),
-            Type::Iterative(_, _, body) => ReadbackImplLevel::from_type(body, prog, type_variables),
+            Type::Recursive(_, _, _, body) => {
+                ReadbackImplLevel::from_type(body, prog, type_variables)
+            }
+            Type::Iterative(_, _, _, body) => {
+                ReadbackImplLevel::from_type(body, prog, type_variables)
+            }
             Type::ReceiveType(_, name, body) | Type::SendType(_, name, body) => {
                 let inserted = type_variables.insert(name.clone());
                 let res =

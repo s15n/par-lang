@@ -1,9 +1,9 @@
 WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
-COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
+COMMENT = _{ ("//" ~ (!"\n" ~ ANY)*) | ("/*" ~ (!"*/" ~ ANY)* ~ "*/") }
 
 keyword = {
     "type" | "dec" | "def" |
-    "chan" | "let" | "do" | "in" | "begin" | "loop" | "telltypes" |
+    "chan" | "let" | "do" | "in" | "begin" | "unfounded" | "loop" | "telltypes" |
     "either" | "recursive" | "iterative" | "self"
 }
 
@@ -54,7 +54,7 @@ expr_let   = { "let" ~ pattern ~ "=" ~ expression ~ "in" ~ expression }
 expr_do    = { "do" ~ "{" ~ process ~ "}" ~ "in" ~ expression }
 expr_fork  = { "chan" ~ name ~ annotation ~ "{" ~ process ~ "}" }
 
-construction   = { cons_begin | cons_loop | cons_then | cons_send | cons_receive | cons_choose | cons_either | cons_break | cons_send_type | cons_recv_type }
+construction   = { cons_begin | cons_unfounded | cons_loop | cons_then | cons_send | cons_receive | cons_choose | cons_either | cons_break | cons_send_type | cons_recv_type }
 cons_then      = { expr_fork | expr_let | expr_do | application | ("{" ~ expression ~ "}") }
 cons_send      = { "(" ~ expression_list ~ ")" ~ construction }
 cons_receive   = { "[" ~ pattern_list ~ "]" ~ construction }
@@ -62,6 +62,7 @@ cons_choose    = { "." ~ name ~ construction }
 cons_either    = { "{" ~ ("." ~ name ~ cons_branch ~ ","?)* ~ "}" }
 cons_break     = { "!" }
 cons_begin     = { "begin" ~ loop_label ~ construction }
+cons_unfounded = { "unfounded" ~ "begin" ~ loop_label ~ construction }
 cons_loop      = { "loop" ~ loop_label }
 cons_send_type = { "(" ~ "type" ~ typ_list ~ ")" ~ construction }
 cons_recv_type = { "[" ~ "type" ~ name_list ~ "]" ~ construction }
@@ -72,12 +73,13 @@ cons_branch_receive   = { "(" ~ pattern_list ~ ")" ~ cons_branch }
 cons_branch_recv_type = { "(" ~ "type" ~ name_list ~ ")" ~ cons_branch }
 
 application     = { (name | "{" ~ expression ~ "}") ~ apply }
-apply           = { apply_begin | apply_loop | apply_send | apply_choose | apply_either | apply_send_type | apply_noop }
+apply           = { apply_begin | apply_unfounded | apply_loop | apply_send | apply_choose | apply_either | apply_send_type | apply_noop }
 apply_noop      = { "" }
 apply_send      = { "(" ~ expression_list ~ ")" ~ apply }
 apply_choose    = { "." ~ name ~ apply }
 apply_either    = { "{" ~ ("." ~ name ~ apply_branch ~ ","?)* ~ "}" }
 apply_begin     = { "begin" ~ loop_label ~ apply }
+apply_unfounded = { "unfounded" ~ "begin" ~ loop_label ~ apply }
 apply_loop      = { "loop" ~ loop_label }
 apply_send_type = { "(" ~ "type" ~ typ_list ~ ")" ~ apply }
 
@@ -93,7 +95,7 @@ proc_telltypes = { "telltypes" ~ process }
 proc_noop      = { "" }
 
 command       = { name ~ cmd }
-cmd           = { cmd_link | cmd_send | cmd_receive | cmd_choose | cmd_either | cmd_break | cmd_continue | cmd_begin | cmd_loop | cmd_send_type | cmd_recv_type | cmd_then }
+cmd           = { cmd_link | cmd_send | cmd_receive | cmd_choose | cmd_either | cmd_break | cmd_continue | cmd_begin | cmd_unfounded | cmd_loop | cmd_send_type | cmd_recv_type | cmd_then }
 cmd_then      = { process }
 cmd_link      = { "<>" ~ expression }
 cmd_send      = { "(" ~ expression_list ~ ")" ~ cmd }
@@ -103,6 +105,7 @@ cmd_either    = { "{" ~ cmd_branches ~ "}" ~ pass_process? }
 cmd_break     = { "!" }
 cmd_continue  = { "?" ~ process }
 cmd_begin     = { "begin" ~ loop_label ~ cmd }
+cmd_unfounded = { "unfounded" ~ "begin" ~ loop_label ~ cmd }
 cmd_loop      = { "loop" ~ loop_label }
 cmd_send_type = { "(" ~ "type" ~ typ_list ~ ")" ~ cmd }
 cmd_recv_type = { "[" ~ "type" ~ name_list ~ "]" ~ cmd }

@@ -62,7 +62,6 @@ def quant = (type Bool) (.true!) (.false!) [x] [y] x {
 
 }
 
-type Bool  = either { .true!, .false! }
 type Color = either { .red!, .green!, .blue! }
 
 type List<T> = recursive either {
@@ -131,11 +130,6 @@ def swap = [bool] bool {
   .false! => .true!
 }
 
-dec true  : Bool
-dec false : Bool
-
-def true  = chan result { result.true! }
-def false = chan result { result.false! }
 
 def bools_forever =
   let bool: Bool = .true! in
@@ -178,25 +172,6 @@ def zip2 = [type T, U] [seq1: Seq<T>, seq2: Seq<U>] begin {
 }
 
 
-type List<T> = recursive either {
-  .empty!
-  .item(T) self
-}
-
-dec alternate : [type A, B] [List<A>, List<B>] recursive either {
-  .remainder either {
-    .left List<A>
-    .right List<B>
-  }
-  .choice {
-    .left => (A) self
-    .right => (B) self
-  }
-}
-type List<T> = recursive either {
-  .empty!
-  .item(T) self
-}
 
 type Alternate<A, B> = recursive either {
   .remainder either {

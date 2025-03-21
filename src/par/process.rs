@@ -33,7 +33,7 @@ pub enum Command<Loc, Name, Typ> {
     Match(Arc<[Name]>, Box<[Arc<Process<Loc, Name, Typ>>]>),
     Break,
     Continue(Arc<Process<Loc, Name, Typ>>),
-    Begin(Option<Name>, Arc<Process<Loc, Name, Typ>>),
+    Begin(bool, Option<Name>, Arc<Process<Loc, Name, Typ>>),
     Loop(Option<Name>),
 
     SendType(Type<Loc, Name>, Arc<Process<Loc, Name, Typ>>),
@@ -171,8 +171,8 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Process<Loc, Name, Typ> {
                     }
                     Command::Break => Command::Break,
                     Command::Continue(process) => Command::Continue(process.optimize()),
-                    Command::Begin(label, process) => {
-                        Command::Begin(label.clone(), process.optimize())
+                    Command::Begin(unfounded, label, process) => {
+                        Command::Begin(unfounded.clone(), label.clone(), process.optimize())
                     }
                     Command::Loop(label) => Command::Loop(label.clone()),
                     Command::SendType(argument, process) => {
@@ -236,12 +236,12 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Command<Loc, Name, Typ> {
                 let (process, caps) = process.fix_captures(loop_points);
                 (Self::Continue(process), caps)
             }
-            Self::Begin(label, process) => {
+            Self::Begin(unfounded, label, process) => {
                 let (_, caps) = process.fix_captures(loop_points);
                 let mut loop_points = loop_points.clone();
                 loop_points.insert(label.clone(), caps);
                 let (process, caps) = process.fix_captures(&loop_points);
-                (Self::Begin(label.clone(), process), caps)
+                (Self::Begin(unfounded.clone(), label.clone(), process), caps)
             }
             Self::Loop(label) => (
                 Self::Loop(label.clone()),
@@ -363,7 +363,10 @@ impl<Loc, Name: Display, Typ> Process<Loc, Name, Typ> {
                         process.pretty(f, indent)
                     }
 
-                    Command::Begin(label, process) => {
+                    Command::Begin(unfounded, label, process) => {
+                        if *unfounded {
+                            write!(f, " unfounded")?;
+                        }
                         write!(f, " begin")?;
                         if let Some(label) = label {
                             write!(f, " {}", label)?;

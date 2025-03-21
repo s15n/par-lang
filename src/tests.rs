@@ -260,10 +260,11 @@ async fn test_whole_programs() -> Result<(), String> {
         test_family!("fibonacci", include_str!("../examples/fibonacci.par"), []),
         test_family!(
             "rock paper scissors",
-            include_str!("../examples/rock-paper-scissors.par"),
+            include_str!("../examples/rock_paper_scissors.par"),
             []
         ),
         test_family!("flatten", include_str!("../examples/flatten.par"), []),
+        test_family!("bubble", include_str!("../examples/bubble_sort.par"), []),
     ];
     for i in test_families {
         eprintln!("testing family: {}", i.name);
@@ -279,7 +280,10 @@ async fn test_whole_programs() -> Result<(), String> {
                 write!(&mut source, "def test_pat_{} = {}\n", idx, code).unwrap();
             }
         }
-        let compiled = playground::Compiled::from_string(&source).unwrap();
+        let compiled = stacker::grow(32 * 1024 * 1024, || {
+            playground::Compiled::from_string(&source).unwrap()
+        });
+
         let checked = match compiled.checked {
             Ok(o) => o,
             Err(e) => return Err(e.pretty(|x| crate::playground::Error::display_loc(&source, x))),
@@ -309,14 +313,7 @@ async fn test_whole_programs() -> Result<(), String> {
                     let mut tree = ic_compiled.get_with_name(&def_name).unwrap();
                     net.lock().unwrap().freshen_variables(&mut tree);
                     let res = ReadbackResult::Halted(
-                        tree.with_type(
-                            prog.declarations
-                                .get(&def_name)
-                                .unwrap()
-                                .as_ref()
-                                .unwrap()
-                                .clone(),
-                        ),
+                        tree.with_type(prog.declarations.get(&def_name).unwrap().clone().1),
                     );
                     state.result_to_pattern(res).await
                 }
@@ -325,14 +322,7 @@ async fn test_whole_programs() -> Result<(), String> {
             let testing_result = state
                 .matches(
                     ReadbackResult::Halted(
-                        tree.with_type(
-                            prog.declarations
-                                .get(&def_name)
-                                .unwrap()
-                                .as_ref()
-                                .unwrap()
-                                .clone(),
-                        ),
+                        tree.with_type(prog.declarations.get(&def_name).unwrap().clone().1),
                     ),
                     pattern,
                 )

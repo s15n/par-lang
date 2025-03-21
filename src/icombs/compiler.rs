@@ -17,7 +17,7 @@ use crate::par::{
 
 use super::Name;
 
-type Prog = Program<Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>;
+type Prog = Program<Loc, Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>>;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 enum VariableKind {
@@ -201,8 +201,8 @@ impl<'program> Compiler<'program> {
             });
         }
         let global = self.program.definitions.get(name);
-        let (global, typ) = match (global, self.program.declarations.get(name)) {
-            (Some(a), Some(b)) => (a, b),
+        let global = match global {
+            Some(a) => &a.1,
             _ => return Err(Error::GlobalNotFound(name.clone())),
         };
         let debug = false;
@@ -216,19 +216,16 @@ impl<'program> Compiler<'program> {
                 global.pretty(&mut s, 0).unwrap();
                 this.compile_expression(global.as_ref())
             },
-            typ.as_ref(),
             debug,
         )?;
         self.global_name_to_id.insert(name.clone(), id);
         self.compile_global_stack.shift_remove(name);
-
         Ok(Tree::Package(id).with_type(typ))
     }
 
     fn in_package(
         &mut self,
         f: impl FnOnce(&mut Self) -> Result<TypedTree>,
-        typ: Option<&Type<Loc, Name>>,
         debug: bool,
     ) -> Result<(usize, Type<Loc, Name>)> {
         let old_net = core::mem::take(&mut self.net);
@@ -399,11 +396,11 @@ impl<'program> Compiler<'program> {
                 index_map.sort_keys();
                 Type::Choice(loc, index_map)
             }
-            Type::Recursive(_, name, body) => self.normalize_type(
-                Type::expand_recursive(&name, &body, &self.program.type_defs).unwrap(),
+            Type::Recursive(_, asc, name, body) => self.normalize_type(
+                Type::expand_recursive(&asc, &name, &body, &self.program.type_defs).unwrap(),
             ),
-            Type::Iterative(_, name, body) => self.normalize_type(
-                Type::expand_iterative(&name, &body, &self.program.type_defs).unwrap(),
+            Type::Iterative(_, asc, name, body) => self.normalize_type(
+                Type::expand_iterative(&asc, &name, &body, &self.program.type_defs).unwrap(),
             ),
             a => a,
         }
@@ -577,7 +574,7 @@ impl<'program> Compiler<'program> {
                 self.net.link(a, Tree::e());
                 self.compile_process(process)?;
             }
-            Command::Begin(label, process) => {
+            Command::Begin(_, label, process) => {
                 let label = LoopLabel(label.clone());
                 let (def0, def1) = self.net.create_wire();
                 let prev = self.context.vars.insert(
@@ -605,7 +602,6 @@ impl<'program> Compiler<'program> {
                         this.compile_process(process)?;
                         Ok(context_out.with_type(Type::Break(External)))
                     },
-                    None,
                     true,
                 )?;
                 self.net.link(def1, Tree::Package(id));

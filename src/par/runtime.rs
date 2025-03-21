@@ -92,7 +92,7 @@ pub enum Value<Loc, Name> {
 
 pub struct Context<Loc, Name, Typ> {
     spawner: Arc<dyn Spawn + Send + Sync>,
-    globals: Arc<IndexMap<Name, Arc<Expression<Loc, Name, Typ>>>>,
+    globals: Arc<IndexMap<Name, (Loc, Arc<Expression<Loc, Name, Typ>>)>>,
     variables: IndexMap<Name, Value<Loc, Name>>,
     loop_points: IndexMap<Option<Name>, (Name, Arc<Process<Loc, Name, Typ>>)>,
 }
@@ -105,7 +105,7 @@ where
 {
     pub fn new(
         spawner: Arc<dyn Spawn + Send + Sync>,
-        globals: Arc<IndexMap<Name, Arc<Expression<Loc, Name, Typ>>>>,
+        globals: Arc<IndexMap<Name, (Loc, Arc<Expression<Loc, Name, Typ>>)>>,
     ) -> Self {
         Self {
             spawner,
@@ -136,7 +136,7 @@ where
         match self.get_variable(name) {
             Some(value) => Ok(value),
             None => match self.globals.get(name) {
-                Some(expression) => self.evaluate(&Arc::clone(expression)),
+                Some((_, expression)) => self.evaluate(&Arc::clone(expression)),
                 None => self.throw([], Error::NameNotDefined(loc.clone(), name.clone())),
             },
         }
@@ -278,7 +278,7 @@ where
                             current_process = Arc::clone(process);
                         }
 
-                        Command::Begin(point, process) => {
+                        Command::Begin(_, point, process) => {
                             self.loop_points
                                 .insert(point.clone(), (object_name.clone(), Arc::clone(process)));
                             self.put(loc, object_name.clone(), object)?;
