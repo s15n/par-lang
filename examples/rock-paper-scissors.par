@@ -9,7 +9,7 @@ def max_moves = .succ.succ.succ.succ.succ.succ.succ.succ.succ.zero!
 dec destroy_nat: [Nat]!
 def destroy_nat = [nat] nat begin {
   .zero! => !
-  .succ pred => destroy_nat(pred)
+  .succ pred => pred loop
 }
 
 dec play_move: [Move] [Move] either { .win! .lose! .draw! }
