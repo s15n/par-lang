@@ -60,6 +60,14 @@ def reverse = [type T] [list] chan yield {
 
 ## 🔗 Concurrent
 
+**Automatically parallel execution.** Everything that can run in parallel, runs in parallel. Thanks to its
+semantics based on linear logic, Par programs are easily executed in parallel. Sequential execution is only
+enforced by data dependencies.
+
+Par even compiles to [interaction combinators](https://core.ac.uk/download/pdf/81113716.pdf), which is the
+basis for the famous [HVM](https://github.com/HigherOrderCO/HVM), and the
+[Bend](https://github.com/HigherOrderCO/Bend) programming language.
+
 **Structured concurrency with session types.** Session types describe concurrent protocols, almost like
 finite-state machines, and make sure these are upheld in code. Par needs no special library for these.
 Linear types _are_ session types, at least in their full version, which embraces duality.
@@ -80,15 +88,7 @@ type Player = iterative :game {
 }
 ```
 
-**Automatically parallel execution.** Everything that can run in parallel, runs in parallel. Thanks to its
-semantics based on linear logic, Par programs are easily executed in parallel. Sequential execution is only
-enforced by data dependencies.
-
-Par even compiles to [interaction combinators](https://core.ac.uk/download/pdf/81113716.pdf), which is the
-basis for the famous [HVM](https://github.com/HigherOrderCO/HVM), and the
-[Bend](https://github.com/HigherOrderCO/Bend) programming language.
-
-## 🕰️ Total
+## 🛡️ Total
 
 **No crashes.** Runtime exceptions are not supported, except for running out of memory.
 
@@ -120,7 +120,7 @@ off. Vast majority of code doesn't need to opt-out of totality checking, it natu
 Those few parts that need to opt-out are clearly marked with `unfounded`. They are the only places
 that can potentially cause infinite loops._
 
-## ❌ Missing features, to do
+## 📝 To Do
 
 **Par is a fresh project in early stages of development.** While the foundations, including some apparently
 advanced features, are designed and implemented, some basic features are still missing.
@@ -148,7 +148,7 @@ by the famous Phil Wadler.
 While programming in Par feels just like a programming language, even if an unusual one, its programs
 still correspond one-to-one with linear logic proofs.
 
-## 🛠️ Come help us!
+## 🤝 Come help us!
 
 There's still so much to be done! If this project speaks to you, join us on
 [Discord](https://discord.gg/8KsypefW99).
