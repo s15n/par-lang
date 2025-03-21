@@ -13,10 +13,17 @@
 
 ![Screenshot](screenshots/rock_paper_scissors.png)
 
-## 🚀 Get started with the [Language Reference](TODO)
+## 🚀 Get started with the [Language Reference](https://faiface.github.io/par-lang/introduction.html)
 
 It contains instructions to install the **interactive playground,** and **a full guide** of the language and
 its type system.
+
+**To run the playground:**
+
+1. Install [Rust and Cargo](https://rustup.rs).
+2. `git clone https://github.com/faiface/par-lang.git`
+3. `cd par-lang`
+4. `cargo run`
 
 ## 💡 [Examples](examples/)
 
