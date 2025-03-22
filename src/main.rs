@@ -15,6 +15,8 @@ async fn main() {
         ..Default::default()
     };
 
+    par::parser::set_miette_hook();
+
     eframe::run_native(
         "⅋layground",
         options,
