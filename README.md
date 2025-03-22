@@ -28,6 +28,8 @@ It contains **a full guide** of the language and its type system.
 
 Open an example in the interactive playground, and **play with any function.**
 
+# ✨ Features
+
 ## 🧩 Expressive
 
 **Duality** gives two sides to every concept, leading to rich composability. Whichever angle you take to
@@ -126,6 +128,18 @@ off. Vast majority of code doesn't need to opt-out of totality checking, it natu
 Those few parts that need to opt-out are clearly marked with `unfounded`. They are the only places
 that can potentially cause infinite loops._
 
+## 📚 Theoretical background
+
+Par is fully based on [linear logic](https://plato.stanford.edu/entries/logic-linear/). It's an attempt to
+bring its expressive power into practice, by interpreting linear logic as _session types_.
+
+In fact, the language itself is based on a little process language, called _CP_, from a paper called
+[_"Propositions as Sessions"_](https://www.pure.ed.ac.uk/ws/portalfiles/portal/18383989/Wadler_2012_Propositions_as_Sessions.pdf)
+by the famous Phil Wadler.
+
+While programming in Par feels just like a programming language, even if an unusual one, its programs
+still correspond one-to-one with linear logic proofs.
+
 ## 📝 To Do
 
 **Par is a fresh project in early stages of development.** While the foundations, including some apparently
@@ -142,19 +156,7 @@ There are also some **advanced missing features:**
 - Non-determinism
 - Traits / type classes
 
-## 📚 Theoretical background
-
-Par is fully based on [linear logic](https://plato.stanford.edu/entries/logic-linear/). It's an attempt to
-bring its expressive power into practice, by interpreting linear logic as _session types_.
-
-In fact, the language itself is based on a little process language, called _CP_, from a paper called
-[_"Propositions as Sessions"_](https://www.pure.ed.ac.uk/ws/portalfiles/portal/18383989/Wadler_2012_Propositions_as_Sessions.pdf)
-by the famous Phil Wadler.
-
-While programming in Par feels just like a programming language, even if an unusual one, its programs
-still correspond one-to-one with linear logic proofs.
-
-## 🤝 Come help us!
+# 🤝 Come help us!
 
 There's still so much to be done! If this project speaks to you, join us on
 [Discord](https://discord.gg/8KsypefW99).
