@@ -33,7 +33,7 @@ pub enum Construct<Loc, Name> {
     Choose(Loc, Name, Box<Self>),
     Either(Loc, ConstructBranches<Loc, Name>),
     Break(Loc),
-    Begin(Loc, Option<Name>, Box<Self>),
+    Begin(Loc, bool, Option<Name>, Box<Self>),
     Loop(Loc, Option<Name>),
     SendType(Loc, Type<Loc, Name>, Box<Self>),
     ReceiveType(Loc, Name, Box<Self>),
@@ -55,7 +55,7 @@ pub enum Apply<Loc, Name> {
     Send(Loc, Box<Expression<Loc, Name>>, Box<Self>),
     Choose(Loc, Name, Box<Self>),
     Either(Loc, ApplyBranches<Loc, Name>),
-    Begin(Loc, Option<Name>, Box<Self>),
+    Begin(Loc, bool, Option<Name>, Box<Self>),
     Loop(Loc, Option<Name>),
     SendType(Loc, Type<Loc, Name>, Box<Self>),
 }
@@ -98,7 +98,7 @@ pub enum Command<Loc, Name> {
     ),
     Break(Loc),
     Continue(Loc, Box<Process<Loc, Name>>),
-    Begin(Loc, Option<Name>, Box<Self>),
+    Begin(Loc, bool, Option<Name>, Box<Self>),
     Loop(Loc, Option<Name>),
     SendType(Loc, Type<Loc, Name>, Box<Self>),
     ReceiveType(Loc, Name, Box<Self>),
@@ -152,9 +152,7 @@ impl<Name: Display> Display for Internal<Name> {
 
 #[derive(Clone, Debug)]
 pub enum CompileError<Loc> {
-    PassNotPossible(Loc),
     MustEndProcess(Loc),
-    CannotEndInDoExpression(Loc),
 }
 
 type Pass<Loc, Name> = Option<Arc<process::Process<Loc, Internal<Name>, ()>>>;
@@ -445,13 +443,17 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Construct<Loc, Name> {
                 process::Command::Break,
             )),
 
-            Self::Begin(loc, label, construct) => {
+            Self::Begin(loc, unfounded, label, construct) => {
                 let process = construct.compile()?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
                     Internal::Result(None),
                     (),
-                    process::Command::Begin(Some(Internal::Result(label.clone())), process),
+                    process::Command::Begin(
+                        *unfounded,
+                        Some(Internal::Result(label.clone())),
+                        process,
+                    ),
                 ))
             }
 
@@ -573,13 +575,17 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Apply<Loc, Name> {
                 ))
             }
 
-            Self::Begin(loc, label, apply) => {
+            Self::Begin(loc, unfounded, label, apply) => {
                 let process = apply.compile()?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
                     Internal::Object(None),
                     (),
-                    process::Command::Begin(Some(Internal::Object(label.clone())), process),
+                    process::Command::Begin(
+                        *unfounded,
+                        Some(Internal::Object(label.clone())),
+                        process,
+                    ),
                 ))
             }
 
@@ -774,13 +780,17 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
                 ))
             }
 
-            Self::Begin(loc, label, command) => {
+            Self::Begin(loc, unfounded, label, command) => {
                 let process = command.compile(object_name, pass)?;
                 Arc::new(process::Process::Do(
                     loc.clone(),
                     object_internal,
                     (),
-                    process::Command::Begin(label.clone().map(Internal::Original), process),
+                    process::Command::Begin(
+                        *unfounded,
+                        label.clone().map(Internal::Original),
+                        process,
+                    ),
                 ))
             }
 
