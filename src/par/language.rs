@@ -155,6 +155,21 @@ pub enum CompileError<Loc> {
     MustEndProcess(Loc),
 }
 
+// todo
+impl<Loc> CompileError<Loc> {
+    pub fn loc(&self) -> &Loc {
+        match self {
+            Self::MustEndProcess(loc) => loc,
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        match self {
+            Self::MustEndProcess(_) => "Process must end",
+        }
+    }
+}
+
 type Pass<Loc, Name> = Option<Arc<process::Process<Loc, Internal<Name>, ()>>>;
 
 impl<Loc: Clone, Name: Clone + Hash + Eq> Pattern<Loc, Name> {

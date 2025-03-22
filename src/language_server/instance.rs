@@ -1,11 +1,21 @@
 use lsp_types::{self as lsp, Uri};
+use crate::par::language::Internal;
+use crate::par::parse::{Loc, Name};
+use crate::par::types::TypeError;
 use crate::playground::Compiled;
 use super::io::IO;
+
+#[derive(Debug, Clone)]
+pub enum CompileError {
+    Compile(crate::playground::Error),
+    Types(TypeError<Loc, Internal<Name>>),
+}
+pub type CompileResult = Result<Compiled, CompileError>;
 
 pub struct Instance {
     uri: Uri,
     dirty: bool,
-    compiled: Option<Result<Compiled, crate::playground::Error>>,
+    compiled: Option<CompileResult>,
 }
 
 impl Instance {
@@ -22,7 +32,8 @@ impl Instance {
 
         let payload = match &self.compiled {
             Some(Ok(compiled)) => format!("Compiled:\n{}", compiled.pretty.clone()),
-            _ => "Compilation failed".to_string(),
+            Some(Err(e)) => format!("Compiled error: {:?}", e),
+            None => "Not compiled".to_string(),
         };
 
         let hover = lsp::Hover {
@@ -34,22 +45,39 @@ impl Instance {
         Some(hover)
     }
 
-    pub fn compile(&mut self, io: &IO) {
+    pub fn compile(&mut self, io: &IO) -> Result<(), CompileError> {
         if !self.dirty {
             tracing::debug!("No changes to compile");
-            return;
+            return Ok(());
         }
         let code = io.read(&self.uri);
-        self.compiled = stacker::grow(32 * 1024 * 1024, || {
-            Some(Compiled::from_string(code))
-        });
-        let ok = self.compiled.as_ref().unwrap().is_ok();
-        if ok {
-            self.dirty = false;
-            tracing::info!("Compilation successful");
-        } else {
-            tracing::info!("Compilation failed");
+
+        // todo: progress reporting
+        let mut compiled = stacker::grow(32 * 1024 * 1024, || {
+            Compiled::from_string(code, self.uri.to_string())
+        }).map_err(|err| CompileError::Compile(err));
+        match compiled {
+            Ok(Compiled { checked: Err(err), .. }) => {
+                compiled = Err(CompileError::Types(err));
+            }
+            _ => {}
         }
+
+        let result = match &compiled {
+            Ok(_) => {
+                self.dirty = false;
+                tracing::info!("Compilation successful");
+                Ok(())
+            }
+            Err(err) => {
+                tracing::info!("Compilation failed");
+                Err(err.clone())
+            }
+        };
+
+        self.compiled = Some(compiled);
+
+        result
     }
 
     pub fn mark_dirty(&mut self) {

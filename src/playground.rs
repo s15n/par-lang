@@ -5,11 +5,11 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
-
+use std::str::FromStr;
 use eframe::egui;
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use indexmap::IndexMap;
-
+use lsp_types::Uri;
 use crate::{
     interact::{Event, Handle, Request},
     par::{
@@ -23,6 +23,8 @@ use crate::{
     spawn::TokioSpawn,
 };
 use miette::{LabeledSpan, SourceOffset, SourceSpan};
+use tracing::span;
+use crate::language_server::URI_PLAYGROUND;
 
 pub struct Playground {
     file_path: Option<PathBuf>,
@@ -42,8 +44,8 @@ pub(crate) struct Compiled {
 }
 
 impl Compiled {
-    pub(crate) fn from_string(source: &str) -> Result<Compiled, Error> {
-        parse_program(source)
+    pub(crate) fn from_string(source: &str, file: String) -> Result<Compiled, Error> {
+        parse_program(source, file)
             .map_err(Error::Parse)
             .and_then(|program| {
                 let type_defs = program
@@ -148,7 +150,7 @@ impl Checked {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Error {
     Parse(SyntaxError),
     Compile(CompileError<Loc>),
@@ -350,7 +352,7 @@ impl Playground {
 
     fn recompile(&mut self) {
         self.compiled = stacker::grow(32 * 1024 * 1024, || {
-            Some(Compiled::from_string(self.code.as_str()))
+            Some(Compiled::from_string(self.code.as_str(), URI_PLAYGROUND.to_string()))
         });
         self.compiled_code = Arc::from(self.code.as_str());
     }
@@ -569,18 +571,18 @@ impl Playground {
 /// Create a `LabeledSpan` without a label at `loc`
 pub fn labels_from_loc<'s>(code: &'s str, loc: &Loc) -> Vec<LabeledSpan> {
     match loc {
-        Loc::Code { line, column } => vec![LabeledSpan::new_with_span(
+        Loc::Code { span, .. } => vec![LabeledSpan::new_with_span(
             None,
-            SourceOffset::from_location(&code, *line, *column),
+            SourceSpan::new(SourceOffset::from(span.start), span.len())
         )],
         Loc::External => vec![],
     }
 }
 pub fn span_from_loc<'s>(code: &'s str, loc: &Loc) -> Option<SourceSpan> {
     match loc {
-        Loc::Code { line, column } => {
-            Some(SourceOffset::from_location(&code, *line, *column).into())
-        }
+        Loc::Code { span, .. } => {
+            Some(SourceSpan::new(SourceOffset::from(span.start), span.len()))
+        },
         Loc::External => None,
     }
 }

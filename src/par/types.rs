@@ -74,6 +74,40 @@ pub enum Type<Loc, Name> {
     ReceiveType(Loc, Name, Box<Self>),
 }
 
+// todo
+impl<Loc, Name> TypeError<Loc, Name> {
+    pub fn loc(&self) -> &Loc {
+        match self {
+            Self::TypeNameAlreadyDefined(loc, _, _)
+            | Self::NameAlreadyDeclared(loc, _, _)
+            | Self::NameAlreadyDefined(loc, _, _)
+            | Self::DeclaredButNotDefined(loc, _)
+            | Self::NoMatchingRecursiveOrIterative(loc, _)
+            | Self::SelfUsedInNegativePosition(loc, _)
+            | Self::TypeNameNotDefined(loc, _)
+            | Self::DependencyCycle(loc, _)
+            | Self::WrongNumberOfTypeArgs(loc, _, _, _)
+            | Self::NameNotDefined(loc, _)
+            | Self::ShadowedObligation(loc, _)
+            | Self::TypeMustBeKnownAtThisPoint(loc, _)
+            | Self::ParameterTypeMustBeKnown(loc, _, _)
+            | Self::CannotAssignFromTo(loc, _, _)
+            | Self::UnfulfilledObligations(loc, _)
+            | Self::InvalidOperation(loc, _, _)
+            | Self::InvalidBranch(loc, _, _)
+            | Self::MissingBranch(loc, _, _)
+            | Self::RedundantBranch(loc, _, _)
+            | Self::NoSuchLoopPoint(loc, _)
+            | Self::DoesNotDescendSubjectOfBegin(loc, _)
+            | Self::LoopVariableNotPreserved(loc, _)
+            | Self::LoopVariableChangedType(loc, _, _, _)
+            | Self::Telltypes(loc, _)
+            => loc,
+            Self::TypesCannotBeUnified(ty1, ty2) => ty1.get_loc(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TypeDefs<Loc, Name> {
     globals: Arc<IndexMap<Name, (Loc, Vec<Name>, Type<Loc, Name>)>>,

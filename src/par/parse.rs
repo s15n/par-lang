@@ -16,14 +16,22 @@ use super::{
     types::Type,
 };
 use core::str::FromStr;
+use std::ops::Range;
 
 #[derive(Parser)]
 #[grammar = "par/syntax.pest"]
 pub struct Par;
 
+pub type Span = Range<usize>;
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Loc {
-    Code { line: usize, column: usize },
+    Code {
+        line: usize,
+        column: usize,
+        span: Span,
+        file: String,
+    },
     External,
 }
 
@@ -36,18 +44,20 @@ impl Default for Loc {
 impl Display for Loc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Code { line, column } => write!(f, "{}:{}", line, column),
+            Self::Code { line, column, span, file } => {
+                write!(f, "{}:{}:{}", file, line, column)
+            }
             Self::External => write!(f, "#:#"),
         }
     }
 }
 
-impl<'a> From<&'a Pair<'a, Rule>> for Loc {
+/*impl<'a> From<&'a Pair<'a, Rule>> for Loc {
     fn from(pair: &Pair<Rule>) -> Self {
         let (line, column) = pair.line_col();
         Loc::Code { line, column }
     }
-}
+}*/
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Name {
@@ -96,6 +106,7 @@ impl<Name, Expr> Default for Program<Loc, Name, Expr> {
     }
 }
 
+/*
 pub fn parse_program(
     source: &str,
 ) -> Result<Program<Loc, Name, Expression<Loc, Name>>, ParseError> {
@@ -945,3 +956,4 @@ fn parse_loop_label(pairs: &mut Pairs<Rule>) -> Result<Option<Name>, ParseError>
         None => Ok(None),
     }
 }
+*/

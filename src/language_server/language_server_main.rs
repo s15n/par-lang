@@ -8,7 +8,7 @@ pub fn main() {
         .with_ansi(false)
         .init();
 
-    tracing::info!("Starting Language Server");
+    tracing::info!("Starting Language Server v0.0.1");
 
     let (connection, io_threads) = lsp_server::Connection::stdio();
 

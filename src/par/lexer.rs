@@ -1,5 +1,6 @@
 use super::{parse::Loc, parser::comment};
 use core::{ops::Range, str::FromStr};
+use miette::{SourceOffset, SourceSpan};
 use winnow::{
     combinator::{alt, peek},
     error::{EmptyError, ParserError},
@@ -33,8 +34,8 @@ pub enum TokenKind {
 pub struct Token<'i> {
     pub kind: TokenKind,
     pub raw: &'i str,
-    pub loc: super::parse::Loc,
-    pub span: Range<usize>,
+    pub loc: Loc,
+    //pub span: Range<usize>,
 }
 // More useful in winnow debug view
 // impl core::fmt::Debug for Token<'_> {
@@ -109,7 +110,7 @@ impl<'a, T: FromStr> ParseSlice<T> for &Token<'a> {
 pub type Tokens<'i> = TokenSlice<'i, Token<'i>>;
 pub type Input<'a> = Tokens<'a>;
 
-pub fn lex<'s>(input: &'s str) -> Vec<Token<'s>> {
+pub fn lex<'s>(input: &'s str, file: String) -> Vec<Token<'s>> {
     type Error = EmptyError;
     (|input: &'s str| -> Result<Vec<Token<'s>>, Error> {
         let mut input = input;
@@ -231,8 +232,9 @@ pub fn lex<'s>(input: &'s str) -> Vec<Token<'s>> {
                 loc: Loc::Code {
                     line: row + 1,
                     column: column + 1,
-                },
-                span: idx..idx + raw.len(),
+                    span: idx..idx + raw.len(),
+                    file: file.clone(),
+                }
             });
             idx += raw.len();
         }
@@ -247,7 +249,7 @@ mod test {
 
     #[test]
     fn tok() {
-        let tokens = lex(&mut "({[< ><>]}):abc_123: a\nab");
+        let tokens = lex(&mut "({[< ><>]}):abc_123: a\nab", "test".to_string());
         assert_eq!(
             tokens.iter().map(|x| x.kind).collect::<Vec<_>>(),
             vec![

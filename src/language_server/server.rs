@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use lsp_server::{Connection};
 use lsp_types::{self as lsp, InitializeParams, Uri};
+use crate::language_server::feedback::{diagnostic_for_error, Feedback, FeedbackBookKeeper};
 use crate::language_server::instance::Instance;
 use super::{io::IO};
 
@@ -10,6 +11,7 @@ pub struct LanguageServer<'c> {
     connection: &'c Connection,
     initialize_params: InitializeParams,
     instances: Instances,
+    feedback: FeedbackBookKeeper,
     io: IO,
 }
 
@@ -22,6 +24,7 @@ impl<'c> LanguageServer<'c> {
             connection,
             initialize_params,
             instances: HashMap::new(),
+            feedback: FeedbackBookKeeper::new(),
             io: IO::new(),
         }
     }
@@ -65,6 +68,8 @@ impl<'c> LanguageServer<'c> {
         self.connection.sender
             .send(lsp_server::Message::Response(response))
             .expect("Sending response failed");
+
+        self.publish_feedback();
     }
 
     fn handle_response(&self, response: lsp_server::Response) {
@@ -103,14 +108,45 @@ impl<'c> LanguageServer<'c> {
         self.connection.handle_shutdown(request).expect("Protocol error while handling shutdown")
     }
 
-    fn handle_request_instance<Result>(
+    fn handle_request_instance<R>(
         &mut self,
         uri: &Uri,
-        handler: impl FnOnce(&mut Instance) -> Result
-    ) -> Result {
+        handler: impl FnOnce(&mut Instance) -> R
+    ) -> R {
         let instance = instance_for(&mut self.instances, uri);
-        instance.compile(&self.io);
-        handler(instance)
+
+        let compile_result = instance.compile(&self.io);
+        let response = handler(instance);
+
+        let mut feedback = self.feedback.cleanup();
+        match compile_result {
+            Ok(_) => { /* warnings */ },
+            Err(err) => {
+                feedback.add_diagnostic(uri.clone(), diagnostic_for_error(&err));
+            }
+        };
+
+        response
+    }
+
+    fn publish_feedback(&mut self) {
+        use lsp::notification::{PublishDiagnostics, Notification};
+
+        for (uri, diagnostics) in self.feedback.diagnostics() {
+            let params = lsp_types::PublishDiagnosticsParams {
+                uri: uri.clone(),
+                diagnostics: diagnostics.clone(),
+                version: None,
+            };
+            let notification = lsp_server::Notification {
+                method: PublishDiagnostics::METHOD.to_string(),
+                params: serde_json::to_value(params).unwrap(),
+            };
+
+            self.connection.sender
+                .send(lsp_server::Message::Notification(notification))
+                .expect("Sending notification failed");
+        }
     }
 
     fn cache_file(&mut self, uri: &Uri, text: String) {
