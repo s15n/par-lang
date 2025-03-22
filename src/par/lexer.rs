@@ -1,4 +1,4 @@
-use super::{parse::Loc, parser::comment};
+use super::parse::{comment, Loc};
 use core::{ops::Range, str::FromStr};
 use winnow::{
     combinator::{alt, peek},

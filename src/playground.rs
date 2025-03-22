@@ -14,8 +14,7 @@ use crate::{
     interact::{Event, Handle, Request},
     par::{
         language::{CompileError, Internal},
-        parse::{Loc, Name, Program},
-        parser::{parse_program, SyntaxError},
+        parse::{parse_program, Loc, Name, Program, SyntaxError},
         process::Expression,
         runtime::{self, Context, Operation},
         types::{self, Type, TypeError},
