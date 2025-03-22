@@ -124,6 +124,31 @@ where
     })
 }
 
+/// Like `commit_after` but the prefix is optional and only cuts if the prefix is `Some`.
+/// Also returns the prefix.
+fn opt_commit_after<Input, PrefixOutput, Output, Error, PrefixParser, ParseNext>(
+    prefix: PrefixParser,
+    mut parser: ParseNext,
+) -> impl Parser<Input, (Option<PrefixOutput>, Output), Error>
+where
+    Input: Stream,
+    Error: ParserError<Input> + ModalError,
+    PrefixParser: Parser<Input, PrefixOutput, Error>,
+    ParseNext: Parser<Input, Output, Error>,
+{
+    let mut prefix = opt(prefix);
+    trace("opt_commit_after", move |input: &mut Input| {
+        let prefix = prefix.parse_next(input)?;
+        if prefix.is_some() {
+            let n = cut_err(parser.by_ref()).parse_next(input)?;
+            Ok((prefix, n))
+        } else {
+            let n = parser.parse_next(input)?;
+            Ok((prefix, n))
+        }
+    })
+}
+
 pub fn comment<I, E>() -> impl Parser<I, I::Slice, E>
 where
     I: Stream + StreamIsPartial + for<'s> Compare<&'s str>,
@@ -148,6 +173,7 @@ where
         "do",
         "in",
         "begin",
+        "unfounded",
         "loop",
         "telltypes",
         "either",
@@ -235,7 +261,7 @@ impl ProgramParseError {
 }
 fn program(
     mut input: Input,
-) -> std::result::Result<Program<Name, Expression<Loc, Name>>, ProgramParseError> {
+) -> std::result::Result<Program<Loc, Name, Expression<Loc, Name>>, ProgramParseError> {
     enum Either<A, B, C> {
         A(A),
         B(B),
@@ -253,18 +279,17 @@ fn program(
     )
     .fold(Program::default, |mut acc, item| {
         match item {
-            Either::A((name, (params, typ))) => {
-                acc.type_defs.insert(name, (params, typ));
+            Either::A(type_def) => {
+                acc.type_defs.push(type_def);
             }
-            Either::B((name, typ)) => {
-                acc.declarations.insert(name, Some(typ));
+            Either::B(dec) => {
+                acc.declarations.push(dec);
             }
-            Either::C((name, typ, expression)) => {
-                if let Some(typ) = typ {
-                    acc.declarations.insert(name.clone(), Some(typ));
+            Either::C((loc, name, annotation, expression)) => {
+                if let Some(typ) = annotation {
+                    acc.declarations.push((loc.clone(), name.clone(), typ));
                 }
-                acc.declarations.entry(name.clone()).or_insert(None);
-                acc.definitions.insert(name, expression);
+                acc.definitions.push((loc, name, expression));
             }
         };
         acc
@@ -282,7 +307,7 @@ fn program(
             ))),
     )
         .parse_next(&mut input)
-        .map(|(x, _)| x)
+        .map(|(x, _eof)| x)
         .map_err(|e| {
             let e = e.into_inner().unwrap_or_else(|_err| {
                 panic!("complete parsers should not report `ErrMode::Incomplete(_)`")
@@ -329,7 +354,7 @@ pub fn set_miette_hook() {
 
 pub fn parse_program(
     input: &str,
-) -> std::result::Result<Program<Name, Expression<Loc, Name>>, SyntaxError> {
+) -> std::result::Result<Program<Loc, Name, Expression<Loc, Name>>, SyntaxError> {
     let toks = lex(&input);
     let e = match program(Input::new(&toks)) {
         Ok(x) => return Ok(x),
@@ -374,23 +399,25 @@ pub fn parse_program(
     })
 }
 
-fn type_def(input: &mut Input) -> Result<(Name, (Vec<Name>, Type<Loc, Name>))> {
-    commit_after(t("type"), (name, type_params, t("="), typ))
-        .map(|(name, type_params, _, typ)| (name, (type_params, typ)))
+fn type_def(input: &mut Input) -> Result<(Loc, Name, Vec<Name>, Type<Loc, Name>)> {
+    commit_after(t("type"), (with_loc(name), type_params, t("="), typ))
+        .map(|((name, loc), type_params, _, typ)| (loc, name, type_params, typ))
         .context(StrContext::Label("type definition"))
         .parse_next(input)
 }
 
-fn declaration(input: &mut Input) -> Result<(Name, Type<Loc, Name>)> {
-    commit_after(t("dec"), (name, t(":"), typ))
-        .map(|(name, _, typ)| (name, typ))
+fn declaration(input: &mut Input) -> Result<(Loc, Name, Type<Loc, Name>)> {
+    commit_after(t("dec"), (with_loc(name), t(":"), typ))
+        .map(|((name, loc), _, typ)| (loc, name, typ))
         .context(StrContext::Label("declaration"))
         .parse_next(input)
 }
 
-fn definition(input: &mut Input) -> Result<(Name, Option<Type<Loc, Name>>, Expression<Loc, Name>)> {
-    commit_after(t("def"), (name, annotation, t("="), expression))
-        .map(|(name, annotation, _, expression)| (name, annotation, expression))
+fn definition(
+    input: &mut Input,
+) -> Result<(Loc, Name, Option<Type<Loc, Name>>, Expression<Loc, Name>)> {
+    commit_after(t("def"), (with_loc(name), annotation, t("="), expression))
+        .map(|((name, loc), annotation, _, expression)| (loc, name, annotation, expression))
         .context(StrContext::Label("definition"))
         .parse_next(input)
 }
@@ -514,7 +541,9 @@ fn typ_continue(input: &mut Input) -> Result<Type<Loc, Name>> {
 
 fn typ_recursive(input: &mut Input) -> Result<Type<Loc, Name>> {
     with_loc(commit_after(t("recursive"), (loop_label, typ)))
-        .map(|((label, typ), loc)| Type::Recursive(Loc::from(loc), label, Box::new(typ)))
+        .map(|((label, typ), loc)| {
+            Type::Recursive(Loc::from(loc), Default::default(), label, Box::new(typ))
+        })
         .parse_next(input)
 }
 
@@ -523,7 +552,9 @@ fn typ_iterative<'s>(input: &mut Input) -> Result<Type<Loc, Name>> {
         t("iterative"),
         (loop_label, typ).context(StrContext::Label("iterative type body")),
     ))
-    .map(|((name, typ), span)| Type::Iterative(Loc::from(span), name, Box::new(typ)))
+    .map(|((name, typ), span)| {
+        Type::Iterative(Loc::from(span), Default::default(), name, Box::new(typ))
+    })
     .parse_next(input)
 }
 
@@ -786,9 +817,14 @@ fn cons_break(input: &mut Input) -> Result<Construct<Loc, Name>> {
 }
 
 fn cons_begin(input: &mut Input) -> Result<Construct<Loc, Name>> {
-    with_loc(commit_after(t("begin"), (loop_label, construction)))
-        .map(|((label, construct), loc)| (Construct::Begin(loc, label, Box::new(construct))))
-        .parse_next(input)
+    with_loc(opt_commit_after(
+        t("unfounded"),
+        commit_after(t("begin"), (loop_label, construction)),
+    ))
+    .map(|((unfounded, (label, construct)), loc)| {
+        Construct::Begin(loc, unfounded.is_some(), label, Box::new(construct))
+    })
+    .parse_next(input)
 }
 
 fn cons_loop(input: &mut Input) -> Result<Construct<Loc, Name>> {
@@ -910,9 +946,14 @@ fn apply_either(input: &mut Input) -> Result<Apply<Loc, Name>> {
 }
 
 fn apply_begin(input: &mut Input) -> Result<Apply<Loc, Name>> {
-    with_loc(commit_after(t("begin"), (loop_label, apply)))
-        .map(|((label, then), loc)| Apply::Begin(loc, label, Box::new(then)))
-        .parse_next(input)
+    with_loc(opt_commit_after(
+        t("unfounded"),
+        commit_after(t("begin"), (loop_label, apply)),
+    ))
+    .map(|((unfounded, (label, then)), loc)| {
+        Apply::Begin(loc, unfounded.is_some(), label, Box::new(then))
+    })
+    .parse_next(input)
 }
 
 fn apply_loop(input: &mut Input) -> Result<Apply<Loc, Name>> {
@@ -1103,9 +1144,14 @@ fn cmd_continue(input: &mut Input) -> Result<Command<Loc, Name>> {
 }
 
 fn cmd_begin(input: &mut Input) -> Result<Command<Loc, Name>> {
-    with_loc(commit_after(t("begin"), (loop_label, cmd)))
-        .map(|((label, cmd), loc)| Command::Begin(loc, label, Box::new(cmd)))
-        .parse_next(input)
+    with_loc(opt_commit_after(
+        t("unfounded"),
+        commit_after(t("begin"), (loop_label, cmd)),
+    ))
+    .map(|((unfounded, (label, cmd)), loc)| {
+        Command::Begin(loc, unfounded.is_some(), label, Box::new(cmd))
+    })
+    .parse_next(input)
 }
 
 fn cmd_loop(input: &mut Input) -> Result<Command<Loc, Name>> {
