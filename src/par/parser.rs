@@ -46,8 +46,6 @@ impl<I: Stream, C: core::fmt::Debug> ParserError<I> for MyError<C> {
         Ok(self)
     }
     fn append(self, _input: &I, _token_start: &<I as Stream>::Checkpoint) -> Self {
-        // // TODO try merging based on length
-        // (_input.eof_offset() < self.eof_offset());
         self
     }
     fn or(mut self, other: Self) -> Self {
@@ -454,11 +452,6 @@ where
 }
 
 fn typ(input: &mut Input) -> Result<Type<Loc, Name>> {
-    // TODO, use `dispatch` to choose alternate based on peek prefix.
-    // This should also help error messages.
-    // let s = dispatch! {peek(take::<usize, Input, Error>(2usize));
-    // "<>" => "<>"
-    // };
     alt((
         typ_name,
         typ_chan,
