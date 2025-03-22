@@ -182,9 +182,17 @@ pub fn lex<'s>(input: &'s str) -> Vec<Token<'s>> {
                     Some((raw, TokenKind::RAngle))
                 }
                 '/' => {
-                    let raw = comment().parse_next(input)?;
-                    idx += raw.len();
-                    None
+                    let (is_comment, raw) = alt((
+                        comment().take().map(|x| (true, x)),
+                        any.take().map(|x| (false, x)),
+                    ))
+                    .parse_next(input)?;
+                    if is_comment {
+                        idx += raw.len();
+                        None
+                    } else {
+                        Some((raw, TokenKind::Unknown))
+                    }
                 }
                 ',' => {
                     let raw = any::<&str, Error>.take().parse_next(input)?;

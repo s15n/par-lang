@@ -147,15 +147,49 @@ where
     })
 }
 
-pub fn comment<I, E>() -> impl Parser<I, I::Slice, E>
+pub fn comment<'s, E>() -> impl Parser<&'s str, &'s str, E>
 where
-    I: Stream + StreamIsPartial + for<'s> Compare<&'s str>,
-    E: ParserError<I>,
+    E: ParserError<&'s str>,
 {
-    // TODO can we add /* */ as accepted syntax?
-    // delimited(("/*"), parser, ("*/"))
-    preceded("//", repeat(0.., (not("\n"), any)).map(|()| ())).take()
+    // below should be a valid block comment
+    /* /* */ */
+    // So have to consider nested comments
+    let comment_block_rest = move |input: &mut &'s str| -> core::result::Result<(), E> {
+        let mut nesting = 0;
+        loop {
+            let next_2 = match input.len() {
+                0 => break Ok(()),
+                1 => break Err(ParserError::from_input(input)),
+                _ => &input.as_bytes()[..2],
+            };
+            match next_2 {
+                s @ b"/*" => {
+                    nesting += 1;
+                    *input = &input[s.len()..];
+                }
+                s @ b"*/" if nesting > 0 => {
+                    nesting -= 1;
+                    *input = &input[s.len()..];
+                }
+                s @ b"*/" => {
+                    *input = &input[s.len()..];
+                    break Ok(());
+                }
+                _ => {
+                    let mut it = input.chars();
+                    it.next(); // skip a char
+                    *input = it.as_str();
+                }
+            }
+        }
+    };
+    alt((
+        preceded("//", repeat(0.., (not("\n"), any)).map(|()| ())),
+        // ending `*/` is optional so lexer doesn't panic if unclosed
+        preceded("/*", comment_block_rest).map(|()| ()),
+    ))
     // .context(StrContext::Label("comment"))
+    .take()
 }
 
 fn keyword<I>() -> impl Parser<I, I::Slice, Error>
