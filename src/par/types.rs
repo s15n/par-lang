@@ -1956,7 +1956,10 @@ impl<Loc, Name: Display> Type<Loc, Name> {
                 write!(f, "{}", name)?;
                 if !args.is_empty() {
                     write!(f, "<")?;
-                    for arg in args {
+                    for (i, arg) in args.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
                         arg.pretty(f, indent)?;
                     }
                     write!(f, ">")?
