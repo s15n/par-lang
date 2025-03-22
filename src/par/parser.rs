@@ -9,7 +9,6 @@ use super::{
 };
 use indexmap::IndexMap;
 use miette::{SourceOffset, SourceSpan};
-use std::sync::Arc;
 use winnow::{
     combinator::{
         alt, cut_err, delimited, empty, not, opt, peek, preceded, repeat, separated, terminated,
@@ -358,8 +357,8 @@ pub struct SyntaxError {
     #[label]
     span: SourceSpan,
     // Generate these with the miette! macro.
-    #[related]
-    related: Arc<[miette::ErrReport]>,
+    // #[related]
+    // related: Arc<[miette::ErrReport]>,
     #[help]
     help: String,
 }
@@ -402,26 +401,6 @@ pub fn parse_program(
                 x => x,
             }
         }),
-        related: {
-            let crate::par::parse::ParseError {
-                msg,
-                location: Loc::Code { line, column },
-            } = (match crate::par::parse::parse_program(&input) {
-                Ok(_) => unreachable!("pest parser didn't error but combinator parser did"),
-                Err(e) => e,
-            })
-            else {
-                unreachable!("parse error location not `Code`")
-            };
-            Arc::from(vec![miette::miette!(
-                labels = vec![miette::LabeledSpan::new_with_span(
-                    None,
-                    SourceOffset::from_location(&input, line, column)
-                )],
-                help = msg,
-                "pest error"
-            )])
-        },
         help: e
             .inner()
             .context
@@ -1312,22 +1291,20 @@ mod test {
     }
 
     #[test]
-    fn test1() {
+    fn test_parse_examples() {
         let input = include_str!("../../examples/sample.par");
-        let res = parse_program(input);
-        match res {
-            Ok(new) => {
-                let old = crate::par::parse::parse_program(input).unwrap();
-                eprintln!("old: {:?}", old);
-                eprintln!("\n---\n");
-                eprintln!("new: {:?}", new);
-                // assert_eq!(format!("{:?}", old), format!("{:?}", new))
-            }
-            Err(e) => {
-                set_miette_hook();
-                let e = miette::Report::from(e).with_source_code(input);
-                eprintln!("{e:?}");
-            }
-        }
+        assert!(parse_program(input).is_ok());
+        let input = include_str!("../../examples/semigroup_queue.par");
+        assert!(parse_program(input).is_ok());
+        let input = include_str!("../../examples/rock_paper_scissors.par");
+        assert!(parse_program(input).is_ok());
+        let input = include_str!("../../examples/flatten.par");
+        assert!(parse_program(input).is_ok());
+        let input = include_str!("../../examples/fibonacci.par");
+        assert!(parse_program(input).is_ok());
+        let input = include_str!("../../examples/bubble_sort.par");
+        assert!(parse_program(input).is_ok());
+        let input = "begin the errors";
+        assert!(parse_program(input).is_err());
     }
 }

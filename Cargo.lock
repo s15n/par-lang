@@ -2248,7 +2248,6 @@ dependencies = [
  "futures",
  "indexmap",
  "miette",
- "pest",
  "pest_derive",
  "rfd",
  "stacker",

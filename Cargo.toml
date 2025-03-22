@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-pest = "2.7.14"
 pest_derive = "2.7.14"
 eframe = { version = "0.31", features = ["default", "__screenshot"] }
 egui_code_editor = "0.2.12"
