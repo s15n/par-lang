@@ -1,10 +1,6 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ops::Deref;
 use lsp_server::{Connection};
 use lsp_types::{self as lsp, InitializeParams, Uri};
-use lsp_types::notification::{DidChangeTextDocument, DidOpenTextDocument, Notification};
-use lsp_types::request::{HoverRequest, Request};
 use crate::language_server::instance::Instance;
 use super::{io::IO};
 
@@ -45,6 +41,8 @@ impl<'c> LanguageServer<'c> {
     }
 
     fn handle_request(&mut self, request: lsp_server::Request) {
+        use lsp::request::{HoverRequest, Request};
+
         let request_id = request.id.clone();
         let method = request.method.as_str();
         let payload = match method {
@@ -74,6 +72,8 @@ impl<'c> LanguageServer<'c> {
     }
 
     fn handle_notification(&mut self, notification: lsp_server::Notification) {
+        use lsp::notification::{DidChangeTextDocument, DidOpenTextDocument, Notification};
+
         let method = notification.method.as_str();
         match method {
             DidOpenTextDocument::METHOD => {
@@ -143,7 +143,7 @@ fn instance_for<'a>(instances: &'a mut Instances, uri: &'a Uri) -> &'a mut Insta
 
 fn extract_request<R>(request: lsp_server::Request) -> R::Params
 where
-    R: Request,
+    R: lsp::request::Request,
 {
     let (_, params) = request
         .extract::<R::Params>(R::METHOD)
@@ -153,7 +153,7 @@ where
 
 fn extract_notification<N>(notification: lsp_server::Notification) -> N::Params
 where
-    N: Notification,
+    N: lsp::notification::Notification,
 {
     notification
         .extract::<N::Params>(N::METHOD)
