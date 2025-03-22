@@ -6,8 +6,8 @@ Read about more technical topics in the next chapters.
 
 ## Contributors
 
-todo
+TODO
 
 ## Influences
 
-todo
+TODO

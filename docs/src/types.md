@@ -56,8 +56,9 @@ let x: either { .none!, .some T } = .none!
 *<sup>
 [Dual](#the-bottom-type)
 | [Constructing Expression](./expressions/construction.md#the-unit-expression)
-| [Pattern](./patterns.md#todo)
-| [Destructing Statement](./statements/commands.md#todo)
+| [Pattern](./patterns.md#the-unit-pattern)
+| [Constructing Statement](./statements/commands.md#the-break-command)
+| [Destructing Statement](./statements/commands.md#the-continue-command)
 </sup>*
 
 Unit is a type providing no information. In C(++) it's called `void`, in Rust it's `()` (and it can be thought of as an empty tuple in Par as well). There is exactly one value of type `!`, and it's also `!`.
@@ -98,8 +99,9 @@ Mathematically, `!` is \\(\mathbf{1}\\), the unit for \\(\otimes\\).
 *<sup>
 [Dual](#function-types)
 | [Constructing Expression](./expressions/construction.md#pair-expressions)
-| [Pattern](./patterns.md#todo)
-| [Destructing Statement](./statements/commands.md#todo)
+| [Pattern](./patterns.md#pair-patterns)
+| [Constructing Statement](./statements/commands.md#send-commands)
+| [Destructing Statement](./statements/commands.md#receive-commands)
 </sup>*
 
 Having multiple types between `(` and `)` is just syntax sugar:
@@ -171,8 +173,8 @@ Mathematically, `(A) B` is \\(A \otimes B\\). For session types, it means "send 
 [Dual](#pair-types)
 | [Constructing Expression](./expressions/construction.md#function-expressions)
 | [Destructing Expression](./expressions/application.md#function-calls)
-| [Constructing Statement](./statements/commands.md#todo)
-| [Destructing Statement](./statements/commands.md#todo)
+| [Constructing Statement](./statements/commands.md#receive-commands)
+| [Destructing Statement](./statements/commands.md#send-commands)
 </sup>*
 
 Having multiple types between `[` and `]` is just syntax sugar:
@@ -203,8 +205,8 @@ Mathematically, `[A] B` is a [linear](./linearity.md) function \\(A \multimap B\
 [Dual](#choice-types)
 | [Constructing Expression](./expressions/construction.md#either-selections)
 | [Destructing Expression](./expressions/application.md#either-destructions)
-| [Constructing Statement](./statements/commands.md#todo)
-| [Destructing Statement](./statements/commands.md#todo)
+| [Constructing Statement](./statements/commands.md#signal-commands)
+| [Destructing Statement](./statements/commands.md#match-commands)
 </sup>*
 
 An either type is the usual sum type aka. a tagged union (in Rust, it's an `enum`). Every value of such a type consists of a label, marking the variant, and a value of the type corresponding to the label (its "payload").
@@ -256,8 +258,8 @@ Either types are often used as [recursive](#recursive-types) types.
 [Dual](#either-types)
 | [Constructing Expression](./expressions/construction.md#choice-constructions)
 | [Destructing Expression](./expressions/application.md#choice-selections)
-| [Constructing Statement](./statements/commands.md#todo)
-| [Destructing Statement](./statements/commands.md#todo)
+| [Constructing Statement](./statements/commands.md#match-commands)
+| [Destructing Statement](./statements/commands.md#signal-commands)
 </sup>*
 
 A choice type is dual to an [either](#either-types) type. Constructing a value of an either type is "making a choice" and similarly, destructing such a value looks exactly like constructing a value of a choice type.
@@ -336,7 +338,7 @@ Choice types are often used as [iterative](#iterative-types) types.
 *<sup>
 [Dual](#iterative-types)
 | [Destructing Expression](./expressions/application.md#recursive-destructions)
-| [Destructing Statement](./statements/commands.md#todo)
+| [Destructing Statement](./statements/commands.md#recursive-commands)
 </sup>*
 
 A recursive type can be used within itself via `self`.
@@ -399,7 +401,7 @@ def is_even = [n] n begin {
 *<sup>
 [Dual](#recursive-types)
 | [Constructing Expression](./expressions/construction.md#iterative-constructions)
-| [Constructing Statement](./statements/commands.md#todo)
+| [Constructing Statement](./statements/commands.md#recursive-commands)
 </sup>*
 
 An iterative type can be used within itself via `self`.
@@ -578,9 +580,9 @@ def add: [Nat, Nat] Nat = [a, b] a begin {
 *<sup>
 [Dual](#universal-types)
 | [Constructing Expression](./expressions/construction.md#existential-constructions)
-| [Pattern](./patterns.md#todo)
-| [Constructing Statement](./statements/commands.md#todo)
-| [Destructing Statement](./statements/commands.md#todo)
+| [Pattern](./patterns.md#existential-patterns)
+| [Constructing Statement](./statements/commands.md#send-type-commands)
+| [Destructing Statement](./statements/commands.md#receive-type-commands)
 </sup>*
 
 Having multiple types between `(` and `)` is just syntax sugar:
@@ -628,8 +630,8 @@ Mathematically, `(type T) A` is \\(\exists\ T: A\\).
 [Dual](#existential-types)
 | [Constructing Expression](./expressions/construction.md#universal-constructions)
 | [Destructing Expression](./expressions/application.md#universal-specializations)
-| [Constructing Statement](./statements/commands.md#todo)
-| [Destructing Statement](./statements/commands.md#todo)
+| [Constructing Statement](./statements/commands.md#receive-type-commands)
+| [Destructing Statement](./statements/commands.md#send-type-commands)
 </sup>*
 
 Having multiple types between `[` and `]` is just syntax sugar:
@@ -670,8 +672,8 @@ Mathematically, `[type T] A` is \\(\forall\ T: A\\).
 
 *<sup>
 [Dual](#the-unit-type)
-| [Constructing Statement](./statements/commands.md#todo)
-| [Destructing Statement](./statements/commands.md#todo)
+| [Constructing Statement](./statements/commands.md#the-continue-command)
+| [Destructing Statement](./statements/commands.md#the-break-command)
 </sup>*
 
 The bottom `?` is dual to the unit `!`.
@@ -693,7 +695,6 @@ Mathematically, `?` is \\(\bot\\), the unit for \\(â…‹\\). So \\(\bot \mathbin{â
 *<sup>
 [Dual](#types)
 | [Constructing Expression](expressions.md#channel-expressions)
-| [Destructing Statement](./statements/commands.md#todo)
 </sup>*
 
 `chan A` represents a channel accepting an `A`:
@@ -718,9 +719,11 @@ def just_true: Bool = chan yield {
 ```
 Note that `b <> c` would have been equally valid.
 
-Mathematically, `chan A` is \\(A^\perp\\), i.e. the dual type to `A`. Every type has a dual. We get for example:
+## Duality equations
 
-| type | dual |
+Mathematically, `chan A` is \\(A^\perp\\), i.e. the dual type to `A`. Every type has a dual. These are defined according to this table:
+
+| Type | Dual |
 | ---- | ---- |
 | `T` | `chan T` |
 | `chan T` | `T` |

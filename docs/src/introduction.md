@@ -96,22 +96,6 @@ This will launch the Par playground.
 Some example code is already written for you.
 Just press <kbd>Compile</kbd> and <kbd>Run</kbd> to run any definition from the program on the left.
 
-## Goals
+## Community
 
-todo
-
-## Features
-
-todo
-
-## Anti-Features
-
-todo
-
-## Resources
-
-To ask questions or discuss ideas, visit the [Discord](https://discord.gg/8KsypefW99).
-
-For a quick but in-depth tutorial, read the [Readme](https://github.com/faiface/par-lang).
-
-An then, there's the document you're currently reading, of course.
+To ask questions or discuss ideas, join our [Discord](https://discord.gg/8KsypefW99).

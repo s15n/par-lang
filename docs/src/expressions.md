@@ -8,8 +8,6 @@
 > &nbsp;&nbsp; | [_DoExpression_](#do-expressions) \
 > &nbsp;&nbsp; | [_ChanExpression_](#channel-expressions)
 
-Some expressions are evaluated strictly, some lazily. todo: which
-
 Every expression desugars to a [channel expression](#channel-expressions). In the most simple way, that is
 ```par
 expr
@@ -138,6 +136,10 @@ dual <> y
 The name declared after the channel may be used inside the process and must be fully destructed inside or moved out of there.
 
 The expression `chan a: A { ... }` has type `chan A`. Conversely, if `chan b { ... }` has type `B`, `b` has type `chan B`.
+
+Note, that `chan A`, the [channel type](./types.md#channel-types), is not a separate type. It merely transforms the the `A` to its dual, according to the [duality equations](./types.md#duality-equations).
+
+These expressions are key to exploiting duality. The expression `chan c { ... }` spawns a process, and at the same time creates a channel, whose one end is accessible as `c` inside the process, and the other end is returned from the expression. The types of these are dual.
 
 Channel expressions are the only expression which is not syntax sugar. Under the hood, all expressions are syntax sugar for channel expressions.
 

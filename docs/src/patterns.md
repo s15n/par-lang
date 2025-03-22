@@ -124,7 +124,7 @@ def negate = [b: Bool] let result: Bool = b {
 *<sup>
 [Type](types.md#the-unit-type)
 | [Constructing Expression](./expressions/construction.md#the-unit-expression)
-| [Destructing Statement](./statements/commands.md#todo)
+| [Destructing Statement](./statements/commands.md#the-continue-command)
 </sup>*
 
 The unit pattern `!` is always irrefutable and binds nothing.
@@ -160,7 +160,7 @@ dec drop_bool : [Bool] !
 *<sup>
 [Type](types.md#pair-types)
 | [Constructing Expression](./expressions/construction.md#pair-expressions)
-| [Destructing Statement](./statements/commands.md#todo)
+| [Destructing Statement](./statements/commands.md#receive-commands)
 </sup>*
 
 - A pair pattern `(p) q` is irrefutable if and only if both `p` and `q` are irrefutable
@@ -182,40 +182,6 @@ dec uncurry : [type A, B, C] [[A, B] C] [(A, B)!] C
 def uncurry = [type A, B, C] [f] [(a, b)!] f(a, b)
 ```
 
-
-<!--## Variant Patterns
-
-> **<sup>Syntax</sup>**\
-> _VariantPattern_ : [_Label_](types.md) _PatternNoAlt_
-
-*<sup>
-[Type](types.md#either-types)
-| [Constructing Expression](./expressions/construction.md#either-selections)
-</sup>*
-
-- A variant pattern `.la p` can only be used on type `either { .la A, ... }` and `p` must be able to be used on type `A`
-- The pattern cannot be used if the type of the value being matched on is unknown
-- When it can match, it is irrefutable if and only if the `either` has exactly one variant
-- `.la p` matches `x` if and only if `x` is of the variant `.la` and `p` matches the payload of `x`
-- Its bindings are those of `p`
-
-Variant patterns are almost exclusively used in destructing values of either types (in [expressions](./expressions/application.md#either-destructions) or [statements](./statements/commands.md#todo)):
-```par
-dec get_second : [type T] [List<T>] (Option<T>) List<T>
-def get_second = [type T] [list] list {
-  .item(fst).item(snd) rest => (.some snd) .item(fst) rest,
-  other => (.none!) other
-}
-```
-
-## Grouped Patterns
-
-> **<sup>Syntax</sup>**\
-> _GroupedPattern_ : `{` _Pattern_ `}`
-
-A grouped pattern is equivalent to its body.
--->
-
 ## Existential Patterns
 
 > **<sup>Syntax</sup>**\
@@ -224,7 +190,7 @@ A grouped pattern is equivalent to its body.
 *<sup>
 [Type](types.md#existential-types)
 | [Constructing Expression](./expressions/construction.md#existential-constructions)
-| [Destructing Statement](./statements/commands.md#todo)
+| [Destructing Statement](./statements/commands.md#receive-type-commands)
 </sup>*
 
 - An existential pattern `(type X) p` can only be used on an existential type `(type T) A` and `p` must be able to be used on type `A`
@@ -252,15 +218,6 @@ def any_test: Any = do {
   let y: X = x_val
 } (type X) y
 ```
-
-<!--## Alternatives
-
-> **<sup>Syntax</sup>**\
-> _Alternatives_ : `|`<sup>?</sup> _PatternNoAlt_ (`|` _PatternNoAlt_)<sup>+</sup>
-
-- The alternatives `a | b | ...` can be used on type `T` if `a`, `b`, ... can all be used on type `T`
-- Together, they're an irrefutable pattern if and only if (todo)
--->
 
 ## Future
 

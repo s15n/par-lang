@@ -1,32 +1,40 @@
 # Future
 
 Here the
-planned features are listed. You can read more and even actively help the language evolution on the Par [Discord](https://discord.gg/8KsypefW99)
+planned features are listed. You can read more and even actively help the language grow on the Par [Discord](https://discord.gg/8KsypefW99)
 
 ## Primitives
 
-<sup>Priority: Essential | Progress: Not started</sup>
+<sup>Priority: Essential</sup>
 
 ## Replicables
 
-<sup>Priority: Essential | Progress: Draft complete</sup>
+<sup>Priority: Essential</sup>
 
-## Tagged Types
+## Extensible I/O via Rust-controlled objects
 
-<sup>Priority: High | Progress: Drafting</sup>
+<sup>Priority: Essential</sup>
+
+## Non-determinism
+
+<sup>Priority: Essential</sup>
+
+## Tagged types
+
+<sup>Priority: High</sup>
 
 ## Traits
 
-<sup>Priority: High | Progress: Draft complete</sup>
+<sup>Priority: High</sup>
 
 ## Powerful pattern matching
 
-<sup>Priority: Medium | Progress: Drafting</sup>
+<sup>Priority: Medium</sup>
 
 ## Records
 
-<sup>Priority: Medium | Progress: Drafting</sup>
+<sup>Priority: Medium</sup>
 
-## Small features
+## Reactive values
 
-todo: write something on these topics.
+<sup>Priority: Low</sup>

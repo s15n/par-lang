@@ -89,4 +89,3 @@ Whitespace characters are:
 - Tabs `'\t'`, `'\v'`
 - Newline `'\n'`
 - Carriage return `'\r'`
-- todo: more?

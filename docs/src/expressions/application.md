@@ -150,17 +150,6 @@ let o_add1: Option<Nat> = o {
 }
 ```
 
-A match expression is equivalent to a [match command](../statements/commands.md#match-commands):
-```par
-// in process syntax
-let y = x { .l1 p1 => y1, ..., .ln pn => yn }
-// is equivalent to
-let y = x
-y { .l1 => { q1; ... }, ..., .ln => { q1; ... } }
-```
-where `qi` is the command corresponding to `pi`. todo: how is this defined.
-
-
 ## Recursive Destructions
 
 > **<sup>Syntax</sup>**\
@@ -271,7 +260,6 @@ def id: [type T] [T] T = [x] x
 def id_bool: [Bool] Bool = id(type Bool)
 def id_unit: [!] ! = id(type !)
 ```
-
 
 [ID]: ../lexical.md#names
 [_PrimaryExpression_]: ../expressions.md#primary-expressions
