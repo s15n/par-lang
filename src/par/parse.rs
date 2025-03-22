@@ -246,7 +246,6 @@ where
     };
     alt((
         preceded("//", repeat(0.., (not("\n"), any)).map(|()| ())),
-        // ending `*/` is optional so lexer doesn't panic if unclosed
         preceded("/*", comment_block_rest).map(|()| ()),
     ))
     // .context(StrContext::Label("comment"))
