@@ -35,6 +35,49 @@ pub enum Loc {
     External,
 }
 
+impl Loc {
+    pub fn inside(&self, other: &Loc) -> bool {
+        match (self, other) {
+            (Self::Code { span: s1, file: f1, .. }, Self::Code { span: s2, file: f2, .. }) => {
+                s1.start >= s2.start && s1.end <= s2.end && f1 == f2
+            }
+            _ => false,
+        }
+    }
+
+    pub fn from_points(point1: (usize, usize), point2: (usize, usize), file: String, text: &str) -> Self {
+        let (line1, column1) = point1;
+        let (line2, column2) = point2;
+        let lines = text.lines();
+        let mut got_start = false;
+        let mut start = 0;
+        let mut end = 0;
+        for (i, l) in lines.enumerate() {
+            if i == line1 {
+                start += column1;
+                got_start = true;
+                end = start;
+            } else if i == line2 {
+                end += column2;
+            }
+            if i == line2 {
+                break;
+            }
+            if !got_start {
+                start += l.len() + 1;
+            } else {
+                end += l.len() + 1;
+            }
+        }
+        Self::Code {
+            line: line1 + 1,
+            column: column1 + 1,
+            span: start..end,
+            file,
+        }
+    }
+}
+
 impl Default for Loc {
     fn default() -> Self {
         Self::External

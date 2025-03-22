@@ -1,5 +1,6 @@
 use lsp_types::{self as lsp, Uri};
 use crate::par::language::Internal;
+use crate::par::lexer::Token;
 use crate::par::parse::{Loc, Name};
 use crate::par::types::TypeError;
 use crate::playground::Compiled;
@@ -27,11 +28,35 @@ impl Instance {
         }
     }
 
-    pub fn handle_hover(&self, params: &lsp::HoverParams) -> Option<lsp::Hover> {
+    pub fn handle_hover(&self, params: &lsp::HoverParams, io: &IO) -> Option<lsp::Hover> {
         tracing::info!("Handling hover request with params: {:?}", params);
 
+        let pos = params.text_document_position_params.position;
+        let hover_loc = Loc::from_points(
+            (pos.line as usize, pos.character as usize),
+            (pos.line as usize, pos.character as usize),
+            self.uri.to_string(),
+            io.read(&self.uri)
+        );
+
         let payload = match &self.compiled {
-            Some(Ok(compiled)) => format!("Compiled:\n{}", compiled.pretty.clone()),
+            Some(Ok(compiled)) => {
+                let mut message: Option<String> = Some(format!("{:?}", hover_loc));
+                for (loc, name, names, typ) in &compiled.program.type_defs {
+                    tracing::info!("Type at {:?}", loc);
+                    if !hover_loc.inside(&loc) {
+                        continue;
+                    }
+                    message = Some(format!("Type: {}", name.to_string()));
+                    break;
+                }
+
+                if let Some(message) = message {
+                    message
+                } else {
+                    format!("Compiled:\n{}", compiled.pretty.clone())
+                }
+            },
             Some(Err(e)) => format!("Compiled error: {:?}", e),
             None => "Not compiled".to_string(),
         };

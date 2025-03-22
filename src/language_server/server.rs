@@ -54,7 +54,7 @@ impl<'c> LanguageServer<'c> {
                 //self.handle_hover(params)
                 self.handle_request_instance(
                     &params.text_document_position_params.text_document.uri,
-                    |instance| instance.handle_hover(&params)
+                    |instance, io| instance.handle_hover(&params, io)
                 )
             }
             _ => {
@@ -111,12 +111,12 @@ impl<'c> LanguageServer<'c> {
     fn handle_request_instance<R>(
         &mut self,
         uri: &Uri,
-        handler: impl FnOnce(&mut Instance) -> R
+        handler: impl FnOnce(&mut Instance, &IO) -> R
     ) -> R {
         let instance = instance_for(&mut self.instances, uri);
 
         let compile_result = instance.compile(&self.io);
-        let response = handler(instance);
+        let response = handler(instance, &self.io);
 
         let mut feedback = self.feedback.cleanup();
         match compile_result {
