@@ -15,13 +15,14 @@ use crate::{
     par::{
         language::{CompileError, Internal},
         parse::{Loc, Name, Program},
-        parser::parse_program,
+        parser::{parse_program, SyntaxError},
         process::Expression,
         runtime::{self, Context, Operation},
         types::{self, Type, TypeError},
     },
     spawn::TokioSpawn,
 };
+use miette::{LabeledSpan, SourceOffset, SourceSpan};
 
 pub struct Playground {
     file_path: Option<PathBuf>,
@@ -42,7 +43,7 @@ pub(crate) struct Compiled {
 
 impl Compiled {
     pub(crate) fn from_string(source: &str) -> Result<Compiled, Error> {
-        parse_program(source.to_owned())
+        parse_program(source)
             .map_err(Error::Parse)
             .and_then(|program| {
                 let type_defs = program
@@ -169,7 +170,7 @@ impl Checked {
 
 #[derive(Debug)]
 pub(crate) enum Error {
-    Parse(miette::Report),
+    Parse(SyntaxError),
     Compile(CompileError<Loc>),
     Type(TypeError<Loc, Internal<Name>>),
     Runtime(runtime::Error<Loc, Internal<Name>>),
@@ -409,7 +410,7 @@ impl Playground {
                 egui::ScrollArea::both().show(ui, |ui| {
                     if let Some(Err(error)) = &self.compiled {
                         ui.label(
-                            egui::RichText::new(error.display(&self.compiled_code))
+                            egui::RichText::new(error.display(self.compiled_code.clone()))
                                 .color(red())
                                 .code(),
                         );
@@ -435,7 +436,8 @@ impl Playground {
                                 egui::RichText::new("Type checking successful").color(green()),
                             );
                         } else if let Err(err) = checked {
-                            let error = Error::Type(err.clone()).display(&self.compiled_code);
+                            let error =
+                                Error::Type(err.clone()).display(self.compiled_code.clone());
 
                             ui.label(egui::RichText::new(error).color(red()).code());
                         }
@@ -554,7 +556,7 @@ impl Playground {
                                 Err(error) => {
                                     ui.label(
                                         egui::RichText::new(
-                                            Error::Runtime(error).display(&int.code),
+                                            Error::Runtime(error).display(int.code.clone()),
                                         )
                                         .color(red())
                                         .code(),
@@ -578,56 +580,130 @@ impl Playground {
     }
 }
 
+pub fn labels_from_loc<'s>(code: &'s str, loc: &Loc) -> Vec<LabeledSpan> {
+    match loc {
+        Loc::Code { line, column } => vec![LabeledSpan::new_with_span(
+            None,
+            SourceOffset::from_location(&code, *line, *column),
+        )],
+        Loc::External => vec![],
+    }
+}
+pub fn span_from_loc<'s>(code: &'s str, loc: &Loc) -> Option<SourceSpan> {
+    match loc {
+        Loc::Code { line, column } => {
+            Some(SourceOffset::from_location(&code, *line, *column).into())
+        }
+        Loc::External => None,
+    }
+}
+
+#[derive(Debug, miette::Diagnostic)]
+struct RuntimeError {
+    #[label]
+    span: Option<SourceSpan>,
+    #[label(collection)]
+    others: Vec<LabeledSpan>,
+    #[related]
+    related: Vec<miette::ErrReport>,
+    message: String,
+}
+impl core::fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        format!("Runtime Error: {}.", self.message).fmt(f)
+    }
+}
+impl core::error::Error for RuntimeError {}
+
 impl Error {
-    pub fn display(&self, code: &str) -> String {
+    pub fn display(&self, code: Arc<str>) -> String {
         match self {
             Self::Parse(error) => {
                 // Show syntax error with miette's formatting
-                format!("{error:?}")
+                format!(
+                    "{:?}",
+                    miette::Report::from(error.to_owned()).with_source_code(code)
+                )
             }
 
             Self::Compile(CompileError::PassNotPossible(loc)) => {
-                format!("{}\nNothing to `pass` to.", Self::display_loc(code, loc))
+                let labels = labels_from_loc(&code, loc);
+                let code = if labels.is_empty() {
+                    "<UI>".into()
+                } else {
+                    code
+                };
+                let error = miette::miette! {
+                    labels = labels,
+                    "Nothing to `pass` to."
+                }
+                .with_source_code(code);
+                format!("{error:?}")
             }
 
             Self::Compile(CompileError::MustEndProcess(loc)) => {
-                format!("{}\nThis process must end.", Self::display_loc(code, loc))
+                let labels = labels_from_loc(&code, loc);
+                let code = if labels.is_empty() {
+                    "<UI>".into()
+                } else {
+                    code
+                };
+                let error = miette::miette! {
+                    labels = labels,
+                    "This process must end."
+                }
+                .with_source_code(code);
+                format!("{error:?}")
             }
 
             Self::Compile(CompileError::CannotEndInDoExpression(loc)) => {
-                format!(
-                    "{}\nCannot end process in `do` expression.",
-                    Self::display_loc(code, loc)
-                )
+                let labels = labels_from_loc(&code, loc);
+                let code = if labels.is_empty() {
+                    "<UI>".into()
+                } else {
+                    code
+                };
+                let error = miette::miette! {
+                    labels = labels,
+                    "Cannot end process in `do` expression."
+                }
+                .with_source_code(code);
+                format!("{error:?}")
             }
 
-            Self::Type(error) => error.pretty(|loc| Self::display_loc(code, loc)),
+            Self::Type(error) => format!("{:?}", error.into_report(code)),
 
-            Self::Runtime(error) => Self::display_runtime_error(code, error),
+            Self::Runtime(error) => format!(
+                "{:?}",
+                miette::Report::from(Self::display_runtime_error(&code, error))
+            ),
         }
     }
 
-    fn display_runtime_error(code: &str, error: &runtime::Error<Loc, Internal<Name>>) -> String {
+    fn display_runtime_error(
+        code: &str,
+        error: &runtime::Error<Loc, Internal<Name>>,
+    ) -> RuntimeError {
         use runtime::Error::*;
         match error {
-            NameNotDefined(loc, name) => {
-                format!(
-                    "{}\n`{}` is not defined.",
-                    Self::display_loc(code, loc),
-                    name
-                )
-            }
-            ShadowedObligation(loc, name) => {
-                format!(
-                    "{}\nCannot re-assign `{}` before handling it.",
-                    Self::display_loc(code, loc),
-                    name
-                )
-            }
-            UnfulfilledObligations(loc, names) => {
-                format!(
-                    "{}\nCannot end this process before handling {}.",
-                    Self::display_loc(code, loc),
+            NameNotDefined(loc, name) => RuntimeError {
+                span: span_from_loc(code, loc),
+                related: Vec::new(),
+                others: Vec::new(),
+                message: format!("`{}` is not defined.", name),
+            },
+            ShadowedObligation(loc, name) => RuntimeError {
+                span: span_from_loc(code, loc),
+                related: Vec::new(),
+                others: Vec::new(),
+                message: format!("Cannot re-assign `{}` before handling it.", name),
+            },
+            UnfulfilledObligations(loc, names) => RuntimeError {
+                span: span_from_loc(code, loc),
+                related: Vec::new(),
+                others: Vec::new(),
+                message: format!(
+                    "Cannot end this process before handling {}.",
                     names
                         .iter()
                         .enumerate()
@@ -637,96 +713,100 @@ impl Error {
                             format!(", `{}`", name)
                         })
                         .collect::<String>()
-                )
-            }
-            IncompatibleOperations(op1, op2) => {
-                format!(
-                    "{}\n\n{}\n\nThese operations are incompatible.",
+                ),
+            },
+            IncompatibleOperations(op1, op2) => RuntimeError {
+                span: None,
+                related: Vec::new(),
+                others: [
                     Self::display_operation(code, op1),
                     Self::display_operation(code, op2),
-                )
-            }
-            NoSuchLoopPoint(loc, _) => {
-                format!(
-                    "{}\nThere is no matching loop point in scope.",
-                    Self::display_loc(code, loc),
-                )
-            }
-            Multiple(error1, error2) => {
-                format!(
-                    "{}\n\n\n{}",
-                    Self::display_runtime_error(code, error1),
-                    Self::display_runtime_error(code, error2),
-                )
-            }
+                ]
+                .into_iter()
+                .flatten()
+                .collect(),
+                message: "These operations are incompatible.".to_owned(),
+            },
+            NoSuchLoopPoint(loc, _) => RuntimeError {
+                span: span_from_loc(code, loc),
+                others: Vec::new(),
+                related: Vec::new(),
+                message: "There is no matching loop point in scope.".to_owned(),
+            },
+            Multiple(error1, error2) => RuntimeError {
+                span: None,
+                others: Vec::new(),
+                related: vec![
+                    miette::Report::from(Self::display_runtime_error(code, error1)),
+                    miette::Report::from(Self::display_runtime_error(code, error2)),
+                ],
+                message: "multiple errors".to_owned(),
+            },
         }
     }
 
-    fn display_operation(code: &str, op: &Operation<Loc, Internal<Name>>) -> String {
+    fn display_operation(code: &str, op: &Operation<Loc, Internal<Name>>) -> Vec<LabeledSpan> {
         match op {
-            Operation::Unknown(loc) => {
-                format!("{}\nUnknown operation.", Self::display_loc(code, loc))
-            }
-            Operation::Send(loc) => {
-                format!(
-                    "{}\nThis side is sending a value.",
-                    Self::display_loc(code, loc),
-                )
-            }
-            Operation::Receive(loc) => {
-                format!(
-                    "{}\nThis side is receiving a value.",
-                    Self::display_loc(code, loc),
-                )
-            }
-            Operation::Choose(loc, chosen) => {
-                format!(
-                    "{}\nThis side is choosing `{}`.",
-                    Self::display_loc(code, loc),
-                    chosen,
-                )
-            }
-            Operation::Match(loc, choices) => {
-                format!(
-                    "{}\nThis side is offering either of {}.",
-                    Self::display_loc(code, loc),
-                    choices
-                        .iter()
-                        .enumerate()
-                        .map(|(i, name)| if i == 0 {
-                            format!("`{}`", name)
-                        } else {
-                            format!(", `{}`", name)
-                        })
-                        .collect::<String>(),
-                )
-            }
-            Operation::Break(loc) => {
-                format!("{}\nThis side is breaking.", Self::display_loc(code, loc))
-            }
-            Operation::Continue(loc) => {
-                format!("{}\nThis side is continuing.", Self::display_loc(code, loc),)
-            }
-        }
-    }
-
-    fn display_loc(code: &str, loc: &Loc) -> String {
-        match loc {
-            Loc::External => format!("<UI>"),
-            Loc::Code { line, column } => {
-                let line_of_code = match code.lines().nth(line - 1) {
-                    Some(loc) => loc,
-                    None => return format!("<invalid location {}:{}>", line, column),
-                };
-                let line_number = format!("{}| ", line);
-                format!(
-                    "{}{}\n{}{}^",
-                    line_number,
-                    line_of_code,
-                    " ".repeat(line_number.len()),
-                    " ".repeat(column - 1),
-                )
-            }
+            Operation::Unknown(loc) => labels_from_loc(code, loc)
+                .into_iter()
+                .map(|mut x| {
+                    x.set_label(Some("Unknown operation.".to_owned()));
+                    x
+                })
+                .collect(),
+            Operation::Send(loc) => labels_from_loc(code, loc)
+                .into_iter()
+                .map(|mut x| {
+                    x.set_label(Some("This side is sending a value.".to_owned()));
+                    x
+                })
+                .collect(),
+            Operation::Receive(loc) => labels_from_loc(code, loc)
+                .into_iter()
+                .map(|mut x| {
+                    x.set_label(Some("This side is receiving a value.".to_owned()));
+                    x
+                })
+                .collect(),
+            Operation::Choose(loc, chosen) => labels_from_loc(code, loc)
+                .into_iter()
+                .map(|mut x| {
+                    x.set_label(Some(format!("This side is choosing `{}`.", chosen)));
+                    x
+                })
+                .collect(),
+            Operation::Match(loc, choices) => labels_from_loc(code, loc)
+                .into_iter()
+                .map(|mut x| {
+                    x.set_label(Some(format!(
+                        "This side is offering either of {}.",
+                        choices
+                            .iter()
+                            .enumerate()
+                            .map(|(i, name)| if i == 0 {
+                                format!("`{}`", name)
+                            } else {
+                                format!(", `{}`", name)
+                            })
+                            .collect::<String>(),
+                    )));
+                    x
+                })
+                .collect(),
+            Operation::Break(loc) => labels_from_loc(code, loc)
+                .into_iter()
+                .map(|mut x| {
+                    x.set_label(Some("This side is breaking.".to_owned()));
+                    x
+                })
+                .collect(),
+            Operation::Continue(loc) => labels_from_loc(code, loc)
+                .into_iter()
+                .map(|mut x| {
+                    x.set_label(Some("This side is continuing.".to_owned()));
+                    x
+                })
+                .collect(),
         }
     }
 }

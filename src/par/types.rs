@@ -1714,6 +1714,178 @@ fn indentation(f: &mut impl Write, indent: usize) -> fmt::Result {
     Ok(())
 }
 
+impl<Name: Display> TypeError<super::parse::Loc, Name> {
+    pub fn into_report(&self, source_code: Arc<str>) -> miette::Report {
+        use crate::playground::labels_from_loc;
+        let code = &source_code;
+        match self {
+            Self::TypeNameNotDefined(loc, name) => {
+                let labels = labels_from_loc(code, loc);
+                miette::miette!(labels = labels, "Type `{}` is not defined.", name)
+            }
+            Self::WrongNumberOfTypeArgs(loc, name, required_number, provided_number) => {
+                let labels = labels_from_loc(code, loc);
+                miette::miette!(
+                    labels = labels,
+                    "Type `{}` has {} type arguments, but {} were provided.",
+                    name,
+                    required_number,
+                    provided_number
+                )
+            }
+            Self::NameNotDefined(loc, name) => {
+                let labels = labels_from_loc(code, loc);
+                miette::miette!(labels = labels, "`{}` is not defined.", name)
+            }
+            Self::ShadowedObligation(loc, name) => {
+                let labels = labels_from_loc(code, loc);
+                miette::miette!(
+                    labels = labels,
+                    "Cannot re-assign `{}` before handling it.",
+                    name,
+                )
+            }
+            Self::TypeMustBeKnownAtThisPoint(loc, _) => {
+                let labels = labels_from_loc(code, loc);
+                miette::miette!(labels = labels, "Type must be known at this point.")
+            }
+            Self::ParameterTypeMustBeKnown(loc, _, param) => {
+                let labels = labels_from_loc(code, loc);
+                miette::miette!(
+                    labels = labels,
+                    "Type of parameter `{}` must be known.",
+                    param,
+                )
+            }
+            Self::CannotAssignFromTo(loc, from_type, to_type) => {
+                let labels = labels_from_loc(code, loc);
+                let (mut from_type_str, mut to_type_str) = (String::new(), String::new());
+                from_type.pretty(&mut from_type_str, 1).unwrap();
+                to_type.pretty(&mut to_type_str, 1).unwrap();
+                miette::miette!(
+                    labels = labels,
+                    "This type was required:\n\n  {}\n\nBut an incompatible type was provided:\n\n  {}\n",
+                    to_type_str,
+                    from_type_str,
+                )
+            }
+            Self::UnfulfilledObligations(loc, names) => {
+                let labels = labels_from_loc(code, loc);
+                miette::miette!(
+                    labels = labels,
+                    "Cannot end this process before handling {}.",
+                    names
+                        .iter()
+                        .enumerate()
+                        .map(|(i, name)| if i == 0 {
+                            format!("`{}`", name)
+                        } else {
+                            format!(", `{}`", name)
+                        })
+                        .collect::<String>()
+                )
+            }
+            Self::InvalidOperation(loc, _, typ) => {
+                let labels = labels_from_loc(code, loc);
+                let mut typ_str = String::new();
+                typ.pretty(&mut typ_str, 1).unwrap();
+                miette::miette!(
+                    labels = labels,
+                    "This operation cannot be performed on:\n\n  {}\n",
+                    typ_str
+                )
+            }
+            Self::InvalidBranch(loc, branch, typ) => {
+                let labels = labels_from_loc(code, loc);
+                let mut typ_str = String::new();
+                typ.pretty(&mut typ_str, 1).unwrap();
+                miette::miette!(
+                    labels = labels,
+                    "Branch `{}` is not available on:\n\n  {}\n",
+                    branch,
+                    typ_str
+                )
+            }
+            Self::MissingBranch(loc, branch, typ) => {
+                let labels = labels_from_loc(code, loc);
+                let mut typ_str = String::new();
+                typ.pretty(&mut typ_str, 1).unwrap();
+                miette::miette!(
+                    labels = labels,
+                    "Branch `{}` was not handled for:\n\n  {}\n",
+                    branch,
+                    typ_str
+                )
+            }
+            Self::RedundantBranch(loc, branch, typ) => {
+                let labels = labels_from_loc(code, loc);
+                let mut typ_str = String::new();
+                typ.pretty(&mut typ_str, 1).unwrap();
+                miette::miette!(
+                    labels = labels,
+                    "Branch `{}` is not possible for:\n\n  {}\n",
+                    branch,
+                    typ_str
+                )
+            }
+            Self::TypesCannotBeUnified(typ1, typ2) => {
+                let mut labels = labels_from_loc(code, typ1.get_loc());
+                labels
+                    .iter_mut()
+                    .for_each(|x| x.set_label(Some("this".to_owned())));
+                let mut labels2 = labels_from_loc(code, typ2.get_loc());
+                labels2.iter_mut().for_each(|x| {
+                    x.set_label(Some("should operate on the same type as this".to_owned()))
+                });
+                labels.extend(labels2);
+                miette::miette!(
+                    labels = labels,
+                    "Operations cannot be performed on the same type."
+                )
+            }
+            Self::NoSuchLoopPoint(loc, _) => {
+                let labels = labels_from_loc(code, loc);
+                miette::miette!(labels = labels, "There is no source_matching loop point in scope.")
+            }
+            Self::LoopVariableNotPreserved(loc, name) => {
+                let labels = labels_from_loc(code, loc);
+                miette::miette!(
+                    labels = labels,
+                    "`{}` is used by next iteration, but is no longer defined.",
+                    name,
+                )
+            }
+            Self::LoopVariableChangedType(loc, name, loop_type, begin_type) => {
+                let labels = labels_from_loc(code, loc);
+                let (mut loop_type_str, mut begin_type_str) = (String::new(), String::new());
+                loop_type.pretty(&mut loop_type_str, 1).unwrap();
+                begin_type.pretty(&mut begin_type_str, 1).unwrap();
+                miette::miette!(
+                    labels = labels,
+                    "For next iteration, `{}` is required to be:\n\n  {}\n\nBut it has an incompatible type:\n\n  {}\n",
+                    name,
+                    begin_type_str,
+                    loop_type_str,
+                )
+            }
+            Self::Telltypes(loc, variables) => {
+                let labels = labels_from_loc(code, loc);
+                let mut buf = String::new();
+                for (name, typ) in variables {
+                    write!(&mut buf, "{}: ", name).unwrap();
+                    typ.pretty(&mut buf, 0).unwrap();
+                    write!(&mut buf, "\n\n").unwrap();
+                }
+                miette::miette! {
+                    labels = labels,
+                    "{}",
+                    buf
+                }
+            }
+        }.with_source_code(source_code)
+    }
+}
+
 impl<Loc, Name: Display> TypeError<Loc, Name> {
     pub fn pretty(&self, display_loc: impl Fn(&Loc) -> String) -> String {
         match self {

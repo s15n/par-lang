@@ -9,6 +9,7 @@ use super::{
 };
 use indexmap::IndexMap;
 use miette::{SourceOffset, SourceSpan};
+use std::sync::Arc;
 use winnow::{
     combinator::{
         alt, cut_err, delimited, empty, not, opt, peek, preceded, repeat, separated, terminated,
@@ -294,22 +295,20 @@ fn program(
         })
 }
 
-#[derive(Debug, miette::Diagnostic)]
+#[derive(Debug, Clone, miette::Diagnostic)]
 #[diagnostic(severity(Error))]
 pub struct SyntaxError {
-    #[source_code]
-    source: String,
     #[label]
     span: SourceSpan,
     // Generate these with the miette! macro.
     #[related]
-    related: Vec<miette::ErrReport>,
+    related: Arc<[miette::ErrReport]>,
     #[help]
     help: String,
 }
 impl core::fmt::Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        "Syntax error".fmt(f)
+        "Syntax error.".fmt(f)
     }
 }
 impl core::error::Error for SyntaxError {}
@@ -329,8 +328,8 @@ pub fn set_miette_hook() {
 }
 
 pub fn parse_program(
-    input: String,
-) -> std::result::Result<Program<Name, Expression<Loc, Name>>, miette::Report> {
+    input: &str,
+) -> std::result::Result<Program<Name, Expression<Loc, Name>>, SyntaxError> {
     let toks = lex(&input);
     let e = match program(Input::new(&toks)) {
         Ok(x) => return Ok(x),
@@ -338,7 +337,7 @@ pub fn parse_program(
     };
     // Empty input doesn't error so this won't panic.
     let error_tok = toks.get(e.offset()).unwrap_or(toks.last().unwrap()).clone();
-    Err(miette::Report::from(SyntaxError {
+    Err(SyntaxError {
         span: SourceSpan::new(SourceOffset::from(error_tok.span.start), {
             match error_tok.span.len() {
                 // miette unicode format for 1 length span is a hard-to-notice line, so don't set length to 1.
@@ -357,14 +356,14 @@ pub fn parse_program(
             else {
                 unreachable!("parse error location not `Code`")
             };
-            vec![miette::miette!(
+            Arc::from(vec![miette::miette!(
                 labels = vec![miette::LabeledSpan::new_with_span(
                     None,
                     SourceOffset::from_location(&input, line, column)
                 )],
                 help = msg,
                 "pest error"
-            )]
+            )])
         },
         help: e
             .inner()
@@ -372,8 +371,7 @@ pub fn parse_program(
             .iter()
             .map(|x| x.1.to_string().chars().chain(['\n']).collect::<String>())
             .collect::<String>(),
-        source: input,
-    }))
+    })
 }
 
 fn type_def(input: &mut Input) -> Result<(Name, (Vec<Name>, Type<Loc, Name>))> {
@@ -1243,7 +1241,7 @@ mod test {
     #[test]
     fn test1() {
         let input = include_str!("../../examples/sample.par");
-        let res = parse_program(input.to_owned());
+        let res = parse_program(input);
         match res {
             Ok(new) => {
                 let old = crate::par::parse::parse_program(input).unwrap();
@@ -1254,6 +1252,7 @@ mod test {
             }
             Err(e) => {
                 set_miette_hook();
+                let e = miette::Report::from(e).with_source_code(input);
                 eprintln!("{e:?}");
             }
         }
