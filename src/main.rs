@@ -5,7 +5,9 @@ mod interact;
 mod par;
 mod playground;
 mod spawn;
+mod language_server;
 
+/*
 #[tokio::main]
 async fn main() {
     let options = eframe::NativeOptions {
@@ -19,4 +21,9 @@ async fn main() {
         Box::new(|cc| Ok(Playground::new(cc))),
     )
     .expect("egui crashed");
+}
+*/
+
+fn main() {
+    language_server::language_server_main::main();
 }
