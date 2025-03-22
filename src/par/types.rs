@@ -2280,7 +2280,7 @@ impl<Name: Display> TypeError<super::parse::Loc, Name> {
             }
             Self::NoSuchLoopPoint(loc, _) => {
                 let labels = labels_from_loc(code, loc);
-                miette::miette!(labels = labels, "There is no source_matching loop point in scope.")
+                miette::miette!(labels = labels, "There is no matching loop point in scope.")
             }
             Self::DoesNotDescendSubjectOfBegin(loc, _) => {
                 let labels = labels_from_loc(code, loc);
