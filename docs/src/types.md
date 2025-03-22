@@ -643,7 +643,6 @@ type T = [type A] [type B] X
 
 Values of universal types can be instantiated for any type. These types syntactically mirror function types but they're qualified over types rather than values.
 They're also similar to parameterized types.
-They are used to obscure their underlying type.
 ```par
 // compare the three types of parameterizing types
 type UnivEndo = [type T] [T] T

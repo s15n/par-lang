@@ -255,7 +255,7 @@ If `x` is of the universal type `[type T] R`, the specialization `f(type X)` is 
 
 These expressions often "instantiate generic functions"
 ```par
-def id: [type T] [T] T = [x] x
+def id = [type T] [x: T] x
 
 def id_bool: [Bool] Bool = id(type Bool)
 def id_unit: [!] ! = id(type !)

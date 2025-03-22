@@ -316,7 +316,7 @@ dual <> a
 | [Destructing Statement](../statements/commands.md#send-type-commands)
 </sup>*
 
-Having multiple names between `(` and `)` is just syntax sugar:
+Having multiple names between `[` and `]` is just syntax sugar:
 ```par
 [type T, U] x
 // is equivalent to
