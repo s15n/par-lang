@@ -49,6 +49,26 @@ impl Loc {
         let (line, column) = pair.line_col();
         Loc::Code { line, column }
     }
+
+    pub(crate) fn display(&self, code: &str) -> String {
+        match self {
+            Loc::External => format!("<UI>"),
+            Loc::Code { line, column } => {
+                let line_of_code = match code.lines().nth(line - 1) {
+                    Some(loc) => loc,
+                    None => return format!("<invalid location {}:{}>", line, column),
+                };
+                let line_number = format!("{}| ", line);
+                format!(
+                    "{}{}\n{}{}^",
+                    line_number,
+                    line_of_code,
+                    " ".repeat(line_number.len()),
+                    " ".repeat(column - 1),
+                )
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]

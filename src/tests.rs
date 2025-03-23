@@ -17,7 +17,6 @@ use crate::{
     },
     par::language::Internal,
     playground::{self, CheckedProgram},
-    readback::{NameRequiredTraits, ReadbackState},
     spawn::TokioSpawn,
 };
 
@@ -132,24 +131,18 @@ impl TestingState {
                 ReadbackResult::Continue => matches!(pattern, ReadbackPattern::Continue).into(),
                 ReadbackResult::Send(left, right) => {
                     if let ReadbackPattern::Send(lp, rp) = pattern {
-                        join(
-                            self.clone().matches(*left, *lp),
-                            self.clone().matches(*right, *rp),
-                        )
-                        .await
-                        .into()
+                        join(self.matches(*left, *lp), self.matches(*right, *rp))
+                            .await
+                            .into()
                     } else {
                         false.into()
                     }
                 }
                 ReadbackResult::Receive(left, right) => {
                     if let ReadbackPattern::Receive(lp, rp) = pattern {
-                        join(
-                            self.clone().matches(*left, *lp),
-                            self.clone().matches(*right, *rp),
-                        )
-                        .await
-                        .into()
+                        join(self.matches(*left, *lp), self.matches(*right, *rp))
+                            .await
+                            .into()
                     } else {
                         false.into()
                     }
@@ -161,7 +154,7 @@ impl TestingState {
                     if name != pat_name {
                         return false.into();
                     }
-                    self.clone().matches(*payload, *pattern_payload).await
+                    self.matches(*payload, *pattern_payload).await
                 }
                 ReadbackResult::Choice(ctx, options) => {
                     let ReadbackPattern::Choice(name, pattern_payload) = pattern else {
@@ -181,7 +174,7 @@ impl TestingState {
                     self.matches(res, pattern).await
                 }
 
-                ReadbackResult::Expand(mut package) => {
+                ReadbackResult::Expand(package) => {
                     let tree = self.shared.expand_once(package.tree).await;
                     self.matches(ReadbackResult::Halted(tree.with_type(package.ty)), pattern)
                         .await
@@ -286,13 +279,13 @@ async fn test_whole_programs() -> Result<(), String> {
 
         let checked = match compiled.checked {
             Ok(o) => o,
-            Err(e) => return Err(e.pretty(|x| crate::playground::Error::display_loc(&source, x))),
+            Err(e) => return Err(e.display(&source)),
         };
         let ic_compiled = checked.ic_compiled.unwrap();
-        let prog = (checked.program.clone());
-        let mut spawner = Arc::new(TokioSpawn);
-        let mut net = Arc::new(Mutex::new(ic_compiled.create_net()));
-        let mut shared = SharedState::with_net(net.clone(), prog.type_defs.clone());
+        let prog = checked.program.clone();
+        let spawner = Arc::new(TokioSpawn);
+        let net = Arc::new(Mutex::new(ic_compiled.create_net()));
+        let shared = SharedState::with_net(net.clone(), prog.type_defs.clone());
         let (_tx, rx) = channel();
         spawner.spawn(shared.create_net_reducer(rx)).unwrap();
         let mut state = TestingState {
@@ -304,14 +297,18 @@ async fn test_whole_programs() -> Result<(), String> {
         for (idx, j) in i.tests.into_iter().enumerate() {
             let def_name = format!("test_{}", idx);
             let def_name = Internal::Original(def_name.into());
-            let mut tree = ic_compiled.get_with_name(&def_name).unwrap();
-            net.lock().unwrap().freshen_variables(&mut tree);
+            let tree = net
+                .lock()
+                .unwrap()
+                .inject_net(ic_compiled.get_with_name(&def_name).unwrap());
             let pattern = match j.pattern {
                 TestPattern::Code(_) => {
                     let def_name = format!("test_pat_{}", idx);
                     let def_name = Internal::Original(def_name.into());
-                    let mut tree = ic_compiled.get_with_name(&def_name).unwrap();
-                    net.lock().unwrap().freshen_variables(&mut tree);
+                    let tree = net
+                        .lock()
+                        .unwrap()
+                        .inject_net(ic_compiled.get_with_name(&def_name).unwrap());
                     let res = ReadbackResult::Halted(
                         tree.with_type(prog.declarations.get(&def_name).unwrap().clone().1),
                     );

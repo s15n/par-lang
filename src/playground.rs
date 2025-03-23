@@ -40,7 +40,7 @@ pub struct Playground {
 pub(crate) struct Compiled {
     pub(crate) program: Program<Loc, Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
     pub(crate) pretty: String,
-    pub(crate) checked: Result<Checked, TypeError<Loc, Internal<Name>>>,
+    pub(crate) checked: Result<Checked, Error>,
 }
 
 impl Compiled {
@@ -124,7 +124,7 @@ impl Compiled {
         return Ok(Compiled {
             program,
             pretty,
-            checked: Ok(Checked::from_program(new_program).map_err(|err| Error::InetCompile(err))?),
+            checked: Checked::from_program(new_program).map_err(|err| Error::InetCompile(err)),
         });
     }
 }
@@ -332,16 +332,12 @@ impl Playground {
         for (internal_name, expression) in &program.definitions {
             if let Internal::Original(name) = internal_name {
                 if ui.button(&name.string).clicked() {
-                    let q = &program.declarations;
-                    let ty = &program
-                        .declarations
-                        .get(&Internal::Original(name.clone()))
-                        .unwrap()
-                        .1;
+                    let ty = compiled
+                        .get_type_of(&Internal::Original(name.clone()))
+                        .unwrap();
                     let mut net = compiled.create_net();
-                    let mut tree = compiled.get_with_name(&internal_name).unwrap();
-                    net.freshen_variables(&mut tree);
-                    let tree = tree.with_type(ty.clone());
+                    let child_net = compiled.get_with_name(&internal_name).unwrap();
+                    let tree = net.inject_net(child_net).with_type(ty.clone());
                     *readback_state = Some(ReadbackState::initialize(
                         ui,
                         net,
@@ -497,7 +493,7 @@ impl Playground {
                                 }
                             }
                         } else if let Err(err) = checked {
-                            let error = Error::Type(err.clone()).display(&self.compiled_code);
+                            let error = err.display(&self.compiled_code);
 
                             ui.label(egui::RichText::new(error).color(red()).code());
                         }
@@ -645,33 +641,30 @@ impl Error {
             Self::Parse(error) => {
                 format!(
                     "{}\nSyntax error: {}.",
-                    Self::display_loc(code, &error.location),
+                    error.location.display(code),
                     error.msg
                 )
             }
 
             Self::Compile(CompileError::MustEndProcess(loc)) => {
-                format!("{}\nThis process must end.", Self::display_loc(code, loc))
+                format!("{}\nThis process must end.", loc.display(code))
             }
 
             Self::Compile(CompileError::CannotEndInDoExpression(loc)) => {
                 format!(
                     "{}\nCannot end process in `do` expression.",
-                    Self::display_loc(code, loc)
+                    loc.display(code)
                 )
             }
 
             Self::Compile(CompileError::PassNotPossible(loc)) => {
-                format!(
-                    "{}\nIt is not possible to `pass` here",
-                    Self::display_loc(code, loc)
-                )
+                format!("{}\nIt is not possible to `pass` here", loc.display(code))
             }
             Self::InetCompile(err) => {
-                format!("inet compilation error: {err:?}")
+                format!("inet compilation error: {}", err.display(code))
             }
 
-            Self::Type(error) => error.pretty(|loc| Self::display_loc(code, loc)),
+            Self::Type(error) => error.pretty(|loc| loc.display(code)),
 
             Self::Runtime(error) => Self::display_runtime_error(code, error),
         }
@@ -681,23 +674,19 @@ impl Error {
         use runtime::Error::*;
         match error {
             NameNotDefined(loc, name) => {
-                format!(
-                    "{}\n`{}` is not defined.",
-                    Self::display_loc(code, loc),
-                    name
-                )
+                format!("{}\n`{}` is not defined.", loc.display(code), name)
             }
             ShadowedObligation(loc, name) => {
                 format!(
                     "{}\nCannot re-assign `{}` before handling it.",
-                    Self::display_loc(code, loc),
+                    loc.display(code),
                     name
                 )
             }
             UnfulfilledObligations(loc, names) => {
                 format!(
                     "{}\nCannot end this process before handling {}.",
-                    Self::display_loc(code, loc),
+                    loc.display(code),
                     names
                         .iter()
                         .enumerate()
@@ -719,7 +708,7 @@ impl Error {
             NoSuchLoopPoint(loc, _) => {
                 format!(
                     "{}\nThere is no matching loop point in scope.",
-                    Self::display_loc(code, loc),
+                    loc.display(code),
                 )
             }
             Multiple(error1, error2) => {
@@ -735,31 +724,21 @@ impl Error {
     fn display_operation(code: &str, op: &Operation<Loc, Internal<Name>>) -> String {
         match op {
             Operation::Unknown(loc) => {
-                format!("{}\nUnknown operation.", Self::display_loc(code, loc))
+                format!("{}\nUnknown operation.", loc.display(code))
             }
             Operation::Send(loc) => {
-                format!(
-                    "{}\nThis side is sending a value.",
-                    Self::display_loc(code, loc),
-                )
+                format!("{}\nThis side is sending a value.", loc.display(code),)
             }
             Operation::Receive(loc) => {
-                format!(
-                    "{}\nThis side is receiving a value.",
-                    Self::display_loc(code, loc),
-                )
+                format!("{}\nThis side is receiving a value.", loc.display(code),)
             }
             Operation::Choose(loc, chosen) => {
-                format!(
-                    "{}\nThis side is choosing `{}`.",
-                    Self::display_loc(code, loc),
-                    chosen,
-                )
+                format!("{}\nThis side is choosing `{}`.", loc.display(code), chosen,)
             }
             Operation::Match(loc, choices) => {
                 format!(
                     "{}\nThis side is offering either of {}.",
-                    Self::display_loc(code, loc),
+                    loc.display(code),
                     choices
                         .iter()
                         .enumerate()
@@ -772,30 +751,10 @@ impl Error {
                 )
             }
             Operation::Break(loc) => {
-                format!("{}\nThis side is breaking.", Self::display_loc(code, loc))
+                format!("{}\nThis side is breaking.", loc.display(code))
             }
             Operation::Continue(loc) => {
-                format!("{}\nThis side is continuing.", Self::display_loc(code, loc),)
-            }
-        }
-    }
-
-    pub(crate) fn display_loc(code: &str, loc: &Loc) -> String {
-        match loc {
-            Loc::External => format!("<UI>"),
-            Loc::Code { line, column } => {
-                let line_of_code = match code.lines().nth(line - 1) {
-                    Some(loc) => loc,
-                    None => return format!("<invalid location {}:{}>", line, column),
-                };
-                let line_number = format!("{}| ", line);
-                format!(
-                    "{}{}\n{}{}^",
-                    line_number,
-                    line_of_code,
-                    " ".repeat(line_number.len()),
-                    " ".repeat(column - 1),
-                )
+                format!("{}\nThis side is continuing.", loc.display(code),)
             }
         }
     }

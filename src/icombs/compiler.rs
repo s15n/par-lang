@@ -31,7 +31,7 @@ enum VariableKind {
     Global,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Error {
     /// Error that is emitted when a variable that was never bound/captured is used
     UnboundVar(Loc),
@@ -43,19 +43,26 @@ pub enum Error {
         global: Name,
         dependents: IndexSet<Name>,
     },
+    UnguardedLoop(Loc, Option<Name>),
 }
 
-impl Debug for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Error {
+    pub fn display(&self, code: &str) -> String {
         match self {
-            Error::UnboundVar(loc) => write!(f, "Unbound variable at {:?}", loc),
-            Error::UnusedVar(loc) => write!(f, "Unused variable at {:?}", loc),
-            Error::UnexpectedType(loc, ty) => write!(f, "Unexpected type at {:?}: {:?}", loc, ty),
-            Error::GlobalNotFound(name) => write!(f, "Global not found: {:?}", name),
-            Error::DependencyCycle { global, dependents } => write!(
-                f,
+            Error::UnboundVar(loc) => format!("Unbound variable\n{}", loc.display(code)),
+            Error::UnusedVar(loc) => format!("Unused variable\n{}", loc.display(code)),
+            Error::UnexpectedType(loc, ty) => {
+                format!("Unexpected type: {:?}\n{}", ty, loc.display(code),)
+            }
+            Error::GlobalNotFound(name) => format!("Global not found: {:?}", name),
+            Error::DependencyCycle { global, dependents } => format!(
                 "Dependency cycle detected for global {:?} with dependents {:?}",
                 global, dependents
+            ),
+            Error::UnguardedLoop(loc, name) => format!(
+                "Unguarded loop with label {:?} at\n{}",
+                name,
+                loc.display(code)
             ),
         }
     }
@@ -90,6 +97,7 @@ pub struct LoopLabel(Option<Name>);
 pub struct Context {
     vars: IndexMap<Var, (TypedTree, VariableKind)>,
     loop_points: IndexMap<LoopLabel, Vec<LoopLabel>>,
+    unguarded_loop_labels: Vec<LoopLabel>,
 }
 
 pub struct PackData {
@@ -97,6 +105,7 @@ pub struct PackData {
     types: Vec<Type<Loc, Name>>,
     kinds: Vec<VariableKind>,
     loop_points: IndexMap<LoopLabel, Vec<LoopLabel>>,
+    unguarded_loop_labels: Vec<LoopLabel>,
 }
 
 impl Context {
@@ -131,6 +140,7 @@ impl Context {
                 types: m_tys,
                 kinds: m_kind,
                 loop_points: core::mem::take(&mut self.loop_points),
+                unguarded_loop_labels: core::mem::take(&mut self.unguarded_loop_labels),
             },
         )
     }
@@ -147,6 +157,7 @@ impl Context {
             m_trees.push(v1);
         }
         self.loop_points = packed.loop_points.clone();
+        self.unguarded_loop_labels = packed.unguarded_loop_labels.clone();
         let context_out = multiplex_trees(m_trees);
         context_out
     }
@@ -164,7 +175,8 @@ pub struct Compiler<'program> {
     global_name_to_id: IndexMap<Name, usize>,
     type_variables: IndexSet<Name>,
     id_to_ty: Vec<Type<Loc, Name>>,
-    id_to_package: Vec<Tree>,
+    id_to_package: Vec<Net>,
+    lazy_redexes: Vec<(Tree, Tree)>,
     compile_global_stack: IndexSet<Name>,
 }
 
@@ -205,13 +217,13 @@ impl<'program> Compiler<'program> {
             Some(a) => &a.1,
             _ => return Err(Error::GlobalNotFound(name.clone())),
         };
-        let debug = false;
+        let debug = true;
         if debug {
             println!("{global:#?}");
         }
 
         let (id, typ) = self.in_package(
-            |this| {
+            |this, id| {
                 let mut s = String::new();
                 global.pretty(&mut s, 0).unwrap();
                 this.compile_expression(global.as_ref())
@@ -225,27 +237,37 @@ impl<'program> Compiler<'program> {
 
     fn in_package(
         &mut self,
-        f: impl FnOnce(&mut Self) -> Result<TypedTree>,
+        f: impl FnOnce(&mut Self, usize) -> Result<TypedTree>,
         debug: bool,
     ) -> Result<(usize, Type<Loc, Name>)> {
+        let id = self.id_to_package.len();
         let old_net = core::mem::take(&mut self.net);
-        let tree = self.with_captures(&Captures::default(), |this| f(this))?;
+        // Allocate package
+        self.id_to_ty.push(Type::Break(Loc::External));
+        self.id_to_package.push(Default::default());
+        let tree = self.with_captures(&Captures::default(), |this| f(this, id))?;
         self.net.ports.push_back(tree.tree);
 
-        let id = self.id_to_package.len();
         self.net.packages = Arc::new(self.id_to_package.clone().into_iter().enumerate().collect());
         if debug {
             println!("{}", self.net.show());
         }
-        self.net.assert_valid();
+        self.net.assert_valid_with(
+            self.lazy_redexes
+                .iter()
+                .map(|(a, b)| [a, b].into_iter())
+                .flatten(),
+        );
         self.net.normal();
+        self.net
+            .redexes
+            .append(&mut core::mem::take(&mut self.lazy_redexes).into());
         self.net.assert_valid();
         if debug {
             println!("{}", self.net.show());
         }
-        let package_contents = self.net.ports.pop_back().unwrap();
-        self.id_to_ty.push(tree.ty.clone());
-        self.id_to_package.push(package_contents);
+        *self.id_to_ty.get_mut(id).unwrap() = tree.ty.clone();
+        *self.id_to_package.get_mut(id).unwrap() = core::mem::take(&mut self.net);
         self.net = old_net;
 
         Ok((id, tree.ty))
@@ -361,6 +383,7 @@ impl<'program> Compiler<'program> {
         }
         println!("Net:");
         println!("{}", self.net.show_indent(1));
+        println!("{}", self.net.ports.len())
     }
     fn link_typed(&mut self, a: TypedTree, b: TypedTree) {
         self.net.link(a.tree, b.tree);
@@ -423,6 +446,13 @@ impl<'program> Compiler<'program> {
         }
     }
     fn compile_process(&mut self, proc: &Process<Loc, Name, Type<Loc, Name>>) -> Result<()> {
+        let debug = true;
+        if debug {
+            let mut s = String::new();
+            proc.pretty(&mut s, 0).unwrap();
+            println!("{s}");
+            self.show_state();
+        }
         match proc {
             Process::Let(_, key, _, _, value, rest) => {
                 let value = self.compile_expression(value)?;
@@ -432,14 +462,15 @@ impl<'program> Compiler<'program> {
                 self.compile_process(rest)
             }
 
-            Process::Do(_, name, target_ty, command) => {
-                self.compile_command(name.clone(), target_ty.clone(), command)
+            Process::Do(loc, name, target_ty, command) => {
+                self.compile_command(loc, name.clone(), target_ty.clone(), command)
             }
             _ => todo!(),
         }
     }
     fn compile_command(
         &mut self,
+        loc: &Loc,
         name: Name,
         ty: Type<Loc, Name>,
         cmd: &Command<Loc, Name, Type<Loc, Name>>,
@@ -529,6 +560,7 @@ impl<'program> Compiler<'program> {
                 self.compile_process(process)?;
             }
             Command::Match(names, processes) => {
+                self.context.unguarded_loop_labels.clear();
                 let old_tree = self.instantiate_variable(&name)?;
                 // Multiplex all other variables in the context.
                 let (context_in, pack_data) = self.context.pack(None, &mut self.net);
@@ -576,6 +608,8 @@ impl<'program> Compiler<'program> {
             }
             Command::Begin(_, label, process) => {
                 let label = LoopLabel(label.clone());
+                self.context.vars.sort_keys();
+
                 let (def0, def1) = self.net.create_wire();
                 let prev = self.context.vars.insert(
                     Var::Loop(label.0.clone()),
@@ -587,7 +621,7 @@ impl<'program> Compiler<'program> {
                 if let Some((prev_tree, _)) = prev {
                     self.net.link(prev_tree.tree, Tree::Era);
                 }
-                self.context.vars.sort_keys();
+
                 let mut labels_in_scope: Vec<_> =
                     self.context.loop_points.keys().cloned().collect();
                 labels_in_scope.push(label.clone());
@@ -595,9 +629,11 @@ impl<'program> Compiler<'program> {
                     .loop_points
                     .insert(label.clone(), labels_in_scope);
 
+                self.context.unguarded_loop_labels.push(label.clone());
+
                 let (context_in, pack_data) = self.context.pack(None, &mut self.net);
                 let (id, _) = self.in_package(
-                    |this| {
+                    |this, id| {
                         let context_out = this.context.unpack(&pack_data, &mut this.net);
                         this.compile_process(process)?;
                         Ok(context_out.with_type(Type::Break(External)))
@@ -609,12 +645,15 @@ impl<'program> Compiler<'program> {
             }
             Command::Loop(label) => {
                 let label = LoopLabel(label.clone());
+                if self.context.unguarded_loop_labels.contains(&label) {
+                    return Err(Error::UnguardedLoop(loc.clone(), label.clone().0));
+                }
                 let (tree, _) = self.use_var(&Var::Loop(label.0.clone()))?;
                 let labels_in_scope = self.context.loop_points.get(&label).unwrap().clone();
                 self.context.vars.sort_keys();
                 let (context_in, pack_data) =
                     self.context.pack(Some(&labels_in_scope), &mut self.net);
-                self.net.link(tree.tree, context_in);
+                self.lazy_redexes.push((tree.tree, context_in));
             }
         };
         Ok(())
@@ -640,12 +679,14 @@ pub fn compile_file(program: &CheckedProgram) -> Result<IcCompiled> {
         context: Context {
             vars: IndexMap::default(),
             loop_points: IndexMap::default(),
+            unguarded_loop_labels: Default::default(),
         },
         global_name_to_id: Default::default(),
         id_to_package: Default::default(),
         id_to_ty: Default::default(),
         type_variables: Default::default(),
         compile_global_stack: Default::default(),
+        lazy_redexes: vec![],
         program,
     };
     for k in compiler.program.definitions.clone().keys() {
@@ -654,13 +695,15 @@ pub fn compile_file(program: &CheckedProgram) -> Result<IcCompiled> {
     Ok(IcCompiled {
         id_to_package: Arc::new(compiler.id_to_package.into_iter().enumerate().collect()),
         name_to_id: compiler.global_name_to_id,
+        id_to_ty: compiler.id_to_ty.into_iter().enumerate().collect(),
     })
 }
 
 #[derive(Clone, Default)]
 pub struct IcCompiled {
-    pub(crate) id_to_package: Arc<IndexMap<usize, Tree>>,
+    pub(crate) id_to_package: Arc<IndexMap<usize, Net>>,
     pub(crate) name_to_id: IndexMap<Name, usize>,
+    pub(crate) id_to_ty: IndexMap<usize, Type<Loc, Name>>,
 }
 
 impl Display for IcCompiled {
@@ -679,9 +722,13 @@ impl Display for IcCompiled {
 }
 
 impl IcCompiled {
-    pub fn get_with_name(&self, name: &Name) -> Option<Tree> {
+    pub fn get_with_name(&self, name: &Name) -> Option<Net> {
         let id = self.name_to_id.get(name)?;
         self.id_to_package.get(id).cloned()
+    }
+    pub fn get_type_of(&self, name: &Name) -> Option<Type<Loc, Name>> {
+        let id = self.name_to_id.get(name)?;
+        self.id_to_ty.get(id).cloned()
     }
     pub fn create_net(&self) -> Net {
         let mut net = Net::default();

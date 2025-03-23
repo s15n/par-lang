@@ -13,16 +13,6 @@ use crate::{
     playground::CheckedProgram,
 };
 
-pub trait NameRequiredTraits:
-    Clone + Hash + Eq + core::fmt::Debug + Ord + Display + Send + Sync + 'static
-{
-}
-
-impl<T: Clone + Hash + Eq + core::fmt::Debug + Ord + Display + Send + Sync + 'static>
-    NameRequiredTraits for T
-{
-}
-
 use crate::{
     icombs::{
         compiler::TypedTree,

@@ -21,6 +21,9 @@ pub fn number_to_string(mut number: usize) -> String {
     result
 }
 
+/// A `Tree` corresponds to a port that is the root of a tree of interaction combinators.
+/// The `Tree` enum itself contains the whole tree, although it some parts of it might be inside
+/// half-linked `Tree::Var`s
 pub enum Tree {
     Con(Box<Tree>, Box<Tree>),
     Dup(Box<Tree>, Box<Tree>),
@@ -41,15 +44,19 @@ pub enum Tree {
 }
 
 impl Tree {
+    /// Construct a CON node
     pub fn c(a: Tree, b: Tree) -> Tree {
         Tree::Con(Box::new(a), Box::new(b))
     }
+    /// Construct a DUP node
     pub fn d(a: Tree, b: Tree) -> Tree {
         Tree::Dup(Box::new(a), Box::new(b))
     }
+    /// Construct an ERA node
     pub fn e() -> Tree {
         Tree::Era
     }
+    /// Construct an external node, given its closure and data.
     pub fn ext(
         f: impl FnOnce(&mut Net, Result<Tree, Box<dyn Any + Send + Sync>>, Box<dyn Any + Send + Sync>)
             + 'static
@@ -151,34 +158,37 @@ impl Clone for Tree {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
+/// A Net represents the current state of the runtime
+/// It contains a list of active pairs, as well as a list of free ports.
+/// It also stores a map of variables, which records whether variables were linked by either of their sides
 pub struct Net {
     pub ports: VecDeque<Tree>,
     pub redexes: VecDeque<(Tree, Tree)>,
     pub vars: BTreeMap<usize, Option<Tree>>,
-    pub packages: Arc<IndexMap<usize, Tree>>,
+    pub packages: Arc<IndexMap<usize, Net>>,
 }
 impl Net {
     fn interact(&mut self, a: Tree, b: Tree) {
         use Tree::*;
-        println!(
+        /*println!(
             "Interacting {} and {}",
             self.show_tree(&a),
             self.show_tree(&b)
-        );
+        );*/
         match (a, b) {
-            (Var(..), _) | (_, Var(..)) => unreachable!(),
+            (a @ Var(..), b @ _) | (a @ _, b @ Var(..)) => {
+                // link anyway
+                self.link(a, b);
+            }
             (Era, Era) => (),
             (Con(a0, a1), Era) | (Dup(a0, a1), Era) | (Era, Con(a0, a1)) | (Era, Dup(a0, a1)) => {
                 self.link(*a0, Era);
                 self.link(*a1, Era);
             }
             (Con(a0, a1), Con(b0, b1)) | (Dup(a0, a1), Dup(b0, b1)) => {
-                println!("con con1");
                 self.link(*a0, *b0);
-                println!("con con2");
                 self.link(*a1, *b1);
-                println!("con con3");
             }
             (Con(a0, a1), Dup(b0, b1)) | (Dup(b0, b1), Con(a0, a1)) => {
                 let (a00, b00) = self.create_wire();
@@ -206,11 +216,10 @@ impl Net {
                 self.interact(a, b);
             }
         }
-        println!("Interaction complete");
     }
-    pub fn freshen_variables(&mut self, tree: &mut Tree) {
+    pub fn freshen_variables(&mut self, net: &mut Net) {
         let mut package_to_net: BTreeMap<usize, usize> = BTreeMap::new();
-        tree.map_vars(&mut |var_id| {
+        net.map_vars(&mut |var_id| {
             if let Some(id) = package_to_net.get(&var_id) {
                 id.clone()
             } else {
@@ -222,17 +231,23 @@ impl Net {
         });
     }
     pub fn dereference_package(&mut self, package: usize) -> Tree {
-        let mut tree = self
+        let net = self
             .packages
             .get(&package)
             .unwrap_or_else(|| panic!("Unknown package with ID {}", package))
             .clone();
+        self.inject_net(net)
+    }
+    pub fn inject_net(&mut self, mut net: Net) -> Tree {
         // Now, we have to freshen all variables in the tree
-        self.freshen_variables(&mut tree);
-        tree
+        self.freshen_variables(&mut net);
+        self.redexes.append(&mut net.redexes);
+        self.vars.append(&mut net.vars);
+        net.ports.pop_back().unwrap()
     }
     /// Returns whether a reduction was carried out
     pub fn reduce_one(&mut self) -> bool {
+        eprintln!("{}\n----------", self.show());
         if let Some((a, b)) = self.redexes.pop_front() {
             self.interact(a, b);
             true
@@ -409,14 +424,18 @@ impl Net {
             _ => {}
         }
     }
-    pub fn assert_valid(&self) {
+    pub fn assert_valid_with<'a>(&self, iter: impl Iterator<Item = &'a Tree>) {
         self.assert_no_vicious();
+
         let mut vars = vec![];
         for (a, b) in &self.redexes {
             vars.append(&mut self.assert_tree_valid(a));
             vars.append(&mut self.assert_tree_valid(b));
         }
         for tree in &self.ports {
+            vars.append(&mut self.assert_tree_valid(tree));
+        }
+        for tree in iter {
             vars.append(&mut self.assert_tree_valid(tree));
         }
 
@@ -436,6 +455,9 @@ impl Net {
         // Perhaps we should check that all packages are valid too
         // Right now this creates nonsensical error messages
         // And in any case, each package is checked when it is created
+    }
+    pub fn assert_valid(&self) {
+        self.assert_valid_with(std::iter::empty());
     }
     fn assert_tree_valid(&self, tree: &Tree) -> Vec<usize> {
         match tree {
