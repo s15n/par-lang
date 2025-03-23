@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use lsp_server::{Connection};
 use lsp_types::{self as lsp, InitializeParams, Uri};
 use crate::language_server::feedback::{diagnostic_for_error, Feedback, FeedbackBookKeeper};
@@ -54,7 +55,7 @@ impl<'c> LanguageServer<'c> {
                 //self.handle_hover(params)
                 self.handle_request_instance(
                     &params.text_document_position_params.text_document.uri,
-                    |instance, io| instance.handle_hover(&params, io)
+                    |instance| instance.handle_hover(&params)
                 )
             }
             _ => {
@@ -111,12 +112,12 @@ impl<'c> LanguageServer<'c> {
     fn handle_request_instance<R>(
         &mut self,
         uri: &Uri,
-        handler: impl FnOnce(&mut Instance, &IO) -> R
+        handler: impl FnOnce(&mut Instance) -> R
     ) -> R {
-        let instance = instance_for(&mut self.instances, uri);
+        let instance = self.instance_for(uri);
 
-        let compile_result = instance.compile(&self.io);
-        let response = handler(instance, &self.io);
+        let compile_result = instance.compile();
+        let response = handler(instance);
 
         let mut feedback = self.feedback.cleanup();
         match compile_result {
@@ -152,7 +153,13 @@ impl<'c> LanguageServer<'c> {
     fn cache_file(&mut self, uri: &Uri, text: String) {
         tracing::info!("Caching file: {:?}", uri);
         self.io.update_file(uri, text);
-        instance_for(&mut self.instances, uri).mark_dirty();
+        self.instance_for(uri).mark_dirty();
+    }
+
+    fn instance_for(&mut self, uri: &Uri) -> &mut Instance {
+        self.instances
+            .entry(uri.clone())
+            .or_insert_with(|| Instance::new(uri.clone(), self.io.clone()))
     }
 }
 
@@ -169,12 +176,6 @@ fn initialize_lsp(connection: &Connection) -> InitializeParams {
     let result: InitializeParams = serde_json::from_value(result_json).unwrap();
     tracing::debug!("Initialized LSP with params: {:?}", result);
     result
-}
-
-fn instance_for<'a>(instances: &'a mut Instances, uri: &'a Uri) -> &'a mut Instance {
-    instances.entry(uri.clone()).or_insert_with(|| {
-        Instance::new(uri.clone())
-    })
 }
 
 fn extract_request<R>(request: lsp_server::Request) -> R::Params
