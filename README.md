@@ -111,14 +111,14 @@ to opt-out of totality.
 ```
 // An iterative type. Constructed by `begin`/`loop`, and destructed step-by-step.
 type Stream<T> = iterative {
-  close => !                         // Close this stream, and destroy its internal resources.
-  next => (T) self                   // Produce an item, then ask me what I want next.
+  .close => !                        // Close this stream, and destroy its internal resources.
+  .next => (T) self                  // Produce an item, then ask me what I want next.
 }
 
 // An infinite sequence of `.true!` values.
 def forever_true: Stream<either { .true!, .false! }> = begin {
-  close => !                         // No resources to destroy, we just end.
-  next => (.true!) loop              // We produce a `.true!`, and repeat the protocol.
+  .close => !                        // No resources to destroy, we just end.
+  .next => (.true!) loop             // We produce a `.true!`, and repeat the protocol.
 }
 ```
 
