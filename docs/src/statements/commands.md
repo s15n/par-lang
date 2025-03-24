@@ -149,7 +149,7 @@ def true_false: (Bool) Bool = chan return: [Bool] chan Bool {
 | [Constructing Expression](../expressions/construction.md#pair-expressions)
 </sup>*
 
-Having multiple patterns between `(` and `)` is just syntax sugar:
+Having multiple patterns between `[` and `]` is just syntax sugar:
 ```par
 // the pattern
 r[p, q]
