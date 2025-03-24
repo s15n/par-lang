@@ -17,6 +17,8 @@
 
 It contains **a full guide** of the language and its type system.
 
+**A live-stream tutorial** on a slightly out-dated version of Par is also up on [YouTube.](https://youtu.be/UX-p1bq-hkU?si=cHD4bzFIHjAiGg81)
+
 **To run the playground:**
 
 1. Install [Rust and Cargo](https://rustup.rs).
