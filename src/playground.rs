@@ -3,7 +3,7 @@ use std::{
     fmt::Write,
     fs::File,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use eframe::egui;
@@ -12,25 +12,22 @@ use indexmap::IndexMap;
 
 use crate::{
     icombs::{compile_file, IcCompiled},
-    interact::{Event, Handle, Request},
     par::{
         language::{CompileError, Internal},
         parse::{parse_program, Loc, Name, Program, SyntaxError},
         process::Expression,
-        runtime::{self, Context, Operation},
         types::{self, Type, TypeDefs, TypeError},
     },
     readback::ReadbackState,
     spawn::TokioSpawn,
 };
-use miette::{LabeledSpan, SourceOffset, SourceSpan};
+use miette::{LabeledSpan, SourceOffset};
 
 pub struct Playground {
     file_path: Option<PathBuf>,
     code: String,
     compiled: Option<Result<Compiled, Error>>,
     compiled_code: Arc<str>,
-    interact: Option<Interact>,
     editor_font_size: f32,
     show_compiled: bool,
     show_ic: bool,
@@ -39,7 +36,6 @@ pub struct Playground {
 
 #[derive(Clone)]
 pub(crate) struct Compiled {
-    pub(crate) program: Program<Loc, Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
     pub(crate) pretty: String,
     pub(crate) checked: Result<Checked, Error>,
 }
@@ -123,7 +119,6 @@ impl Compiled {
             definitions: ctx.get_checked_definitions().clone(),
         };
         return Ok(Compiled {
-            program,
             pretty,
             checked: Checked::from_program(new_program).map_err(|err| Error::InetCompile(err)),
         });
@@ -167,13 +162,6 @@ pub(crate) enum Error {
     Compile(CompileError<Loc>),
     InetCompile(crate::icombs::compiler::Error),
     Type(TypeError<Loc, Internal<Name>>),
-    Runtime(runtime::Error<Loc, Internal<Name>>),
-}
-
-#[derive(Clone)]
-struct Interact {
-    code: Arc<str>,
-    handle: Arc<Mutex<Handle<Loc, Internal<Name>, ()>>>,
 }
 
 impl Playground {
@@ -193,7 +181,6 @@ impl Playground {
             code: default_code.clone(),
             compiled: None,
             compiled_code: Arc::from(default_code),
-            interact: None,
             editor_font_size: 16.0,
             show_compiled: false,
             show_ic: false,
@@ -350,43 +337,6 @@ impl Playground {
             }
         }
     }
-    fn run(
-        interact: &mut Option<Interact>,
-        ui: &mut egui::Ui,
-        program: &Program<Loc, Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
-        compiled_code: Arc<str>,
-    ) {
-        for (_, internal_name, expression) in &program.definitions {
-            if let Internal::Original(name) = internal_name {
-                if ui.button(&name.string).clicked() {
-                    if let Some(int) = interact.take() {
-                        int.handle.lock().expect("lock failed").cancel();
-                    }
-                    *interact = Some(Interact {
-                        code: Arc::clone(&compiled_code),
-                        handle: Handle::start_expression(
-                            Arc::new({
-                                let ctx = ui.ctx().clone();
-                                move || ctx.request_repaint()
-                            }),
-                            Context::new(
-                                Arc::new(TokioSpawn),
-                                Arc::new(
-                                    program
-                                        .definitions
-                                        .iter()
-                                        .map(|(b, a, c)| (a.clone(), (b.clone(), c.clone())))
-                                        .collect(),
-                                ),
-                            ),
-                            expression,
-                        ),
-                    });
-                    ui.close_menu();
-                }
-            }
-        }
-    }
 
     fn recompile(&mut self) {
         stacker::grow(32 * 1024 * 1024, || {
@@ -404,35 +354,19 @@ impl Playground {
                     self.recompile();
                 }
 
-                if let Some(Ok(Compiled {
-                    program, checked, ..
-                })) = &mut self.compiled
-                {
+                if let Some(Ok(Compiled { checked, .. })) = &mut self.compiled {
                     ui.checkbox(
                         &mut self.show_compiled,
                         egui::RichText::new("Show compiled"),
                     );
                     ui.checkbox(&mut self.show_ic, egui::RichText::new("Show IC"));
 
-                    egui::menu::menu_custom_button(
-                        ui,
-                        egui::Button::new(
-                            egui::RichText::new("Run")
-                                .strong()
-                                .color(egui::Color32::BLACK),
-                        )
-                        .fill(green().lerp_to_gamma(egui::Color32::WHITE, 0.3)),
-                        |ui| {
-                            Self::run(&mut self.interact, ui, program, self.compiled_code.clone());
-                        },
-                    );
-
                     if let Ok(checked) = checked {
                         if let Some(ic_compiled) = checked.ic_compiled.as_ref() {
                             egui::menu::menu_custom_button(
                                 ui,
                                 egui::Button::new(
-                                    egui::RichText::new("Readback")
+                                    egui::RichText::new("Run")
                                         .strong()
                                         .color(egui::Color32::BLACK),
                                 )
@@ -475,8 +409,7 @@ impl Playground {
                                 .with_theme(theme)
                                 .with_numlines(true)
                                 .show(ui, pretty);
-                        }
-                        if let Ok(checked) = checked {
+                        } else if let Ok(checked) = checked {
                             if let Some(ic_compiled) = checked.ic_compiled.as_ref() {
                                 if self.show_ic {
                                     CodeEditor::default()
@@ -488,8 +421,10 @@ impl Playground {
                                         .show(ui, &mut format!("{}", ic_compiled));
                                 }
 
-                                if let Some(rb) = &mut self.readback_state {
-                                    rb.show_readback(ui, checked.program.clone())
+                                if !self.show_compiled && !self.show_ic {
+                                    if let Some(rb) = &mut self.readback_state {
+                                        rb.show_readback(ui, checked.program.clone())
+                                    }
                                 }
                             }
                         } else if let Err(err) = checked {
@@ -497,140 +432,9 @@ impl Playground {
                             ui.label(egui::RichText::new(error).color(red()).code());
                         }
                     }
-
-                    if let Some(int) = &self.interact {
-                        self.show_interact(ui, int.clone());
-                    }
                 });
             });
         });
-    }
-
-    fn show_interact(&mut self, ui: &mut egui::Ui, int: Interact) {
-        let handle = int.handle.lock().expect("lock failed");
-
-        egui::Frame::default()
-            .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
-            .inner_margin(egui::Margin::same(4))
-            .outer_margin(egui::Margin::same(2))
-            .show(ui, |ui| {
-                ui.horizontal_top(|ui| {
-                    let mut to_the_side = Vec::new();
-
-                    ui.vertical(|ui| {
-                        for event in handle.events() {
-                            match event {
-                                Event::Send(_, argument) => {
-                                    self.show_interact(
-                                        ui,
-                                        Interact {
-                                            code: Arc::clone(&int.code),
-                                            handle: Arc::clone(&argument),
-                                        },
-                                    );
-                                }
-
-                                Event::Receive(_, parameter) => {
-                                    to_the_side.push(Arc::clone(&parameter))
-                                }
-
-                                Event::Choose(_, chosen) => {
-                                    ui.horizontal(|ui| {
-                                        ui.label(
-                                            egui::RichText::new("+").strong().code().color(blue()),
-                                        );
-                                        ui.label(
-                                            egui::RichText::new(format!("{}", chosen))
-                                                .strong()
-                                                .code(),
-                                        );
-                                    });
-                                }
-
-                                Event::Either(_, chosen) => {
-                                    ui.horizontal(|ui| {
-                                        ui.label(
-                                            egui::RichText::new(">").strong().code().color(green()),
-                                        );
-                                        ui.label(
-                                            egui::RichText::new(format!("{}", chosen))
-                                                .strong()
-                                                .code(),
-                                        );
-                                    });
-                                }
-
-                                Event::Break(_) => {
-                                    ui.horizontal(|ui| {
-                                        ui.label(egui::RichText::new("break").italics().code());
-                                    });
-                                }
-
-                                Event::Continue(_) => {
-                                    ui.horizontal(|ui| {
-                                        ui.label(egui::RichText::new("continue").italics().code());
-                                    });
-                                }
-                            }
-                        }
-
-                        if let Some(result) = handle.interaction() {
-                            ui.horizontal(|ui| match result {
-                                Ok(Request::Dynamic(_)) => {
-                                    ui.horizontal(|ui| {
-                                        drop(handle);
-                                        ui.label(
-                                            egui::RichText::new("<UI>")
-                                                .strong()
-                                                .code()
-                                                .color(red()),
-                                        );
-                                    });
-                                }
-                                Ok(Request::Either(loc, choices)) => {
-                                    ui.vertical(|ui| {
-                                        drop(handle);
-                                        for choice in choices.iter() {
-                                            if ui
-                                                .button(
-                                                    egui::RichText::new(format!("{}", choice))
-                                                        .strong(),
-                                                )
-                                                .clicked()
-                                            {
-                                                Handle::choose(
-                                                    Arc::clone(&int.handle),
-                                                    loc.clone(),
-                                                    choice.clone(),
-                                                );
-                                            }
-                                        }
-                                    });
-                                }
-                                Err(error) => {
-                                    ui.label(
-                                        egui::RichText::new(
-                                            Error::Runtime(error).display(int.code.clone()),
-                                        )
-                                        .color(red())
-                                        .code(),
-                                    );
-                                }
-                            });
-                        }
-                    });
-
-                    for side in to_the_side {
-                        self.show_interact(
-                            ui,
-                            Interact {
-                                code: Arc::clone(&int.code),
-                                handle: side,
-                            },
-                        );
-                    }
-                });
-            });
     }
 }
 
@@ -644,31 +448,6 @@ pub fn labels_from_loc<'s>(code: &'s str, loc: &Loc) -> Vec<LabeledSpan> {
         Loc::External => vec![],
     }
 }
-pub fn span_from_loc<'s>(code: &'s str, loc: &Loc) -> Option<SourceSpan> {
-    match loc {
-        Loc::Code { line, column } => {
-            Some(SourceOffset::from_location(&code, *line, *column).into())
-        }
-        Loc::External => None,
-    }
-}
-
-#[derive(Debug, miette::Diagnostic)]
-struct RuntimeError {
-    #[label]
-    span: Option<SourceSpan>,
-    #[label(collection)]
-    others: Vec<LabeledSpan>,
-    #[related]
-    related: Vec<miette::ErrReport>,
-    message: String,
-}
-impl core::fmt::Display for RuntimeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        format!("Runtime Error: {}.", self.message).fmt(f)
-    }
-}
-impl core::error::Error for RuntimeError {}
 
 impl Error {
     pub fn display(&self, code: Arc<str>) -> String {
@@ -698,144 +477,9 @@ impl Error {
 
             Self::Type(error) => format!("{:?}", error.into_report(code)),
 
-            Self::Runtime(error) => format!(
-                "{:?}",
-                miette::Report::from(Self::display_runtime_error(&code, error))
-            ),
-
             Self::InetCompile(err) => {
                 format!("inet compilation error: {}", err.display(&code))
             }
-        }
-    }
-
-    fn display_runtime_error(
-        code: &str,
-        error: &runtime::Error<Loc, Internal<Name>>,
-    ) -> RuntimeError {
-        use runtime::Error::*;
-        match error {
-            NameNotDefined(loc, name) => RuntimeError {
-                span: span_from_loc(code, loc),
-                related: Vec::new(),
-                others: Vec::new(),
-                message: format!("`{}` is not defined.", name),
-            },
-            ShadowedObligation(loc, name) => RuntimeError {
-                span: span_from_loc(code, loc),
-                related: Vec::new(),
-                others: Vec::new(),
-                message: format!("Cannot re-assign `{}` before handling it.", name),
-            },
-            UnfulfilledObligations(loc, names) => RuntimeError {
-                span: span_from_loc(code, loc),
-                related: Vec::new(),
-                others: Vec::new(),
-                message: format!(
-                    "Cannot end this process before handling {}.",
-                    names
-                        .iter()
-                        .enumerate()
-                        .map(|(i, name)| if i == 0 {
-                            format!("`{}`", name)
-                        } else {
-                            format!(", `{}`", name)
-                        })
-                        .collect::<String>()
-                ),
-            },
-            IncompatibleOperations(op1, op2) => RuntimeError {
-                span: None,
-                related: Vec::new(),
-                others: [
-                    Self::display_operation(code, op1),
-                    Self::display_operation(code, op2),
-                ]
-                .into_iter()
-                .flatten()
-                .collect(),
-                message: "These operations are incompatible.".to_owned(),
-            },
-            NoSuchLoopPoint(loc, _) => RuntimeError {
-                span: span_from_loc(code, loc),
-                others: Vec::new(),
-                related: Vec::new(),
-                message: "There is no matching loop point in scope.".to_owned(),
-            },
-            Multiple(error1, error2) => RuntimeError {
-                span: None,
-                others: Vec::new(),
-                related: vec![
-                    miette::Report::from(Self::display_runtime_error(code, error1)),
-                    miette::Report::from(Self::display_runtime_error(code, error2)),
-                ],
-                message: "multiple errors".to_owned(),
-            },
-        }
-    }
-
-    fn display_operation(code: &str, op: &Operation<Loc, Internal<Name>>) -> Vec<LabeledSpan> {
-        match op {
-            Operation::Unknown(loc) => labels_from_loc(code, loc)
-                .into_iter()
-                .map(|mut x| {
-                    x.set_label(Some("Unknown operation.".to_owned()));
-                    x
-                })
-                .collect(),
-            Operation::Send(loc) => labels_from_loc(code, loc)
-                .into_iter()
-                .map(|mut x| {
-                    x.set_label(Some("This side is sending a value.".to_owned()));
-                    x
-                })
-                .collect(),
-            Operation::Receive(loc) => labels_from_loc(code, loc)
-                .into_iter()
-                .map(|mut x| {
-                    x.set_label(Some("This side is receiving a value.".to_owned()));
-                    x
-                })
-                .collect(),
-            Operation::Choose(loc, chosen) => labels_from_loc(code, loc)
-                .into_iter()
-                .map(|mut x| {
-                    x.set_label(Some(format!("This side is choosing `{}`.", chosen)));
-                    x
-                })
-                .collect(),
-            Operation::Match(loc, choices) => labels_from_loc(code, loc)
-                .into_iter()
-                .map(|mut x| {
-                    x.set_label(Some(format!(
-                        "This side is offering either of {}.",
-                        choices
-                            .iter()
-                            .enumerate()
-                            .map(|(i, name)| if i == 0 {
-                                format!("`{}`", name)
-                            } else {
-                                format!(", `{}`", name)
-                            })
-                            .collect::<String>(),
-                    )));
-                    x
-                })
-                .collect(),
-            Operation::Break(loc) => labels_from_loc(code, loc)
-                .into_iter()
-                .map(|mut x| {
-                    x.set_label(Some("This side is breaking.".to_owned()));
-                    x
-                })
-                .collect(),
-            Operation::Continue(loc) => labels_from_loc(code, loc)
-                .into_iter()
-                .map(|mut x| {
-                    x.set_label(Some("This side is continuing.".to_owned()));
-                    x
-                })
-                .collect(),
         }
     }
 }

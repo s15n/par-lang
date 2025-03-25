@@ -2,7 +2,6 @@ use eframe::egui;
 use playground::Playground;
 
 pub mod icombs;
-mod interact;
 mod par;
 mod playground;
 mod readback;

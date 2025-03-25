@@ -98,7 +98,6 @@ pub struct ReadbackState {
     #[allow(unused)]
     pub net_tx: Sender<()>,
     root_impl: ReadbackImplLevel,
-    pub show_net: bool,
 }
 
 impl ReadbackState {
@@ -106,13 +105,7 @@ impl ReadbackState {
         ui.vertical(|ui| {
             self.root_impl.show_message(ui);
             ui.horizontal(|ui| {
-                ui.checkbox(&mut self.show_net, "Show net");
-            });
-            ui.horizontal(|ui| {
                 self.inner.show_handle(ui, self.root.clone(), prog);
-                if self.show_net {
-                    ui.code(self.root.lock().unwrap().net.lock().unwrap().show());
-                };
             });
         });
     }
@@ -142,7 +135,6 @@ impl ReadbackState {
             root: Arc::new(Mutex::new(handle)),
             net_tx: net_tx,
             root_impl: root_impl,
-            show_net: false,
             inner: ReadbackStateInner {
                 shared,
                 spawner: spawner,
@@ -172,44 +164,38 @@ impl ReadbackStateInner {
                         match event {
                             Event::Send(handle) => {
                                 ui.horizontal(|ui| {
-                                    ui.label("+");
+                                    ui.label(RichText::from("+").code());
                                     self.show_handle(ui, handle.clone(), prog);
                                 });
                             }
                             Event::Receive(handle) => {
                                 ui.horizontal(|ui| {
-                                    ui.label("-");
+                                    ui.label(RichText::from("-").code());
                                     self.show_handle(ui, handle.clone(), prog);
                                 });
                             }
                             Event::SendType(name) => {
                                 ui.horizontal(|ui| {
-                                    ui.label("+");
+                                    ui.label(RichText::from("+").code());
                                     ui.label(format!("type {}", name));
                                 });
                             }
                             Event::ReceiveType(name) => {
                                 ui.horizontal(|ui| {
-                                    ui.label("-");
+                                    ui.label(RichText::from("-").code());
                                     ui.label(format!("type {}", name));
                                 });
                             }
                             Event::Either(name) => {
                                 ui.horizontal(|ui| {
-                                    ui.label("+");
-                                    ui.label(
-                                        RichText::from(name.to_string())
-                                            .color(Color32::WHITE)
-                                            .strong(),
-                                    );
+                                    ui.label(RichText::from("+").code());
+                                    ui.label(RichText::from(name.to_string()).strong());
                                 });
                             }
                             Event::Choose(name) => {
                                 ui.horizontal(|ui| {
-                                    ui.label("-");
-                                    ui.label(
-                                        RichText::from(name.to_string()).color(Color32::WHITE),
-                                    );
+                                    ui.label(RichText::from("-").code());
+                                    ui.label(RichText::from(name.to_string()).strong());
                                 });
                             }
                             Event::Named(tree) => {
@@ -220,18 +206,19 @@ impl ReadbackStateInner {
                             }
                             Event::Break => {
                                 ui.horizontal(|ui| {
-                                    ui.label("+");
-                                    ui.label(RichText::from("!").color(Color32::WHITE).strong());
+                                    ui.label(RichText::from("+").code());
+                                    ui.label(RichText::from("!").strong().code());
                                 });
                             }
                             Event::Continue => {
                                 ui.horizontal(|ui| {
-                                    ui.label("-");
-                                    ui.label(RichText::from("!").color(Color32::WHITE));
+                                    ui.label(RichText::from("-").code());
+                                    ui.label(RichText::from("!").strong().code());
                                 });
                             }
                         }
                     }
+
                     let mut lock = handle.lock().unwrap();
                     if let Some(end) = lock.end.as_mut() {
                         match end {
@@ -268,10 +255,7 @@ impl ReadbackStateInner {
                                 ui.vertical(|ui| {
                                     for (_, (name, _, _)) in options.iter().enumerate() {
                                         if ui
-                                            .button(
-                                                RichText::new(name.to_string())
-                                                    .color(Color32::WHITE),
-                                            )
+                                            .button(RichText::new(name.to_string()).strong())
                                             .clicked()
                                         {
                                             chosen = Some(name.clone());
@@ -306,12 +290,7 @@ impl ReadbackStateInner {
                                 }
                             }
                             Request::Expand(_) => {
-                                if ui
-                                    .button(
-                                        RichText::from("expand").italics().color(Color32::WHITE),
-                                    )
-                                    .clicked()
-                                {
+                                if ui.button(RichText::from("expand").italics()).clicked() {
                                     let Some(Request::Expand(package)) =
                                         core::mem::replace(&mut lock.end, Some(Request::Waiting))
                                     else {
@@ -332,11 +311,7 @@ impl ReadbackStateInner {
                             Request::Variable(id) => {
                                 ui.horizontal(|ui| {
                                     ui.label("Variable: ");
-                                    ui.label(
-                                        RichText::new(number_to_string(*id))
-                                            .color(Color32::WHITE)
-                                            .code(),
-                                    );
+                                    ui.label(RichText::new(number_to_string(*id)).strong().code());
                                 });
                             }
                         }
