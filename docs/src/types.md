@@ -660,7 +660,7 @@ let id_bool: ParamEndo<Bool> = id(type Bool)
 // this type encapsulates the Bool
 let id_bool_2: ExistEndo = (type Bool) id_bool
 ```
-For a more interesting example, see [(list reverse)]().
+A more interesting example is [reversing a list](./expressions.md#channel-expressions) of any type.
 
 Mathematically, `[type T] A` is \\(\forall\ T: A\\).
 
