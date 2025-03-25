@@ -4,61 +4,61 @@ use std::{
     hash::Hash,
     sync::Arc,
 };
-
+use crate::par::location::Span;
 use super::types::Type;
 
 #[derive(Clone, Debug)]
-pub enum Process<Loc, Name, Typ> {
+pub enum Process<Name, Typ> {
     Let(
-        Loc,
+        Span,
         Name,
-        Option<Type<Loc, Name>>,
+        Option<Type<Name>>,
         Typ,
-        Arc<Expression<Loc, Name, Typ>>,
+        Arc<Expression<Name, Typ>>,
         Arc<Self>,
     ),
-    Do(Loc, Name, Typ, Command<Loc, Name, Typ>),
-    Telltypes(Loc, Arc<Self>),
+    Do(Span, Name, Typ, Command<Name, Typ>),
+    Telltypes(Span, Arc<Self>),
 }
 
 #[derive(Clone, Debug)]
-pub enum Command<Loc, Name, Typ> {
-    Link(Arc<Expression<Loc, Name, Typ>>),
+pub enum Command<Name, Typ> {
+    Link(Arc<Expression<Name, Typ>>),
     Send(
-        Arc<Expression<Loc, Name, Typ>>,
-        Arc<Process<Loc, Name, Typ>>,
+        Arc<Expression<Name, Typ>>,
+        Arc<Process<Name, Typ>>,
     ),
-    Receive(Name, Option<Type<Loc, Name>>, Arc<Process<Loc, Name, Typ>>),
-    Choose(Name, Arc<Process<Loc, Name, Typ>>),
-    Match(Arc<[Name]>, Box<[Arc<Process<Loc, Name, Typ>>]>),
+    Receive(Name, Option<Type<Name>>, Arc<Process<Name, Typ>>),
+    Choose(Name, Arc<Process<Name, Typ>>),
+    Match(Arc<[Name]>, Box<[Arc<Process<Name, Typ>>]>),
     Break,
-    Continue(Arc<Process<Loc, Name, Typ>>),
-    Begin(bool, Option<Name>, Arc<Process<Loc, Name, Typ>>),
+    Continue(Arc<Process<Name, Typ>>),
+    Begin(bool, Option<Name>, Arc<Process<Name, Typ>>),
     Loop(Option<Name>),
 
-    SendType(Type<Loc, Name>, Arc<Process<Loc, Name, Typ>>),
-    ReceiveType(Name, Arc<Process<Loc, Name, Typ>>),
+    SendType(Type<Name>, Arc<Process<Name, Typ>>),
+    ReceiveType(Name, Arc<Process<Name, Typ>>),
 }
 
 #[derive(Clone, Debug)]
-pub enum Expression<Loc, Name, Typ> {
-    Reference(Loc, Name, Typ),
+pub enum Expression<Name, Typ> {
+    Reference(Span, Name, Typ),
     Fork(
-        Loc,
-        Captures<Loc, Name>,
+        Span,
+        Captures<Name>,
         Name,
-        Option<Type<Loc, Name>>,
+        Option<Type<Name>>,
         Typ,
-        Arc<Process<Loc, Name, Typ>>,
+        Arc<Process<Name, Typ>>,
     ),
 }
 
 #[derive(Clone, Debug)]
-pub struct Captures<Loc, Name> {
-    pub names: IndexMap<Name, Loc>,
+pub struct Captures<Name> {
+    pub names: IndexMap<Name, Span>,
 }
 
-impl<Loc, Name> Default for Captures<Loc, Name> {
+impl<Name> Default for Captures<Name> {
     fn default() -> Self {
         Self {
             names: IndexMap::new(),
@@ -66,14 +66,14 @@ impl<Loc, Name> Default for Captures<Loc, Name> {
     }
 }
 
-impl<Loc, Name: Hash + Eq> Captures<Loc, Name> {
+impl<Name: Hash + Eq> Captures<Name> {
     pub fn new() -> Self {
         Self {
             names: IndexMap::new(),
         }
     }
 
-    pub fn single(name: Name, loc: Loc) -> Self {
+    pub fn single(name: Name, loc: Span) -> Self {
         let mut caps = Self::new();
         caps.add(name, loc);
         caps
@@ -85,20 +85,20 @@ impl<Loc, Name: Hash + Eq> Captures<Loc, Name> {
         }
     }
 
-    pub fn add(&mut self, name: Name, loc: Loc) {
+    pub fn add(&mut self, name: Name, loc: Span) {
         self.names.insert(name, loc);
     }
 
-    pub fn remove(&mut self, name: &Name) -> Option<Loc> {
+    pub fn remove(&mut self, name: &Name) -> Option<Span> {
         self.names.shift_remove(name)
     }
 }
 
-impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Process<Loc, Name, Typ> {
+impl<Span: Clone, Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
     pub fn fix_captures(
         &self,
-        loop_points: &IndexMap<Option<Name>, Captures<Loc, Name>>,
-    ) -> (Arc<Self>, Captures<Loc, Name>) {
+        loop_points: &IndexMap<Option<Name>, Captures<Name>>,
+    ) -> (Arc<Self>, Captures<Name>) {
         match self {
             Self::Let(loc, name, annotation, typ, expression, process) => {
                 let (process, mut caps) = process.fix_captures(loop_points);
@@ -190,11 +190,11 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Process<Loc, Name, Typ> {
     }
 }
 
-impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Command<Loc, Name, Typ> {
+impl<Span: Clone, Name: Clone + Hash + Eq, Typ: Clone> Command<Name, Typ> {
     pub fn fix_captures(
         &self,
-        loop_points: &IndexMap<Option<Name>, Captures<Loc, Name>>,
-    ) -> (Self, Captures<Loc, Name>) {
+        loop_points: &IndexMap<Option<Name>, Captures<Name>>,
+    ) -> (Self, Captures<Name>) {
         match self {
             Self::Link(expression) => {
                 let (expression, caps) = expression.fix_captures(loop_points);
@@ -259,11 +259,11 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Command<Loc, Name, Typ> {
     }
 }
 
-impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Expression<Loc, Name, Typ> {
+impl<Span: Clone, Name: Clone + Hash + Eq, Typ: Clone> Expression<Name, Typ> {
     pub fn fix_captures(
         &self,
-        loop_points: &IndexMap<Option<Name>, Captures<Loc, Name>>,
-    ) -> (Arc<Self>, Captures<Loc, Name>) {
+        loop_points: &IndexMap<Option<Name>, Captures<Name>>,
+    ) -> (Arc<Self>, Captures<Name>) {
         match self {
             Self::Reference(loc, name, typ) => (
                 Arc::new(Self::Reference(loc.clone(), name.clone(), typ.clone())),
@@ -304,7 +304,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Expression<Loc, Name, Typ>
     }
 }
 
-impl<Loc, Name: Display, Typ> Process<Loc, Name, Typ> {
+impl<Name: Display, Typ> Process<Name, Typ> {
     pub fn pretty(&self, f: &mut impl Write, indent: usize) -> fmt::Result {
         match self {
             Self::Let(_, name, _, _, expression, process) => {
@@ -405,7 +405,7 @@ impl<Loc, Name: Display, Typ> Process<Loc, Name, Typ> {
     }
 }
 
-impl<Loc, Name: Display, Typ> Expression<Loc, Name, Typ> {
+impl<Name: Display, Typ> Expression<Name, Typ> {
     pub fn pretty(&self, f: &mut impl Write, indent: usize) -> fmt::Result {
         match self {
             Self::Reference(_, name, _) => {

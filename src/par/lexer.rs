@@ -1,4 +1,5 @@
 use super::{parse::Loc, parser::comment};
+use crate::par::location::{Point, Span};
 use core::{ops::Range, str::FromStr};
 use miette::{SourceOffset, SourceSpan};
 use winnow::{
@@ -11,31 +12,47 @@ use winnow::{
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TokenKind {
-    LParen,
-    RParen,
-    LCurly,
-    RCurly,
-    LAngle,
-    RAngle,
-    LBrack,
-    RBrack,
+    LPar,
+    RPar,
+    LCrl,
+    RCrl,
+    LBkt,
+    RBkt,
+    LAng,
+    RAng,
+
     Colon,
-    Ident,
     Comma,
     Dot,
+    Eq,
     Arrow,
-    Equal,
     Bang,
     Quest,
     Link,
+
+    Identifier,
+    Begin,
+    Chan,
+    Dec,
+    Def,
+    Do,
+    Either,
+    In,
+    Iterative,
+    Let,
+    Loop,
+    Recursive,
+    Self_,
+    Type,
+    Unfounded,
+
     Unknown,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token<'i> {
     pub kind: TokenKind,
     pub raw: &'i str,
-    pub loc: Loc,
-    //pub span: Range<usize>,
+    pub span: Span,
 }
 // More useful in winnow debug view
 // impl core::fmt::Debug for Token<'_> {
@@ -49,44 +66,106 @@ impl PartialEq<TokenKind> for Token<'_> {
         self.kind == *other
     }
 }
-impl From<TokenKind> for &'static str {
-    fn from(value: TokenKind) -> Self {
-        match value {
-            TokenKind::LParen => "(",
-            TokenKind::RParen => ")",
-            TokenKind::LCurly => "{",
-            TokenKind::RCurly => "}",
-            TokenKind::LBrack => "[",
-            TokenKind::RBrack => "]",
-            TokenKind::LAngle => "<",
-            TokenKind::RAngle => ">",
+
+impl TokenKind {
+    pub fn expected(&self) -> &'static str {
+        match self {
+            TokenKind::LPar => "(",
+            TokenKind::RPar => ")",
+            TokenKind::LCrl => "{",
+            TokenKind::RCrl => "}",
+            TokenKind::LBkt => "[",
+            TokenKind::RBkt => "]",
+            TokenKind::LAng => "<",
+            TokenKind::RAng => ">",
+
             TokenKind::Colon => ":",
-            TokenKind::Ident => "",
-            TokenKind::Unknown => "",
             TokenKind::Comma => ",",
             TokenKind::Dot => ".",
+            TokenKind::Eq => "=",
             TokenKind::Arrow => "=>",
-            TokenKind::Equal => "=",
             TokenKind::Bang => "!",
             TokenKind::Quest => "?",
             TokenKind::Link => "<>",
+
+            TokenKind::Identifier => "identifier",
+            TokenKind::Begin => "begin",
+            TokenKind::Chan => "chan",
+            TokenKind::Dec => "dec",
+            TokenKind::Def => "def",
+            TokenKind::Do => "do",
+            TokenKind::Either => "either",
+            TokenKind::In => "in",
+            TokenKind::Iterative => "iterative",
+            TokenKind::Let => "let",
+            TokenKind::Loop => "loop",
+            TokenKind::Recursive => "recursive",
+            TokenKind::Self_ => "self",
+            TokenKind::Type => "type",
+            TokenKind::Unfounded => "unfounded",
+
+            TokenKind::Unknown => "???",
         }
     }
 }
+/*
+impl From<TokenKind> for &'static str {
+    fn from(value: TokenKind) -> Self {
+        match value {
+            TokenKind::LPar => "(",
+            TokenKind::RPar => ")",
+            TokenKind::LCrl => "{",
+            TokenKind::RCrl => "}",
+            TokenKind::LBkt => "[",
+            TokenKind::RBkt => "]",
+            TokenKind::LAng => "<",
+            TokenKind::RAng => ">",
+
+            TokenKind::Colon => ":",
+            TokenKind::Comma => ",",
+            TokenKind::Dot => ".",
+            TokenKind::Equal => "=",
+            TokenKind::Arrow => "=>",
+            TokenKind::Bang => "!",
+            TokenKind::Quest => "?",
+            TokenKind::Link => "<>",
+
+            TokenKind::Identifier => "<id>",
+            TokenKind::Begin => "begin",
+            TokenKind::Chan => "chan",
+            TokenKind::Dec => "dec",
+            TokenKind::Def => "def",
+            TokenKind::Do => "do",
+            TokenKind::Either => "either",
+            TokenKind::In => "in",
+            TokenKind::Iterative => "iterative",
+            TokenKind::Let => "let",
+            TokenKind::Loop => "loop",
+            TokenKind::Recursive => "recursive",
+            TokenKind::Self_ => "self",
+            TokenKind::Type => "type",
+            TokenKind::Unfounded => "unfounded",
+
+            TokenKind::Unknown => "<unknown>",
+        }
+    }
+}
+*/
 
 impl PartialEq<str> for Token<'_> {
     fn eq(&self, other: &str) -> bool {
         <&str>::from(self.kind) == other
-            || (matches!(self.kind, TokenKind::Ident) && self.raw == other)
+            || (matches!(self.kind, TokenKind::Identifier) && self.raw == other)
     }
 }
 impl PartialEq<&str> for Token<'_> {
     fn eq(&self, &other: &&str) -> bool {
         <&str>::from(self.kind) == other
-            || (matches!(self.kind, TokenKind::Ident) && self.raw == other)
+            || (matches!(self.kind, TokenKind::Identifier) && self.raw == other)
     }
 }
 
+/*
 impl<'i, E> Parser<Tokens<'i>, &'i Token<'i>, E> for TokenKind
 where
     E: ParserError<Tokens<'i>>,
@@ -95,6 +174,7 @@ where
         literal(*self).parse_next(input).map(|t| &t[0])
     }
 }
+*/
 
 impl<'a, T: FromStr> ParseSlice<T> for Token<'a> {
     fn parse_slice(&self) -> Option<T> {
@@ -110,137 +190,165 @@ impl<'a, T: FromStr> ParseSlice<T> for &Token<'a> {
 pub type Tokens<'i> = TokenSlice<'i, Token<'i>>;
 pub type Input<'a> = Tokens<'a>;
 
-pub fn lex<'s>(input: &'s str, file: String) -> Vec<Token<'s>> {
-    type Error = EmptyError;
-    (|input: &'s str| -> Result<Vec<Token<'s>>, Error> {
-        let mut input = input;
-        let input = &mut input;
-        let mut row = 0;
-        let mut last_newline = input.len();
-        let mut tokens = Vec::new();
-        let mut idx = 0;
-        while let Ok(c) = peek(any::<&str, Error>).parse_next(input) {
-            let column = last_newline - input.len(); // starting column
-            let Some((raw, kind)) = (match c {
-                'a'..='z' | 'A'..='Z' | '0'..='9' | '_' => {
-                    let ident = take_while(
-                        0..,
-                        |c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_'),
-                    )
-                    .take()
-                    .parse_next(input)?;
-                    Some((ident, TokenKind::Ident))
-                }
-                '\n' => {
-                    let _ = any::<&str, Error>.parse_next(input);
-                    row += 1;
-                    last_newline = input.len();
-                    idx += 1;
+pub fn tokenize<'s>(input: &'s str) -> Vec<Token<'s>> {
+    lex::<'s, EmptyError>(input).expect("lexing failed")
+}
+
+fn lex<'s, E>(input: &'s str) -> Result<Vec<Token<'s>>, E>
+where
+    E: ParserError<&'s str>,
+{
+    let mut input = input;
+    let input = &mut input;
+
+    let mut row = 0;
+    let mut last_newline = input.len();
+    let mut tokens = Vec::new();
+    let mut idx = 0;
+
+    let mut any = any::<&str, E>;
+
+    while let Ok(c) = peek(any).parse_next(input) {
+        let column = last_newline - input.len(); // starting column
+        let Some((raw, kind)) = (match c {
+            'a'..='z' | 'A'..='Z' | '_' => {
+                let raw = take_while(
+                    0..,
+                    |c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_'),
+                )
+                .take()
+                .parse_next(input)?;
+                let kind = match raw {
+                    "begin" => TokenKind::Begin,
+                    "chan" => TokenKind::Chan,
+                    "dec" => TokenKind::Dec,
+                    "def" => TokenKind::Def,
+                    "do" => TokenKind::Do,
+                    "either" => TokenKind::Either,
+                    "in" => TokenKind::In,
+                    "iterative" => TokenKind::Iterative,
+                    "let" => TokenKind::Let,
+                    "loop" => TokenKind::Loop,
+                    "recursive" => TokenKind::Recursive,
+                    "self" => TokenKind::Self_,
+                    "type" => TokenKind::Type,
+                    "unfounded" => TokenKind::Unfounded,
+                    _ => TokenKind::Identifier,
+                };
+                Some((raw, kind))
+            }
+            '\n' => {
+                let _ = any.parse_next(input);
+                row += 1;
+                last_newline = input.len();
+                idx += 1;
+                None
+            }
+            ' ' | '\t' | '\r' => {
+                let _ = any.parse_next(input);
+                idx += 1;
+                None
+            }
+            ':' => {
+                let raw = any.take().parse_next(input)?;
+                Some((raw, TokenKind::Colon))
+            }
+            '[' => {
+                let raw = any.take().parse_next(input)?;
+                Some((raw, TokenKind::LBkt))
+            }
+            ']' => {
+                let raw = any.take().parse_next(input)?;
+                Some((raw, TokenKind::RBkt))
+            }
+            '(' => {
+                let raw = any.take().parse_next(input)?;
+                Some((raw, TokenKind::LPar))
+            }
+            ')' => {
+                let raw = any.take().parse_next(input)?;
+                Some((raw, TokenKind::RPar))
+            }
+            '{' => {
+                let raw = any.take().parse_next(input)?;
+                Some((raw, TokenKind::LCrl))
+            }
+            '}' => {
+                let raw = any.take().parse_next(input)?;
+                Some((raw, TokenKind::RCrl))
+            }
+            '<' => Some(
+                alt((
+                    "<>".map(|raw| (raw, TokenKind::Link)),
+                    "<".map(|raw| (raw, TokenKind::LAng)),
+                ))
+                .parse_next(input)?,
+            ),
+            '>' => {
+                let raw = any.take().parse_next(input)?;
+                Some((raw, TokenKind::RAng))
+            }
+            '/' => {
+                let (is_comment, raw) = alt((
+                    comment().take().map(|x| (true, x)),
+                    any.take().map(|x| (false, x)),
+                ))
+                .parse_next(input)?;
+                if is_comment {
+                    idx += raw.len();
                     None
-                }
-                ' ' | '\t' | '\r' => {
-                    let _ = any::<&str, Error>.parse_next(input);
-                    idx += 1;
-                    None
-                }
-                ':' => {
-                    let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::Colon))
-                }
-                '[' => {
-                    let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::LBrack))
-                }
-                ']' => {
-                    let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::RBrack))
-                }
-                '(' => {
-                    let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::LParen))
-                }
-                ')' => {
-                    let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::RParen))
-                }
-                '{' => {
-                    let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::LCurly))
-                }
-                '}' => {
-                    let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::RCurly))
-                }
-                '<' => Some(
-                    alt((
-                        "<>".map(|raw| (raw, TokenKind::Link)),
-                        "<".map(|raw| (raw, TokenKind::LAngle)),
-                    ))
-                    .parse_next(input)?,
-                ),
-                '>' => {
-                    let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::RAngle))
-                }
-                '/' => {
-                    let (is_comment, raw) = alt((
-                        comment().take().map(|x| (true, x)),
-                        any.take().map(|x| (false, x)),
-                    ))
-                    .parse_next(input)?;
-                    if is_comment {
-                        idx += raw.len();
-                        None
-                    } else {
-                        Some((raw, TokenKind::Unknown))
-                    }
-                }
-                ',' => {
-                    let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::Comma))
-                }
-                '.' => {
-                    let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::Dot))
-                }
-                '=' => Some(
-                    alt((
-                        ("=>").map(|raw| (raw, TokenKind::Arrow)),
-                        ("=").map(|raw| (raw, TokenKind::Equal)),
-                    ))
-                    .parse_next(input)?,
-                ),
-                '!' => {
-                    let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::Bang))
-                }
-                '?' => {
-                    let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::Quest))
-                }
-                _ => {
-                    let raw = any::<&str, Error>.take().parse_next(input)?;
+                } else {
                     Some((raw, TokenKind::Unknown))
                 }
-            }) else {
-                continue;
-            };
-            tokens.push(Token {
-                kind,
-                raw,
-                // one-based row/column
-                loc: Loc::Code {
-                    line: row + 1,
-                    column: column + 1,
-                    span: idx..idx + raw.len(),
-                    file: file.clone(),
-                }
-            });
-            idx += raw.len();
-        }
-        Ok(tokens)
-    })(input)
-    .expect("lexing failed")
+            }
+            ',' => {
+                let raw = any.take().parse_next(input)?;
+                Some((raw, TokenKind::Comma))
+            }
+            '.' => {
+                let raw = any.take().parse_next(input)?;
+                Some((raw, TokenKind::Dot))
+            }
+            '=' => Some(
+                alt((
+                    ("=>").map(|raw| (raw, TokenKind::Arrow)),
+                    ("=").map(|raw| (raw, TokenKind::Eq)),
+                ))
+                .parse_next(input)?,
+            ),
+            '!' => {
+                let raw = any.take().parse_next(input)?;
+                Some((raw, TokenKind::Bang))
+            }
+            '?' => {
+                let raw = any.take().parse_next(input)?;
+                Some((raw, TokenKind::Quest))
+            }
+            _ => {
+                let raw = any.take().parse_next(input)?;
+                Some((raw, TokenKind::Unknown))
+            }
+        }) else {
+            continue;
+        };
+        let start = Point {
+            offset: idx,
+            row,
+            column,
+        };
+        idx += raw.len();
+        let end = Point {
+            offset: idx,
+            row,
+            column: column + raw.len(),
+        };
+        tokens.push(Token {
+            kind,
+            raw,
+            span: Span { start, end },
+        });
+    }
+    Ok(tokens)
 }
 
 #[cfg(test)]
@@ -249,24 +357,24 @@ mod test {
 
     #[test]
     fn tok() {
-        let tokens = lex(&mut "({[< ><>]}):abc_123: a\nab", "test".to_string());
+        let tokens = tokenize(&mut "({[< ><>]}):abc_123: a\nab");
         assert_eq!(
             tokens.iter().map(|x| x.kind).collect::<Vec<_>>(),
             vec![
-                TokenKind::LParen,
-                TokenKind::LCurly,
-                TokenKind::LBrack,
-                TokenKind::LAngle,
-                TokenKind::RAngle,
+                TokenKind::LPar,
+                TokenKind::LCrl,
+                TokenKind::LBkt,
+                TokenKind::LAng,
+                TokenKind::RAng,
                 TokenKind::Link,
-                TokenKind::RBrack,
-                TokenKind::RCurly,
-                TokenKind::RParen,
+                TokenKind::RBkt,
+                TokenKind::RCrl,
+                TokenKind::RPar,
                 TokenKind::Colon,
-                TokenKind::Ident,
+                TokenKind::Identifier,
                 TokenKind::Colon,
-                TokenKind::Ident,
-                TokenKind::Ident,
+                TokenKind::Identifier,
+                TokenKind::Identifier,
             ]
         );
         eprintln!("{:#?}", tokens);
