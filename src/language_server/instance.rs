@@ -1,8 +1,8 @@
 use std::fmt::Display;
 use lsp_types::{self as lsp, Uri};
-use crate::par::ast::{Declaration, Definition, Internal, Name, TypeDef};
+use crate::par::language::{Declaration, Definition, Internal, Name, TypeDef};
 use crate::par::lexer::Token;
-use crate::par::location::Span;
+use crate::location::Span;
 use crate::par::types::TypeError;
 use crate::playground::Compiled;
 use super::io::IO;

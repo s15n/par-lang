@@ -13,15 +13,17 @@ use indexmap::IndexMap;
 use crate::{
     interact::{Event, Handle, Request},
     par::{
-        language::{CompileError, Internal},
-        parse::{parse_program, Loc, Name, Program, SyntaxError},
-        process::Expression,
+        language::{CompileError, Internal, Program},
+        parse::{parse_program, Name, SyntaxError},
+        process,
         runtime::{self, Context, Operation},
         types::{self, Type, TypeError},
     },
     spawn::TokioSpawn,
 };
 use miette::{LabeledSpan, SourceOffset, SourceSpan};
+use crate::location::Span;
+use crate::par::language::Definition;
 
 pub struct Playground {
     file_path: Option<PathBuf>,
@@ -35,9 +37,9 @@ pub struct Playground {
 
 #[derive(Clone)]
 pub(crate) struct Compiled {
-    pub(crate) program: Program<Loc, Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
+    pub(crate) program: Program<Internal<Name>, Arc<process::Expression<Span, Internal<Name>, ()>>>,
     pub(crate) pretty: String,
-    pub(crate) checked: Result<Checked, TypeError<Loc, Internal<Name>>>,
+    pub(crate) checked: Result<Checked, TypeError<Internal<Name>>>,
 }
 
 impl Compiled {
@@ -80,7 +82,7 @@ impl Compiled {
                             )
                         })
                     })
-                    .collect::<Result<_, CompileError<Loc>>>();
+                    .collect::<Result<_, CompileError>>();
                 match compile_result {
                     Ok(compiled) => Ok(Compiled::from_program(Program {
                         type_defs,
@@ -93,12 +95,12 @@ impl Compiled {
     }
 
     pub(crate) fn from_program(
-        program: Program<Loc, Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
+        program: Program<Internal<Name>, Arc<process::Expression<Span, Internal<Name>, ()>>>,
     ) -> Self {
         let pretty = program
             .definitions
             .iter()
-            .map(|(_, name, def)| {
+            .map(|Definition { name, expression: def, .. }| {
                 let mut buf = String::new();
                 write!(&mut buf, "define {} = ", name).expect("write failed");
                 def.pretty(&mut buf, 0).expect("write failed");
@@ -138,9 +140,8 @@ impl Checked {
     pub(crate) fn from_program(
         // not used for anything, so there's no reason to store it ATM.
         _: Program<
-            Loc,
             Internal<Name>,
-            Arc<Expression<Loc, Internal<Name>, Type<Loc, Internal<Name>>>>,
+            Arc<process::Expression<Span, Internal<Name>, Type<Internal<Name>>>>,
         >,
     ) -> Self {
         Checked {}
@@ -150,15 +151,15 @@ impl Checked {
 #[derive(Debug)]
 pub(crate) enum Error {
     Parse(SyntaxError),
-    Compile(CompileError<Loc>),
-    Type(TypeError<Loc, Internal<Name>>),
-    Runtime(runtime::Error<Loc, Internal<Name>>),
+    Compile(CompileError),
+    Type(TypeError<Internal<Name>>),
+    Runtime(runtime::Error<Span, Internal<Name>>),
 }
 
 #[derive(Clone)]
 struct Interact {
     code: Arc<str>,
-    handle: Arc<Mutex<Handle<Loc, Internal<Name>, ()>>>,
+    handle: Arc<Mutex<Handle<Span, Internal<Name>, ()>>>,
 }
 
 impl Playground {
@@ -310,11 +311,11 @@ impl Playground {
     fn run(
         interact: &mut Option<Interact>,
         ui: &mut egui::Ui,
-        program: &Program<Loc, Internal<Name>, Arc<Expression<Loc, Internal<Name>, ()>>>,
+        program: &Program<Internal<Name>, Arc<process::Expression<Span, Internal<Name>, ()>>>,
         compiled_code: Arc<str>,
     ) {
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for (_, internal_name, expression) in &program.definitions {
+            for Definition { name: internal_name, expression, .. } in &program.definitions {
                 if let Internal::Original(name) = internal_name {
                     if ui.button(&name.string).clicked() {
                         if let Some(int) = interact.take() {
@@ -333,7 +334,7 @@ impl Playground {
                                         program
                                             .definitions
                                             .iter()
-                                            .map(|(_, name, expr)| (name.clone(), expr.clone()))
+                                            .map(|Definition { name, expression, .. }| (name.clone(), expression.clone()))
                                             .collect(),
                                     ),
                                 ),
@@ -565,23 +566,15 @@ impl Playground {
     }
 }
 
-/// Create a `LabeledSpan` without a label at `loc`
-pub fn labels_from_loc<'s>(code: &'s str, loc: &Loc) -> Vec<LabeledSpan> {
-    match loc {
-        Loc::Code { line, column } => vec![LabeledSpan::new_with_span(
-            None,
-            SourceOffset::from_location(&code, *line, *column),
-        )],
-        Loc::External => vec![],
-    }
+/// Create a `LabeledSpan` without a label at `span`
+pub fn labels_from_span(code: &str, span: &Span) -> Vec<LabeledSpan> {
+    vec![LabeledSpan::new_with_span(
+        None,
+        SourceSpan::new(SourceOffset::from(span.start.offset), span.len())
+    )]
 }
-pub fn span_from_loc<'s>(code: &'s str, loc: &Loc) -> Option<SourceSpan> {
-    match loc {
-        Loc::Code { line, column } => {
-            Some(SourceOffset::from_location(&code, *line, *column).into())
-        }
-        Loc::External => None,
-    }
+pub fn span_to_source_span(code: &str, span: &Span) -> Option<SourceSpan> {
+    Some(SourceSpan::new(SourceOffset::from(span.start.offset), span.len()))
 }
 
 #[derive(Debug, miette::Diagnostic)]
@@ -613,7 +606,7 @@ impl Error {
             }
 
             Self::Compile(CompileError::MustEndProcess(loc)) => {
-                let labels = labels_from_loc(&code, loc);
+                let labels = labels_from_span(&code, loc);
                 let code = if labels.is_empty() {
                     "<UI>".into()
                 } else {
@@ -627,7 +620,7 @@ impl Error {
                 format!("{error:?}")
             }
 
-            Self::Type(error) => format!("{:?}", error.into_report(code)),
+            Self::Type(error) => format!("{:?}", error.to_report(code)),
 
             Self::Runtime(error) => format!(
                 "{:?}",
@@ -638,24 +631,24 @@ impl Error {
 
     fn display_runtime_error(
         code: &str,
-        error: &runtime::Error<Loc, Internal<Name>>,
+        error: &runtime::Error<Span, Internal<Name>>,
     ) -> RuntimeError {
         use runtime::Error::*;
         match error {
             NameNotDefined(loc, name) => RuntimeError {
-                span: span_from_loc(code, loc),
+                span: span_to_source_span(code, loc),
                 related: Vec::new(),
                 others: Vec::new(),
                 message: format!("`{}` is not defined.", name),
             },
             ShadowedObligation(loc, name) => RuntimeError {
-                span: span_from_loc(code, loc),
+                span: span_to_source_span(code, loc),
                 related: Vec::new(),
                 others: Vec::new(),
                 message: format!("Cannot re-assign `{}` before handling it.", name),
             },
             UnfulfilledObligations(loc, names) => RuntimeError {
-                span: span_from_loc(code, loc),
+                span: span_to_source_span(code, loc),
                 related: Vec::new(),
                 others: Vec::new(),
                 message: format!(
@@ -684,7 +677,7 @@ impl Error {
                 message: "These operations are incompatible.".to_owned(),
             },
             NoSuchLoopPoint(loc, _) => RuntimeError {
-                span: span_from_loc(code, loc),
+                span: span_to_source_span(code, loc),
                 others: Vec::new(),
                 related: Vec::new(),
                 message: "There is no matching loop point in scope.".to_owned(),
@@ -701,37 +694,37 @@ impl Error {
         }
     }
 
-    fn display_operation(code: &str, op: &Operation<Loc, Internal<Name>>) -> Vec<LabeledSpan> {
+    fn display_operation(code: &str, op: &Operation<Span, Internal<Name>>) -> Vec<LabeledSpan> {
         match op {
-            Operation::Unknown(loc) => labels_from_loc(code, loc)
+            Operation::Unknown(loc) => labels_from_span(code, loc)
                 .into_iter()
                 .map(|mut x| {
                     x.set_label(Some("Unknown operation.".to_owned()));
                     x
                 })
                 .collect(),
-            Operation::Send(loc) => labels_from_loc(code, loc)
+            Operation::Send(loc) => labels_from_span(code, loc)
                 .into_iter()
                 .map(|mut x| {
                     x.set_label(Some("This side is sending a value.".to_owned()));
                     x
                 })
                 .collect(),
-            Operation::Receive(loc) => labels_from_loc(code, loc)
+            Operation::Receive(loc) => labels_from_span(code, loc)
                 .into_iter()
                 .map(|mut x| {
                     x.set_label(Some("This side is receiving a value.".to_owned()));
                     x
                 })
                 .collect(),
-            Operation::Choose(loc, chosen) => labels_from_loc(code, loc)
+            Operation::Choose(loc, chosen) => labels_from_span(code, loc)
                 .into_iter()
                 .map(|mut x| {
                     x.set_label(Some(format!("This side is choosing `{}`.", chosen)));
                     x
                 })
                 .collect(),
-            Operation::Match(loc, choices) => labels_from_loc(code, loc)
+            Operation::Match(loc, choices) => labels_from_span(code, loc)
                 .into_iter()
                 .map(|mut x| {
                     x.set_label(Some(format!(
@@ -749,14 +742,14 @@ impl Error {
                     x
                 })
                 .collect(),
-            Operation::Break(loc) => labels_from_loc(code, loc)
+            Operation::Break(loc) => labels_from_span(code, loc)
                 .into_iter()
                 .map(|mut x| {
                     x.set_label(Some("This side is breaking.".to_owned()));
                     x
                 })
                 .collect(),
-            Operation::Continue(loc) => labels_from_loc(code, loc)
+            Operation::Continue(loc) => labels_from_span(code, loc)
                 .into_iter()
                 .map(|mut x| {
                     x.set_label(Some("This side is continuing.".to_owned()));

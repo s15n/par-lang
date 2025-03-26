@@ -12,7 +12,7 @@ pub enum Process<Loc, Name, Typ> {
     Let(
         Loc,
         Name,
-        Option<Type<Loc, Name>>,
+        Option<Type<Name>>,
         Typ,
         Arc<Expression<Loc, Name, Typ>>,
         Arc<Self>,
@@ -28,7 +28,7 @@ pub enum Command<Loc, Name, Typ> {
         Arc<Expression<Loc, Name, Typ>>,
         Arc<Process<Loc, Name, Typ>>,
     ),
-    Receive(Name, Option<Type<Loc, Name>>, Arc<Process<Loc, Name, Typ>>),
+    Receive(Name, Option<Type<Name>>, Arc<Process<Loc, Name, Typ>>),
     Choose(Name, Arc<Process<Loc, Name, Typ>>),
     Match(Arc<[Name]>, Box<[Arc<Process<Loc, Name, Typ>>]>),
     Break,
@@ -36,7 +36,7 @@ pub enum Command<Loc, Name, Typ> {
     Begin(bool, Option<Name>, Arc<Process<Loc, Name, Typ>>),
     Loop(Option<Name>),
 
-    SendType(Type<Loc, Name>, Arc<Process<Loc, Name, Typ>>),
+    SendType(Type<Name>, Arc<Process<Loc, Name, Typ>>),
     ReceiveType(Name, Arc<Process<Loc, Name, Typ>>),
 }
 
@@ -47,7 +47,7 @@ pub enum Expression<Loc, Name, Typ> {
         Loc,
         Captures<Loc, Name>,
         Name,
-        Option<Type<Loc, Name>>,
+        Option<Type<Name>>,
         Typ,
         Arc<Process<Loc, Name, Typ>>,
     ),
