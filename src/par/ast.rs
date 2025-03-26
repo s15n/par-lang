@@ -1,21 +1,21 @@
 use std::fmt::Display;
 use std::hash::Hash;
-use std::str::FromStr;
 use std::sync::Arc;
 use indexmap::IndexMap;
 use crate::par::language::{CompileError, Pass};
 use crate::par::lexer::Token;
 use crate::par::location::{Span, Spanning};
 use crate::par::process;
-use crate::par::process::Captures;
 use crate::par::types::Type;
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+//#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 pub struct Name {
+    pub span: Span,
     pub string: String,
 }
 
-impl From<String> for Name {
+/*impl From<String> for Name {
     fn from(string: String) -> Self {
         Self { string }
     }
@@ -27,12 +27,29 @@ impl FromStr for Name {
         Ok(Name::from(s.to_owned()))
     }
 }
-
+*/
 impl From<&Token<'_>> for Name {
     fn from(token: &Token) -> Self {
-        Self::from_str(token.raw).unwrap()
+        Self {
+            span: token.span,
+            string: token.raw.to_owned()
+        }
     }
 }
+
+impl Hash for Name {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.string.hash(state)
+    }
+}
+
+impl PartialEq for Name {
+    fn eq(&self, other: &Self) -> bool {
+        self.string == other.string
+    }
+}
+
+impl Eq for Name {}
 
 impl Display for Name {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -85,6 +102,18 @@ pub enum Pattern<Name> {
     Receive(Span, Vec<Self>, Box<Self>),
     Continue(Span),
     ReceiveTypes(Span, Vec<Name>, Box<Self>),
+}
+
+impl<Name> Spanning for Pattern<Name> {
+    fn span(&self) -> Span {
+        match self {
+            | Self::Name(span, _, _)
+            | Self::Continue(span)
+            | Self::Receive(span, _, _)
+            | Self::ReceiveTypes(span, _, _)
+            => span.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -165,6 +194,19 @@ impl<Name> Spanning for Construct<Name> {
     }
 }
 
+pub fn curry_patterns<T, Name>(
+    complete_span: &Span,
+    patterns: &Vec<Pattern<Name>>,
+    then: T,
+    construct: impl Fn(T, &Pattern<Name>) -> T,
+    construct_final: impl Fn(&Span, T, &Pattern<Name>) -> T,
+) -> T {
+    let mut patterns = patterns.into_iter();
+    let first = patterns.next().unwrap();
+    let result = patterns.rfold(then, construct);
+    construct_final(complete_span, result, first)
+}
+
 #[derive(Clone, Debug)]
 pub struct ConstructBranches<Name>(pub IndexMap<Name, ConstructBranch<Name>>);
 
@@ -190,6 +232,21 @@ pub enum Apply<Name> {
     Begin { span: Span, unfounded: bool, label: Option<Name>, then: Box<Self> },
     Loop(Span, Option<Name>),
     SendType(Span, Type<Name>, Box<Self>),
+}
+
+impl Spanning for Apply<Name> {
+    fn span(&self) -> Span {
+        match self {
+            | Self::Noop(span)
+            | Self::Send(span, _, _)
+            | Self::Choose(span, _, _)
+            | Self::Either(span, _)
+            | Self::Begin { span, .. }
+            | Self::Loop(span, _)
+            | Self::SendType(span, _, _)
+            => span.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -427,7 +484,7 @@ impl<Name: Clone + Hash + Eq> Expression<Name> {
                 let body = body.compile()?;
                 Arc::new(process::Expression::Fork(
                     span.clone(),
-                    Captures::new(),
+                    process::Captures::new(),
                     Internal::Result(None),
                     None,
                     (),
@@ -454,7 +511,7 @@ impl<Name: Clone + Hash + Eq> Expression<Name> {
                 ))))?;
                 Arc::new(process::Expression::Fork(
                     span.clone(),
-                    Captures::new(),
+                    process::Captures::new(),
                     Internal::Result(None),
                     None,
                     (),
@@ -464,7 +521,7 @@ impl<Name: Clone + Hash + Eq> Expression<Name> {
 
             Self::Fork { span, channel, annotation, process} => Arc::new(process::Expression::Fork(
                 span.clone(),
-                Captures::new(),
+                process::Captures::new(),
                 Internal::Original(channel.clone()),
                 original(annotation),
                 (),
@@ -475,7 +532,7 @@ impl<Name: Clone + Hash + Eq> Expression<Name> {
                 let process = construct.compile()?;
                 Arc::new(process::Expression::Fork(
                     construct.span().clone(),
-                    Captures::new(),
+                    process::Captures::new(),
                     Internal::Result(None),
                     None,
                     (),
@@ -490,7 +547,7 @@ impl<Name: Clone + Hash + Eq> Expression<Name> {
                 let process = apply.compile()?;
                 Arc::new(process::Expression::Fork(
                     span.clone(),
-                    Captures::new(),
+                    process::Captures::new(),
                     Internal::Result(None),
                     None,
                     (),
@@ -538,7 +595,34 @@ impl<Name: Clone + Hash + Eq> Construct<Name> {
 
             Self::Receive(span, patterns, construct) => {
                 let process = construct.compile()?;
-                todo!() //pattern.compile_receive(0, span, &Internal::Result(None), process)
+                patterns.into_iter().rfold(
+                    process,
+                    |result, pattern| {
+                        pattern.compile_receive(0, &span, &Internal::Result(None), result)
+                    },
+                )
+                /*let span_end = process.span();
+                curry_patterns(
+                    span,
+                    patterns,
+                    process,
+                    |result, pattern| {
+                        let span: Span = (pattern.span()..=span_end).into();
+                        pattern.compile_receive(0, &span, &Internal::Result(None), result)
+                    },
+                    |span, result, pattern| {
+                        pattern.compile_receive(0, span, &Internal::Result(None), result)
+                    },
+                )
+                patterns.into_iter().rfold(
+                    process,
+                    |result, pattern| {
+                        let span: Span = (pattern.span()..=span_end).into();
+                        pattern.compile_receive(0, &span, &Internal::Result(None), result)
+                    },
+                )
+                 */
+                //pattern.compile_receive(0, span, &Internal::Result(None), process)
             }
 
             Self::Choose(span, chosen, construct) => {

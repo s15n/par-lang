@@ -4,7 +4,7 @@ use std::{
     hash::Hash,
     sync::Arc,
 };
-use crate::par::location::Span;
+use crate::par::location::{Span, Spanning};
 use super::types::Type;
 
 #[derive(Clone, Debug)]
@@ -19,6 +19,17 @@ pub enum Process<Name, Typ> {
     ),
     Do(Span, Name, Typ, Command<Name, Typ>),
     Telltypes(Span, Arc<Self>),
+}
+
+impl<Name, Typ> Spanning for Process<Name, Typ> {
+    fn span(&self) -> Span {
+        match self {
+            | Self::Let(span, _, _, _, _, _)
+            | Self::Do(span, _, _, _)
+            | Self::Telltypes(span, _)
+            => span.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

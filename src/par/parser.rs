@@ -21,6 +21,8 @@ use winnow::{
     token::any,
     Parser,
 };
+use winnow::combinator::{empty, peek};
+use crate::par::ast::Apply;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MyError<C = StrContext> {
@@ -284,11 +286,10 @@ where
 */
 
 fn name(input: &mut Input) -> Result<Name> {
-    TokenKind::Identifier.parse_to::<Name>()
+    t(TokenKind::Identifier)
+        .map(Name::from)
         .context(StrContext::Expected(StrContextValue::CharLiteral('_')))
-        .context(StrContext::Expected(StrContextValue::Description(
-            "alphabetic",
-        )))
+        .context(StrContext::Expected(StrContextValue::Description("alphabetic")))
         .context(StrContext::Label("name"))
         .parse_next(input)
 }
@@ -599,9 +600,8 @@ fn typ(input: &mut Input) -> Result<Type<Name>> {
 fn typ_name(input: &mut Input) -> Result<Type<Name>> {
     trace(
         "typ_name",
-        (t(TokenKind::Identifier), type_args).map(|(name_token, (typ_args_span, typ_args))| {
-            let span = (name_token.span..=typ_args_span).into();
-            let name = Name::from_str(name_token.raw).unwrap();
+        (name, type_args).map(|(name, (typ_args_span, typ_args))| {
+            let span = (name.span..=typ_args_span).into();
             Type::Name(span, name, typ_args)
         })
     )
@@ -833,9 +833,9 @@ fn annotation(input: &mut Input) -> Result<Option<Type<Name>>> {
 fn pattern(input: &mut Input) -> Result<Pattern<Name>> {
     alt((
         pattern_name,
-        /*pattern_receive_type,
-        pattern_receive,
-        pattern_continue,*/
+        //pattern_receive_type,
+        //pattern_receive,
+        pattern_continue,
     ))
         .parse_next(input)
 }
@@ -865,13 +865,13 @@ fn pattern_name(input: &mut Input) -> Result<Pattern<Name>> {
         })
         .parse_next(input)
 }
-
-fn pattern_continue(input: &mut Input) -> Result<Pattern<Loc, Name>> {
-    with_loc(t("!"))
-        .map(|(_, loc)| Pattern::Continue(loc))
+*/
+fn pattern_continue(input: &mut Input) -> Result<Pattern<Name>> {
+    t(TokenKind::Bang)
+        .map(|token| Pattern::Continue(token.span))
         .parse_next(input)
 }
-
+/*
 fn pattern_receive_type(input: &mut Input) -> Result<Pattern<Loc, Name>> {
     with_loc(commit_after(
         tn!("(", "type"),
@@ -891,8 +891,7 @@ fn expression(input: &mut Input) -> Result<Expression<Name>> {
         expr_let,
         //expr_do,
         //expr_fork,
-        //application,
-        //with_loc(construction).map(|(cons, loc)| Expression::Construction(loc, cons)),
+        application,
         construction.map(Expression::Construction),
         expr_grouped,
     ))
@@ -1146,33 +1145,38 @@ fn cons_branch_recv_type(input: &mut Input) -> Result<ConstructBranch<Name>> {
         })
         .parse_next(input)
 }
-/*
-fn application(input: &mut Input) -> Result<Expression<Loc, Name>> {
-    with_loc((
+
+fn application(input: &mut Input) -> Result<Expression<Name>> {
+    (
         alt((
-            with_loc(name).map(|(name, loc)| Expression::Reference(loc, name)),
-            delimited(t("{"), expression, t("}")),
+            t(TokenKind::Identifier).map(|name_token| {
+                Expression::Reference(name_token.span, Name::from(name_token))
+            }),
+            expr_grouped
         )),
         apply,
-    ))
-    .map(|((expr, apply), loc)| Expression::Application(loc, Box::new(expr), apply))
-    .context(StrContext::Label("application"))
-    .parse_next(input)
+    )
+        .map(|(expr, apply)| {
+            let span = (expr.span()..=apply.span()).into();
+            Expression::Application(span, Box::new(expr), apply)
+        })
+        .context(StrContext::Label("application"))
+        .parse_next(input)
 }
 
-fn apply(input: &mut Input) -> Result<Apply<Loc, Name>> {
+fn apply(input: &mut Input) -> Result<Apply<Name>> {
     alt((
-        apply_begin,
+        /*apply_begin,
         apply_loop,
         apply_choose,
         apply_either,
         apply_send_type,
-        apply_send,
+        apply_send,*/
         apply_noop,
     ))
     .parse_next(input)
 }
-
+/*
 fn apply_send(input: &mut Input) -> Result<Apply<Loc, Name>> {
     with_loc(commit_after(t("("), (list(expression), t(")"), apply)))
         .map(|((arguments, _, mut apply), loc)| {
@@ -1223,13 +1227,15 @@ fn apply_send_type(input: &mut Input) -> Result<Apply<Loc, Name>> {
         })
         .parse_next(input)
 }
-
-fn apply_noop(input: &mut Input) -> Result<Apply<Loc, Name>> {
-    with_loc(empty)
-        .map(|((), loc)| Apply::Noop(loc))
-        .parse_next(input)
+*/
+fn apply_noop(input: &mut Input) -> Result<Apply<Name>> {
+    let span = match peek(any::<_, Error>).parse_next(input) {
+        Ok(token) => token.span.clone(),
+        Err(_) => todo!()
+    };
+    Ok(Apply::Noop(span))
 }
-
+/*
 fn apply_branch(input: &mut Input) -> Result<ApplyBranch<Loc, Name>> {
     alt((
         apply_branch_then,
@@ -1491,12 +1497,11 @@ fn cmd_branch_recv_type(input: &mut Input) -> Result<CommandBranch<Loc, Name>> {
 fn loop_label(input: &mut Input) -> Result<Option<(Span, Name)>> {
     opt((
         t(TokenKind::Colon),
-        t(TokenKind::Identifier)
+        name
     ))
         .map(|opt| {
-            opt.map(|(pre, name_token)| {
-                let span = (pre.span..=name_token.span).into();
-                let name = Name::from_str(name_token.raw).unwrap();
+            opt.map(|(pre, name)| {
+                let span = (pre.span..=name.span).into();
                 (span, name)
             })
         })
@@ -1508,7 +1513,7 @@ mod test {
     use super::*;
     use crate::par::lexer::tokenize;
 
-    #[test]
+    /*#[test]
     fn test_list() {
         let mut p = list("ab");
         assert_eq!(p.parse("ab").unwrap(), vec!["ab"]);
@@ -1534,7 +1539,7 @@ mod test {
                 ]
             );
         }
-    }
+    }*/
     /*#[test]
     fn test_loop_label() {
         let toks = lex(":one");

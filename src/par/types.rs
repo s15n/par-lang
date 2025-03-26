@@ -8,7 +8,8 @@ use std::{
 
 use super::{
     ast::Program,
-    process::{Captures, Command, Expression, Process},
+    process
+    //process::{Captures, Command, Expression, Process},
 };
 use miette::LabeledSpan;
 use crate::par::ast::{Declaration, Definition, TypeDef};
@@ -347,12 +348,12 @@ impl<Name: Eq + Hash> Type<Name> {
                 args.into_iter().map(|arg| arg.map_names(f)).collect(),
             ),
             Self::Send(span, ts, u) => {
-                todo!()
-                //Type::Send(span, Box::new(t.map_names(f)), Box::new(u.map_names(f)))
+                let mapped = ts.into_iter().map(|t| t.map_names(f)).collect();
+                Type::Send(span, mapped, Box::new(u.map_names(f)))
             }
             Self::Receive(span, ts, u) => {
-                todo!()
-                //Type::Receive(span, Box::new(t.map_names(f)), Box::new(u.map_names(f)))
+                let mapped = ts.into_iter().map(|t| t.map_names(f)).collect();
+                Type::Receive(span, mapped, Box::new(u.map_names(f)))
             }
             Self::Either(span, branches) => Type::Either(
                 span,
@@ -956,25 +957,25 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
             Self::Break(span) => Self::Break(span),
             Self::Continue(span) => Self::Continue(span),
 
-            Self::Recursive { span: span, asc: asc, label: label, body: t } => Self::Recursive {
-                span: span,
-                asc: asc,
-                label: label,
+            Self::Recursive { span, asc, label, body: t } => Self::Recursive {
+                span,
+                asc,
+                label,
                 body: Box::new(t.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?)
             },
-            Self::Iterative { span: span, asc: asc, label: label, body: t } => {
+            Self::Iterative { span, asc, label, body: t } => {
                 if &label == top_label {
                     Self::Iterative {
-                        span: span,
-                        asc: asc,
-                        label: label,
+                        span,
+                        asc,
+                        label,
                         body: t
                     }
                 } else {
                     Self::Iterative {
-                        span: span,
-                        asc: asc,
-                        label: label,
+                        span,
+                        asc,
+                        label,
                         body: Box::new(
                             t.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?,
                         )
@@ -1038,11 +1039,11 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
             Self::Break(_) => {}
             Self::Continue(_) => {}
 
-            Self::Recursive { span: _, asc: asc, label: _, body: t } => {
+            Self::Recursive { span: _, asc, label: _, body: t } => {
                 asc.shift_remove(label);
                 t.invalidate_ascendent(label);
             }
-            Self::Iterative { span: _, asc: asc, label: _, body: t } => {
+            Self::Iterative { span: _, asc, label: _, body: t } => {
                 asc.shift_remove(label);
                 t.invalidate_ascendent(label);
             }
@@ -1066,7 +1067,7 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
 pub struct Context<Name> {
     type_defs: TypeDefs<Name>,
     declarations: Arc<IndexMap<Name, (Span, Type<Name>)>>,
-    unchecked_definitions: Arc<IndexMap<Name, (Span, Arc<Expression<Name, ()>>)>>,
+    unchecked_definitions: Arc<IndexMap<Name, (Span, Arc<process::Expression<Name, ()>>)>>,
     checked_definitions: Arc<RwLock<IndexMap<Name, CheckedDef<Name>>>>,
     current_deps: IndexSet<Name>,
     variables: IndexMap<Name, Type<Name>>,
@@ -1076,7 +1077,7 @@ pub struct Context<Name> {
 #[derive(Clone, Debug)]
 struct CheckedDef<Name> {
     span: Span,
-    def: Arc<Expression<Name, Type<Name>>>,
+    def: Arc<process::Expression<Name, Type<Name>>>,
     typ: Type<Name>,
 }
 
@@ -1085,7 +1086,7 @@ where
     Name: Clone + Eq + Hash,
 {
     pub fn new_with_type_checking(
-        program: &Program<Name, Arc<Expression<Name, ()>>>,
+        program: &Program<Name, Arc<process::Expression<Name, ()>>>,
     ) -> Result<Self, TypeError<Name>> {
         let type_defs = TypeDefs::new_with_validation(&program.type_defs)?;
 
@@ -1184,7 +1185,7 @@ where
 
     pub fn get_checked_definitions(
         &self,
-    ) -> Vec<Definition<Name, Arc<Expression<Name, Type<Name>>>>> {
+    ) -> Vec<Definition<Name, Arc<process::Expression<Name, Type<Name>>>>> {
         self.checked_definitions
             .read()
             .unwrap()
@@ -1242,7 +1243,7 @@ where
     pub fn capture(
         &mut self,
         inference_subject: Option<&Name>,
-        cap: &Captures<Name>,
+        cap: &process::Captures<Name>,
         target: &mut Self,
     ) -> Result<(), TypeError<Name>> {
         for (name, span) in &cap.names {
@@ -1267,10 +1268,10 @@ where
 
     pub fn check_process(
         &mut self,
-        process: &Process<Name, ()>,
-    ) -> Result<Arc<Process<Name, Type<Name>>>, TypeError<Name>> {
+        process: &process::Process<Name, ()>,
+    ) -> Result<Arc<process::Process<Name, Type<Name>>>, TypeError<Name>> {
         match process {
-            Process::Let(span, name, annotation, (), expression, process) => {
+            process::Process::Let(span, name, annotation, (), expression, process) => {
                 let (expression, typ) = match annotation {
                     Some(annotated_type) => (
                         self.check_expression(None, expression, annotated_type)?,
@@ -1280,7 +1281,7 @@ where
                 };
                 self.put(span, name.clone(), typ.clone())?;
                 let process = self.check_process(process)?;
-                Ok(Arc::new(Process::Let(
+                Ok(Arc::new(process::Process::Let(
                     span.clone(),
                     name.clone(),
                     annotation.clone(),
@@ -1290,7 +1291,7 @@ where
                 )))
             }
 
-            Process::Do(span, object, (), command) => {
+            process::Process::Do(span, object, (), command) => {
                 let typ = self.get(span, object)?;
 
                 let (command, _) = self.check_command(
@@ -1302,7 +1303,7 @@ where
                     &mut |context, process| Ok((context.check_process(process)?, None)),
                 )?;
 
-                Ok(Arc::new(Process::Do(
+                Ok(Arc::new(process::Process::Do(
                     span.clone(),
                     object.clone(),
                     typ,
@@ -1310,7 +1311,7 @@ where
                 )))
             }
 
-            Process::Telltypes(span, _) => {
+            process::Process::Telltypes(span, _) => {
                 return Err(TypeError::Telltypes(span.clone(), self.variables.clone()))
             }
         }
@@ -1322,18 +1323,18 @@ where
         span: &Span,
         object: &Name,
         typ: &Type<Name>,
-        command: &Command<Name, ()>,
+        command: &process::Command<Name, ()>,
         analyze_process: &mut impl FnMut(
             &mut Self,
-            &Process<Name, ()>,
+            &process::Process<Name, ()>,
         ) -> Result<
             (
-                Arc<Process<Name, Type<Name>>>,
+                Arc<process::Process<Name, Type<Name>>>,
                 Option<Type<Name>>,
             ),
             TypeError<Name>,
         >,
-    ) -> Result<(Command<Name, Type<Name>>, Option<Type<Name>>), TypeError<Name>>
+    ) -> Result<(process::Command<Name, Type<Name>>, Option<Type<Name>>), TypeError<Name>>
     {
         if let Type::Name(_, name, args) = typ {
             return self.check_command(
@@ -1345,7 +1346,7 @@ where
                 analyze_process,
             );
         }
-        if !matches!(command, Command::Link(_)) {
+        if !matches!(command, process::Command::Link(_)) {
             if let Type::Iterative { span: _, asc: top_asc, label: top_label, body } = typ {
                 return self.check_command(
                     inference_subject,
@@ -1357,7 +1358,7 @@ where
                 );
             }
         }
-        if !matches!(command, Command::Begin(_, _, _) | Command::Loop(_)) {
+        if !matches!(command, process::Command::Begin(_, _, _) | process::Command::Loop(_)) {
             if let Type::Recursive { span: _, asc: top_asc, label: top_label, body } = typ {
                 return self.check_command(
                     inference_subject,
@@ -1386,14 +1387,14 @@ where
         }
 
         Ok(match command {
-            Command::Link(expression) => {
+            process::Command::Link(expression) => {
                 let expression =
                     self.check_expression(None, expression, &typ.dual(&self.type_defs)?)?;
                 self.cannot_have_obligations(span)?;
-                (Command::Link(expression), None)
+                (process::Command::Link(expression), None)
             }
 
-            Command::Send(argument, process) => {
+            process::Command::Send(argument, process) => {
                 let Type::Receive(_, argument_types, then_type) = typ else {
                     return Err(TypeError::InvalidOperation(
                         span.clone(),
@@ -1405,12 +1406,10 @@ where
                 //let argument = self.check_expression(None, argument, &argument_type)?;
                 //self.put(span, object.clone(), *then_type.clone())?;
                 //let (process, inferred_types) = analyze_process(self, process)?;
-                //(Command::Send(argument, process), inferred_types)
+                //(process::Command::Send(argument, process), inferred_types)
             }
 
-            Command::Receive(parameter, annotation, process) => {
-                todo!()
-                /*
+            process::Command::Receive(parameter, annotation, process) => {
                 let Type::Send(_, parameter_types, then_type) = typ else {
                     return Err(TypeError::InvalidOperation(
                         span.clone(),
@@ -1418,20 +1417,31 @@ where
                         typ.clone(),
                     ));
                 };
+                let mut parameter_types = parameter_types.into_iter();
+                let parameter_type = parameter_types.next().unwrap();
+                let parameter_types: Vec<_> = parameter_types.map(Type::clone).collect();
+                let then_type = if parameter_types.is_empty() {
+                    *then_type.clone()
+                } else {
+                    Type::Send(
+                        span.clone(),
+                        parameter_types,
+                        Box::from(*then_type.clone()),
+                    )
+                };
                 if let Some(annotated_type) = annotation {
                     parameter_type.check_assignable(span, annotated_type, &self.type_defs)?;
                 }
-                self.put(span, parameter.clone(), *parameter_type.clone())?;
-                self.put(span, object.clone(), *then_type.clone())?;
+                self.put(span, parameter.clone(), parameter_type.clone())?;
+                self.put(span, object.clone(), then_type)?;
                 let (process, inferred_types) = analyze_process(self, process)?;
                 (
-                    Command::Receive(parameter.clone(), annotation.clone(), process),
+                    process::Command::Receive(parameter.clone(), annotation.clone(), process),
                     inferred_types,
                 )
-                */
             }
 
-            Command::Choose(chosen, process) => {
+            process::Command::Choose(chosen, process) => {
                 let Type::Choice(_, branches) = typ else {
                     return Err(TypeError::InvalidOperation(
                         span.clone(),
@@ -1448,10 +1458,10 @@ where
                 };
                 self.put(span, object.clone(), branch_type.clone())?;
                 let (process, inferred_types) = analyze_process(self, process)?;
-                (Command::Choose(chosen.clone(), process), inferred_types)
+                (process::Command::Choose(chosen.clone(), process), inferred_types)
             }
 
-            Command::Match(branches, processes) => {
+            process::Command::Match(branches, processes) => {
                 let Type::Either(_, required_branches) = typ else {
                     return Err(TypeError::InvalidOperation(
                         span.clone(),
@@ -1505,12 +1515,12 @@ where
                 }
 
                 (
-                    Command::Match(Arc::clone(branches), Box::from(typed_processes)),
+                    process::Command::Match(Arc::clone(branches), Box::from(typed_processes)),
                     inferred_type,
                 )
             }
 
-            Command::Break => {
+            process::Command::Break => {
                 let Type::Continue(_) = typ else {
                     return Err(TypeError::InvalidOperation(
                         span.clone(),
@@ -1519,10 +1529,10 @@ where
                     ));
                 };
                 self.cannot_have_obligations(span)?;
-                (Command::Break, None)
+                (process::Command::Break, None)
             }
 
-            Command::Continue(process) => {
+            process::Command::Continue(process) => {
                 let Type::Break(_) = typ else {
                     return Err(TypeError::InvalidOperation(
                         span.clone(),
@@ -1531,10 +1541,10 @@ where
                     ));
                 };
                 let (process, inferred_types) = analyze_process(self, process)?;
-                (Command::Continue(process), inferred_types)
+                (process::Command::Continue(process), inferred_types)
             }
 
-            Command::Begin(unfounded, label, process) => {
+            process::Command::Begin(unfounded, label, process) => {
                 let Type::Recursive { span: typ_span, asc: typ_asc, label: typ_label, body: typ_body } = typ else {
                     return Err(TypeError::InvalidOperation(
                         span.clone(),
@@ -1587,12 +1597,12 @@ where
                 });
 
                 (
-                    Command::Begin(*unfounded, label.clone(), process),
+                    process::Command::Begin(*unfounded, label.clone(), process),
                     inferred_iterative,
                 )
             }
 
-            Command::Loop(label) => {
+            process::Command::Loop(label) => {
                 if !matches!(typ, Type::Recursive { .. }) {
                     return Err(TypeError::InvalidOperation(
                         span.clone(),
@@ -1647,12 +1657,12 @@ where
                 self.cannot_have_obligations(span)?;
 
                 (
-                    Command::Loop(label.clone()),
+                    process::Command::Loop(label.clone()),
                     inferred_loop.or(Some(Type::Self_(span.clone(), label.clone()))),
                 )
             }
 
-            Command::SendType(argument, process) => {
+            process::Command::SendType(argument, process) => {
                 todo!()
                 /*
                 let Type::ReceiveTypes(_, type_names, then_type) = typ else {
@@ -1665,11 +1675,11 @@ where
                 let then_type = then_type.clone().substitute(type_name, argument)?;
                 self.put(span, object.clone(), then_type)?;
                 let (process, inferred_types) = analyze_process(self, process)?;
-                (Command::SendType(argument.clone(), process), inferred_types)
+                (process::Command::SendType(argument.clone(), process), inferred_types)
                 */
             }
 
-            Command::ReceiveType(parameter, process) => {
+            process::Command::ReceiveType(parameter, process) => {
                 todo!()
                 /*
                 let Type::SendTypes(_, type_names, then_type) = typ else {
@@ -1686,7 +1696,7 @@ where
                 self.put(span, object.clone(), then_type)?;
                 let (process, inferred_types) = analyze_process(self, process)?;
                 (
-                    Command::ReceiveType(parameter.clone(), process),
+                    process::Command::ReceiveType(parameter.clone(), process),
                     inferred_types,
                 )
                 */
@@ -1696,12 +1706,12 @@ where
 
     pub fn infer_process(
         &mut self,
-        process: &Process<Name, ()>,
+        process: &process::Process<Name, ()>,
         subject: &Name,
-    ) -> Result<(Arc<Process<Name, Type<Name>>>, Type<Name>), TypeError<Name>>
+    ) -> Result<(Arc<process::Process<Name, Type<Name>>>, Type<Name>), TypeError<Name>>
     {
         match process {
-            Process::Let(span, name, annotation, (), expression, process) => {
+            process::Process::Let(span, name, annotation, (), expression, process) => {
                 let (expression, typ) = match annotation {
                     Some(annotated_type) => (
                         self.check_expression(Some(subject), expression, annotated_type)?,
@@ -1712,7 +1722,7 @@ where
                 self.put(span, name.clone(), typ.clone())?;
                 let (process, subject_type) = self.infer_process(process, subject)?;
                 Ok((
-                    Arc::new(Process::Let(
+                    Arc::new(process::Process::Let(
                         span.clone(),
                         name.clone(),
                         annotation.clone(),
@@ -1724,11 +1734,11 @@ where
                 ))
             }
 
-            Process::Do(span, object, (), command) => {
+            process::Process::Do(span, object, (), command) => {
                 if object == subject {
                     let (command, typ) = self.infer_command(span, subject, command)?;
                     return Ok((
-                        Arc::new(Process::Do(
+                        Arc::new(process::Process::Do(
                             span.clone(),
                             object.clone(),
                             typ.clone(),
@@ -1759,12 +1769,12 @@ where
                 };
 
                 Ok((
-                    Arc::new(Process::Do(span.clone(), object.clone(), typ, command)),
+                    Arc::new(process::Process::Do(span.clone(), object.clone(), typ, command)),
                     inferred_type,
                 ))
             }
 
-            Process::Telltypes(span, _) => {
+            process::Process::Telltypes(span, _) => {
                 return Err(TypeError::Telltypes(span.clone(), self.variables.clone()))
             }
         }
@@ -1774,25 +1784,25 @@ where
         &mut self,
         span: &Span,
         subject: &Name,
-        command: &Command<Name, ()>,
-    ) -> Result<(Command<Name, Type<Name>>, Type<Name>), TypeError<Name>> {
+        command: &process::Command<Name, ()>,
+    ) -> Result<(process::Command<Name, Type<Name>>, Type<Name>), TypeError<Name>> {
         Ok(match command {
-            Command::Link(expression) => {
+            process::Command::Link(expression) => {
                 let (expression, typ) = self.infer_expression(Some(subject), expression)?;
-                (Command::Link(expression), typ.dual(&self.type_defs)?)
+                (process::Command::Link(expression), typ.dual(&self.type_defs)?)
             }
 
-            Command::Send(argument, process) => {
+            process::Command::Send(argument, process) => {
                 let (argument, arg_type) = self.infer_expression(Some(subject), argument)?;
                 let (process, then_type) = self.infer_process(process, subject)?;
                 (
-                    Command::Send(argument, process),
+                    process::Command::Send(argument, process),
                     todo!()
                     //Type::Receive(span.clone(), Box::new(arg_type), Box::new(then_type)),
                 )
             }
 
-            Command::Receive(parameter, annotation, process) => {
+            process::Command::Receive(parameter, annotation, process) => {
                 let Some(param_type) = annotation else {
                     return Err(TypeError::ParameterTypeMustBeKnown(
                         span.clone(),
@@ -1803,24 +1813,23 @@ where
                 self.put(span, parameter.clone(), param_type.clone())?;
                 let (process, then_type) = self.infer_process(process, subject)?;
                 (
-                    Command::Receive(parameter.clone(), annotation.clone(), process),
+                    process::Command::Receive(parameter.clone(), annotation.clone(), process),
                     Type::Send(
                         span.clone(),
-                        todo!(),
-                        //Box::new(param_type.clone()),
+                        vec![param_type.clone()],
                         Box::new(then_type),
                     ),
                 )
             }
 
-            Command::Choose(_, _) => {
+            process::Command::Choose(_, _) => {
                 return Err(TypeError::TypeMustBeKnownAtThisPoint(
                     span.clone(),
                     subject.clone(),
                 ))
             }
 
-            Command::Match(branches, processes) => {
+            process::Command::Match(branches, processes) => {
                 let original_context = self.clone();
                 let mut typed_processes = Vec::new();
                 let mut branch_types = IndexMap::new();
@@ -1833,29 +1842,29 @@ where
                 }
 
                 (
-                    Command::Match(Arc::clone(branches), Box::from(typed_processes)),
+                    process::Command::Match(Arc::clone(branches), Box::from(typed_processes)),
                     Type::Either(span.clone(), branch_types),
                 )
             }
 
-            Command::Break => {
+            process::Command::Break => {
                 self.cannot_have_obligations(span)?;
-                (Command::Break, Type::Continue(span.clone()))
+                (process::Command::Break, Type::Continue(span.clone()))
             }
 
-            Command::Continue(process) => {
+            process::Command::Continue(process) => {
                 let process = self.check_process(process)?;
-                (Command::Continue(process), Type::Break(span.clone()))
+                (process::Command::Continue(process), Type::Break(span.clone()))
             }
 
-            Command::Begin(unfounded, label, process) => {
+            process::Command::Begin(unfounded, label, process) => {
                 self.loop_points.insert(
                     label.clone(),
                     (subject.clone(), Arc::new(self.variables.clone())),
                 );
                 let (process, body) = self.infer_process(process, subject)?;
                 (
-                    Command::Begin(*unfounded, label.clone(), process),
+                    process::Command::Begin(*unfounded, label.clone(), process),
                     Type::Recursive {
                         span: span.clone(),
                         asc: if *unfounded {
@@ -1869,7 +1878,7 @@ where
                 )
             }
 
-            Command::Loop(label) => {
+            process::Command::Loop(label) => {
                 let Some((driver, variables)) = self.loop_points.get(label).cloned() else {
                     return Err(TypeError::NoSuchLoopPoint(span.clone(), label.clone()));
                 };
@@ -1903,23 +1912,23 @@ where
                 self.cannot_have_obligations(span)?;
 
                 (
-                    Command::Loop(label.clone()),
+                    process::Command::Loop(label.clone()),
                     Type::Self_(span.clone(), label.clone()),
                 )
             }
 
-            Command::SendType(_, _) => {
+            process::Command::SendType(_, _) => {
                 return Err(TypeError::TypeMustBeKnownAtThisPoint(
                     span.clone(),
                     subject.clone(),
                 ))
             }
 
-            Command::ReceiveType(parameter, process) => {
+            process::Command::ReceiveType(parameter, process) => {
                 self.type_defs.vars.insert(parameter.clone());
                 let (process, then_type) = self.infer_process(process, subject)?;
                 (
-                    Command::ReceiveType(parameter.clone(), process),
+                    process::Command::ReceiveType(parameter.clone(), process),
                     todo!()
                     //Type::SendTypes(span.clone(), parameter.clone(), Box::new(then_type)),
                 )
@@ -1930,11 +1939,11 @@ where
     pub fn check_expression(
         &mut self,
         inference_subject: Option<&Name>,
-        expression: &Expression<Name, ()>,
+        expression: &process::Expression<Name, ()>,
         target_type: &Type<Name>,
-    ) -> Result<Arc<Expression<Name, Type<Name>>>, TypeError<Name>> {
+    ) -> Result<Arc<process::Expression<Name, Type<Name>>>, TypeError<Name>> {
         match expression {
-            Expression::Reference(span, name, ()) => {
+            process::Expression::Reference(span, name, ()) => {
                 if Some(name) == inference_subject {
                     return Err(TypeError::TypeMustBeKnownAtThisPoint(
                         span.clone(),
@@ -1943,14 +1952,14 @@ where
                 }
                 let typ = self.get(span, name)?;
                 typ.check_assignable(span, target_type, &self.type_defs)?;
-                Ok(Arc::new(Expression::Reference(
+                Ok(Arc::new(process::Expression::Reference(
                     span.clone(),
                     name.clone(),
                     typ.clone(),
                 )))
             }
 
-            Expression::Fork(span, captures, channel, annotation, (), process) => {
+            process::Expression::Fork(span, captures, channel, annotation, (), process) => {
                 let target_dual = target_type.dual(&self.type_defs)?;
                 let typ = match annotation {
                     Some(annotated_type) => {
@@ -1963,7 +1972,7 @@ where
                 self.capture(inference_subject, captures, &mut context)?;
                 context.put(span, channel.clone(), typ.clone())?;
                 let process = context.check_process(process)?;
-                Ok(Arc::new(Expression::Fork(
+                Ok(Arc::new(process::Expression::Fork(
                     span.clone(),
                     captures.clone(),
                     channel.clone(),
@@ -1978,11 +1987,11 @@ where
     pub fn infer_expression(
         &mut self,
         inference_subject: Option<&Name>,
-        expression: &Expression<Name, ()>,
-    ) -> Result<(Arc<Expression<Name, Type<Name>>>, Type<Name>), TypeError<Name>>
+        expression: &process::Expression<Name, ()>,
+    ) -> Result<(Arc<process::Expression<Name, Type<Name>>>, Type<Name>), TypeError<Name>>
     {
         match expression {
-            Expression::Reference(span, name, ()) => {
+            process::Expression::Reference(span, name, ()) => {
                 if Some(name) == inference_subject {
                     return Err(TypeError::TypeMustBeKnownAtThisPoint(
                         span.clone(),
@@ -1991,7 +2000,7 @@ where
                 }
                 let typ = self.get(span, name)?;
                 Ok((
-                    Arc::new(Expression::Reference(
+                    Arc::new(process::Expression::Reference(
                         span.clone(),
                         name.clone(),
                         typ.clone(),
@@ -2000,7 +2009,7 @@ where
                 ))
             }
 
-            Expression::Fork(span, captures, channel, annotation, (), process) => {
+            process::Expression::Fork(span, captures, channel, annotation, (), process) => {
                 let mut context = self.split();
                 self.capture(inference_subject, captures, &mut context)?;
                 let (process, typ) = match annotation {
@@ -2012,7 +2021,7 @@ where
                 };
                 let dual = typ.dual(&self.type_defs)?;
                 Ok((
-                    Arc::new(Expression::Fork(
+                        Arc::new(process::Expression::Fork(
                         span.clone(),
                         captures.clone(),
                         channel.clone(),

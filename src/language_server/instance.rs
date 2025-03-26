@@ -60,7 +60,7 @@ impl Instance {
                         let mut msg = format!("Declaration: {}: ", name.to_string());
                         let indent = msg.len();
                         typ.pretty(&mut msg, indent + 1).unwrap();
-                        message = Some(msg);
+                        message = Some(format!("{} ({:?})", msg, typ));
                         break;
                     }
                 }
@@ -71,7 +71,7 @@ impl Instance {
                             continue;
                         }
                         inside_item = true;
-                        message = Some(format!("Declaration: {}", name.to_string()));
+                        message = Some(format!("Definition: {}", name.to_string()));
                         break;
                     }
                 }
