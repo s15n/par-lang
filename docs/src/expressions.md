@@ -176,7 +176,29 @@ def is_even = chan return: (Nat) chan Bool {
   }
 }
 ```
-Learn more about destructing values using commands [here](./statements/commands.md)
+Learn more about destructing values using commands [here](./statements/commands.md).
+
+A more elaborate example is reversing a list using the generator pattern:
+```par
+dec reverse : [type T] [List<T>] List<T>
+
+// We construct the reversed list by destructing its dual: `chan List<T>`.
+def reverse = [type T] [list] chan yield {
+  let yield: chan List<T> = list begin {
+    // The list is empty, give back the generator handle.
+    .empty!       => yield,
+    // The list starts with an item `x`.
+    .item(x) rest => do {
+      // Traverse into the rest of the list first.            
+      let yield = rest loop
+      // After that, produce `x` on the reversed list.          
+      yield.item(x)                  
+    } in yield // Finally, give back the generator handle.
+  }
+  // At the very end, signal the end of the list.
+  yield.empty!                       
+}
+```
 
 [_Pattern_]: ./patterns.md
 [_Construction_]: ./expressions/construction.md
