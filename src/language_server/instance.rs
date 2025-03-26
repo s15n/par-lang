@@ -1,7 +1,8 @@
+use std::fmt::Display;
 use lsp_types::{self as lsp, Uri};
-use crate::par::language::Internal;
+use crate::par::ast::{Declaration, Definition, Internal, Name, TypeDef};
 use crate::par::lexer::Token;
-use crate::par::parse::{Loc, Name};
+use crate::par::location::Span;
 use crate::par::types::TypeError;
 use crate::playground::Compiled;
 use super::io::IO;
@@ -9,7 +10,7 @@ use super::io::IO;
 #[derive(Debug, Clone)]
 pub enum CompileError {
     Compile(crate::playground::Error),
-    Types(TypeError<Loc, Internal<Name>>),
+    Types(TypeError<Internal<Name>>),
 }
 pub type CompileResult = Result<Compiled, CompileError>;
 
@@ -34,23 +35,45 @@ impl Instance {
         tracing::info!("Handling hover request with params: {:?}", params);
 
         let pos = params.text_document_position_params.position;
-        let hover_loc = Loc::from_points(
-            (pos.line as usize, pos.character as usize),
-            (pos.line as usize, pos.character as usize),
-            self.uri.to_string(),
-            &self.io.read(&self.uri).unwrap()
-        );
 
         let payload = match &self.compiled {
             Some(Ok(compiled)) => {
-                let mut message: Option<String> = Some(format!("{:?}", hover_loc));
-                for (loc, name, names, typ) in &compiled.program.type_defs {
-                    tracing::info!("Type at {:?}", loc);
-                    if !hover_loc.inside(&loc) {
+                let mut message: Option<String> = Some(format!("{}:{}", pos.line, pos.character));
+
+                let mut inside_item = false;
+
+                for TypeDef { span, name, .. } in &compiled.program.type_defs {
+                    if !is_inside(pos, span) {
                         continue;
                     }
+                    inside_item = true;
                     message = Some(format!("Type: {}", name.to_string()));
                     break;
+                }
+
+                if !inside_item {
+                    for Declaration { span, name, typ } in &compiled.program.declarations {
+                        if !is_inside(pos, span) {
+                            continue;
+                        }
+                        inside_item = true;
+                        let mut msg = format!("Declaration: {}: ", name.to_string());
+                        let indent = msg.len();
+                        typ.pretty(&mut msg, indent + 1).unwrap();
+                        message = Some(msg);
+                        break;
+                    }
+                }
+
+                if !inside_item {
+                    for Definition { span, name, .. } in &compiled.program.definitions {
+                        if !is_inside(pos, span) {
+                            continue;
+                        }
+                        inside_item = true;
+                        message = Some(format!("Declaration: {}", name.to_string()));
+                        break;
+                    }
                 }
 
                 if let Some(message) = message {
@@ -81,7 +104,7 @@ impl Instance {
 
         // todo: progress reporting
         let mut compiled = stacker::grow(32 * 1024 * 1024, || {
-            Compiled::from_string(&code.unwrap(), self.uri.to_string())
+            Compiled::from_string(&code.unwrap())
         }).map_err(|err| CompileError::Compile(err));
         match compiled {
             Ok(Compiled { checked: Err(err), .. }) => {
@@ -110,4 +133,16 @@ impl Instance {
     pub fn mark_dirty(&mut self) {
         self.dirty = true;
     }
+}
+
+fn is_inside(pos: lsp::Position, span: &Span) -> bool {
+    let pos_row = pos.line as usize;
+    let pos_column = pos.character as usize;
+
+    let start = span.start;
+    let end = span.end;
+
+    !(pos_row < start.row || pos_row > end.row)
+        && !(pos_row == start.row && pos_column < start.column)
+        && !(pos_row == end.row && pos_column > end.column)
 }

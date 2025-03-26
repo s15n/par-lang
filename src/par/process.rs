@@ -94,7 +94,7 @@ impl<Name: Hash + Eq> Captures<Name> {
     }
 }
 
-impl<Span: Clone, Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
+impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
     pub fn fix_captures(
         &self,
         loop_points: &IndexMap<Option<Name>, Captures<Name>>,
@@ -190,7 +190,7 @@ impl<Span: Clone, Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
     }
 }
 
-impl<Span: Clone, Name: Clone + Hash + Eq, Typ: Clone> Command<Name, Typ> {
+impl<Name: Clone + Hash + Eq, Typ: Clone> Command<Name, Typ> {
     pub fn fix_captures(
         &self,
         loop_points: &IndexMap<Option<Name>, Captures<Name>>,
@@ -259,7 +259,7 @@ impl<Span: Clone, Name: Clone + Hash + Eq, Typ: Clone> Command<Name, Typ> {
     }
 }
 
-impl<Span: Clone, Name: Clone + Hash + Eq, Typ: Clone> Expression<Name, Typ> {
+impl<Name: Clone + Hash + Eq, Typ: Clone> Expression<Name, Typ> {
     pub fn fix_captures(
         &self,
         loop_points: &IndexMap<Option<Name>, Captures<Name>>,

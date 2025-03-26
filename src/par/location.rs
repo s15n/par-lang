@@ -1,6 +1,7 @@
 use std::ops::RangeInclusive;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Hash)]
 pub struct Point {
     // 0-based
     pub offset: usize,
@@ -11,9 +12,14 @@ pub struct Point {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Hash)]
 pub struct Span {
     pub start: Point,
     pub end: Point,
+}
+
+pub trait Spanning {
+    fn span(&self) -> Span;
 }
 
 impl Span {

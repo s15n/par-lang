@@ -161,9 +161,9 @@ pub enum CompileError {
 
 // todo
 impl CompileError {
-    pub fn span(&self) -> &Span {
+    pub fn span(&self) -> Span {
         match self {
-            Self::MustEndProcess(span) => span,
+            Self::MustEndProcess(span) => span.clone(),
         }
     }
 

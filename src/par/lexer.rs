@@ -1,4 +1,4 @@
-use super::{parse::Loc, parser::comment};
+use super::{parser::comment};
 use crate::par::location::{Point, Span};
 use core::{ops::Range, str::FromStr};
 use miette::{SourceOffset, SourceSpan};
@@ -154,18 +154,15 @@ impl From<TokenKind> for &'static str {
 
 impl PartialEq<str> for Token<'_> {
     fn eq(&self, other: &str) -> bool {
-        <&str>::from(self.kind) == other
-            || (matches!(self.kind, TokenKind::Identifier) && self.raw == other)
+        self.raw == other
     }
 }
 impl PartialEq<&str> for Token<'_> {
     fn eq(&self, &other: &&str) -> bool {
-        <&str>::from(self.kind) == other
-            || (matches!(self.kind, TokenKind::Identifier) && self.raw == other)
+        self.raw == other
     }
 }
 
-/*
 impl<'i, E> Parser<Tokens<'i>, &'i Token<'i>, E> for TokenKind
 where
     E: ParserError<Tokens<'i>>,
@@ -174,7 +171,6 @@ where
         literal(*self).parse_next(input).map(|t| &t[0])
     }
 }
-*/
 
 impl<'a, T: FromStr> ParseSlice<T> for Token<'a> {
     fn parse_slice(&self) -> Option<T> {

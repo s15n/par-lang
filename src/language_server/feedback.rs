@@ -3,7 +3,7 @@ use std::fmt::format;
 use lsp_types::{self as lsp, Uri};
 use miette::Diagnostic;
 use crate::language_server::instance::CompileError;
-use crate::par::parse::Loc;
+use crate::par::location::Spanning;
 
 pub struct Feedback {
     diagnostics: HashMap<Uri, Vec<lsp::Diagnostic>>,
@@ -57,33 +57,33 @@ impl FeedbackBookKeeper {
 pub fn diagnostic_for_error(err: &CompileError) -> lsp::Diagnostic {
     use crate::playground::Error;
 
-    let (loc, message) = match err {
-        CompileError::Compile(Error::Parse(err)) => (err.loc(), err.message().to_string()),
-        CompileError::Compile(Error::Compile(err)) => (err.loc(), err.message().to_string()),
-        CompileError::Compile(Error::Type(err))
+    let (span, message, help) = match err {
+        CompileError::Compile(Error::Parse(err))
+        => (err.span(), err.message().to_string(), err.help().map(|s| s.to_string())),
+
+        CompileError::Compile(Error::Compile(err))
+        => (err.span(), err.message().to_string(), Some("Help".to_string())),
+
+        | CompileError::Compile(Error::Type(err))
         | CompileError::Types(err)
-        => (err.loc(), "Type Error".to_string()),
+        => (err.span(), "Type Error".to_string(), Some("Help".to_string())),
+
         CompileError::Compile(Error::Runtime(_)) => {
             unreachable!("Runtime error at compile time")
         },
     };
-    let range = match loc {
-        Loc::Code { line, column, span, ..} => lsp::Range {
-            start: lsp::Position {
-                line: *line as u32 - 1,
-                character: *column as u32 - 1,
-            },
-            end: lsp::Position {
-                line: *line as u32 - 1,
-                character: (*column + span.len()) as u32 - 1,
-            }
+    let message = match help {
+        Some(help) => format!("{}\n{}", message, help),
+        None => message,
+    };
+    let range = lsp::Range {
+        start: lsp::Position {
+            line: span.start.row as u32,
+            character: span.start.column as u32,
         },
-        Loc::External => {
-            tracing::warn!("External error location");
-            lsp::Range {
-                start: lsp::Position { line: 0, character: 0, },
-                end: lsp::Position { line: 0, character: 0, }
-            }
+        end: lsp::Position {
+            line: span.end.row as u32,
+            character: span.end.column as u32,
         }
     };
     lsp::Diagnostic {

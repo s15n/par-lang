@@ -9,12 +9,11 @@ use std::str::FromStr;
 use eframe::egui;
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use indexmap::IndexMap;
-use lsp_types::Uri;
 use crate::{
     interact::{Event, Handle, Request},
     par::{
-        language::{CompileError, Internal},
-        ast::{Name, Program},
+        language::{CompileError},
+        ast::{Name, Program, Internal},
         parser::{parse_program, SyntaxError},
         process::Expression,
         runtime::{self, Context, Operation},
@@ -25,7 +24,7 @@ use crate::{
 use miette::{LabeledSpan, SourceOffset, SourceSpan};
 use tracing::span;
 use crate::language_server::URI_PLAYGROUND;
-use crate::par::ast::Definition;
+use crate::par::ast::{Declaration, Definition, TypeDef};
 use crate::par::location::Span;
 
 pub struct Playground {
@@ -46,43 +45,43 @@ pub(crate) struct Compiled {
 }
 
 impl Compiled {
-    pub(crate) fn from_string(source: &str, file: String) -> Result<Compiled, Error> {
-        parse_program(source, file)
+    pub(crate) fn from_string(source: &str) -> Result<Compiled, Error> {
+        parse_program(source)
             .map_err(Error::Parse)
             .and_then(|program| {
                 let type_defs = program
                     .type_defs
                     .into_iter()
-                    .map(|(loc, name, params, typ)| {
-                        (
-                            loc,
-                            Internal::Original(name),
-                            params.into_iter().map(Internal::Original).collect(),
-                            typ.map_names(&mut Internal::Original),
-                        )
+                    .map(|TypeDef { span, name, params, typ }| {
+                        TypeDef {
+                            span,
+                            name: Internal::Original(name),
+                            params: params.into_iter().map(Internal::Original).collect(),
+                            typ: typ.map_names( & mut Internal::Original),
+                        }
                     })
                     .collect();
                 let declarations = program
                     .declarations
                     .into_iter()
-                    .map(|(loc, name, typ)| {
-                        (
-                            loc,
-                            Internal::Original(name),
-                            typ.map_names(&mut Internal::Original),
-                        )
+                    .map(|Declaration { span, name, typ }| {
+                        Declaration {
+                            span,
+                            name: Internal::Original(name),
+                            typ: typ.map_names( & mut Internal::Original),
+                        }
                     })
                     .collect();
                 let compile_result = program
                     .definitions
                     .into_iter()
-                    .map(|(loc, name, def)| {
-                        def.compile().map(|compiled| {
-                            (
-                                loc,
-                                Internal::Original(name.clone()),
-                                compiled.optimize().fix_captures(&IndexMap::new()).0,
-                            )
+                    .map(|Definition { span, name, expression }| {
+                        expression.compile().map(|compiled| {
+                            Definition {
+                                span,
+                                name: Internal::Original(name.clone()),
+                                expression: compiled.optimize().fix_captures(&IndexMap::new()).0,
+                            }
                         })
                     })
                     .collect::<Result<_, CompileError>>();
@@ -128,11 +127,11 @@ impl Compiled {
             declarations: program.declarations.clone(),
             definitions,
         };
-        return Compiled {
+        Compiled {
             program,
             pretty,
             checked: Ok(Checked::from_program(new_program)),
-        };
+        }
     }
 }
 
@@ -156,13 +155,13 @@ pub(crate) enum Error {
     Parse(SyntaxError),
     Compile(CompileError),
     Type(TypeError<Internal<Name>>),
-    Runtime(runtime::Error<Internal<Name>>),
+    Runtime(runtime::Error<Span, Internal<Name>>),
 }
 
 #[derive(Clone)]
 struct Interact {
     code: Arc<str>,
-    handle: Arc<Mutex<Handle<Internal<Name>, ()>>>,
+    handle: Arc<Mutex<Handle<Span, Internal<Name>, ()>>>,
 }
 
 impl Playground {
@@ -353,7 +352,7 @@ impl Playground {
 
     fn recompile(&mut self) {
         self.compiled = stacker::grow(32 * 1024 * 1024, || {
-            Some(Compiled::from_string(self.code.as_str(), URI_PLAYGROUND.to_string()))
+            Some(Compiled::from_string(self.code.as_str()))
         });
         self.compiled_code = Arc::from(self.code.as_str());
     }
@@ -573,11 +572,11 @@ impl Playground {
 pub fn labels_from_span(code: &str, span: &Span) -> Vec<LabeledSpan> {
     vec![LabeledSpan::new_with_span(
         None,
-        SourceSpan::new(SourceOffset::from(span.start), span.len())
+        SourceSpan::new(SourceOffset::from(span.start.offset), span.len())
     )]
 }
 pub fn span_to_source_span(code: &str, span: &Span) -> Option<SourceSpan> {
-    Some(SourceSpan::new(SourceOffset::from(span.start), span.len()))
+    Some(SourceSpan::new(SourceOffset::from(span.start.offset), span.len()))
 }
 
 #[derive(Debug, miette::Diagnostic)]
