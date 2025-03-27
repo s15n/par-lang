@@ -347,14 +347,11 @@ impl<Name: Clone + Hash + Eq> Pattern<Name> {
 
             Self::Receive(loc, patterns, rest) => {
                 patterns.into_iter().rfold(
-                    (level + patterns.len(), rest.compile_helper(level, process)),
-                    |(level, rest), pattern| {
-                        (
-                            level - 1,
-                            pattern.compile_receive(level, loc, &Internal::Match(level), rest)
-                        )
+                    rest.compile_helper(level, process),
+                    |rest, pattern| {
+                        pattern.compile_receive(level + 1, loc, &Internal::Match(level), rest)
                     },
-                ).1
+                )
             },
 
             Self::Continue(loc) => Arc::new(process::Process::Do(
