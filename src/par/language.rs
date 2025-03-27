@@ -195,6 +195,19 @@ impl Display for Name {
     }
 }
 
+impl Internal<Name> {
+    pub fn span(&self) -> Option<Span> {
+        match self {
+            | Self::Original(name)
+            | Self::Result(Some(name))
+            | Self::Object(Some(name))
+            => Some(name.span.clone()),
+
+            _ => None,
+        }
+    }
+}
+
 impl<Name: From<String>> From<String> for Internal<Name> {
     fn from(value: String) -> Self {
         Self::Original(Name::from(value))

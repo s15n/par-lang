@@ -8,12 +8,15 @@ use super::{
     lexer::{lex, Input, Token, TokenKind},
     types::Type,
 };
-use core::{fmt::Display, str::FromStr};
+use crate::location::{Point, Span, Spanning};
+use crate::par::language::{Declaration, Definition, Name, Program, TypeDef};
+use core::fmt::Display;
 use indexmap::IndexMap;
 use miette::{SourceOffset, SourceSpan};
+use winnow::token::literal;
 use winnow::{
     combinator::{
-        alt, cut_err, delimited, empty, not, opt, peek, preceded, repeat, separated, terminated,
+        alt, cut_err, not, opt, preceded, repeat, separated, terminated,
         trace,
     },
     error::{
@@ -23,9 +26,6 @@ use winnow::{
     token::any,
     Parser,
 };
-use winnow::token::literal;
-use crate::location::{Point, Span, Spanning};
-use crate::par::language::{Declaration, Definition, Name, Program, TypeDef};
 
 impl From<&Token<'_>> for Name {
     fn from(token: &Token) -> Self {
@@ -1515,7 +1515,6 @@ fn loop_label(input: &mut Input) -> Result<Option<Name>> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::par::lexer::lex;
 
     /*
     #[test]

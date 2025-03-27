@@ -3,3 +3,4 @@ mod server;
 mod feedback;
 mod instance;
 mod io;
+mod protocol;

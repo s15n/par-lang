@@ -1,7 +1,6 @@
-use std::fmt::Display;
-use lsp_types::{self as lsp, Uri};
+use std::collections::HashMap;
+use lsp_types::{self as lsp, DocumentSymbolResponse, Uri};
 use crate::par::language::{Declaration, Definition, Internal, Name, TypeDef};
-use crate::par::lexer::Token;
 use crate::location::Span;
 use crate::par::types::TypeError;
 use crate::playground::Compiled;
@@ -31,12 +30,8 @@ impl Instance {
         }
     }
 
-    pub fn uri(&self) -> &Uri {
-        &self.uri
-    }
-
     pub fn handle_hover(&self, params: &lsp::HoverParams) -> Option<lsp::Hover> {
-        tracing::info!("Handling hover request with params: {:?}", params);
+        tracing::debug!("Handling hover request with params: {:?}", params);
 
         let pos = params.text_document_position_params.position;
 
@@ -100,6 +95,68 @@ impl Instance {
             range: None,
         };
         Some(hover)
+    }
+
+    pub fn handle_document_symbols(&self, params: &lsp::DocumentSymbolParams) -> Option<DocumentSymbolResponse> {
+        tracing::info!("Handling symbols request with params: {:?}", params);
+
+        let Some(Ok(compiled)) = &self.compiled else {
+            return None;
+        };
+
+        let mut symbols = HashMap::new();
+
+        for TypeDef { span, name, .. } in &compiled.program.type_defs {
+            symbols.insert(name, lsp::DocumentSymbol {
+                name: name.to_string(),
+                detail: None,
+                kind: lsp::SymbolKind::INTERFACE, // fits best?
+                tags: None,
+                deprecated: None, // must be specified
+                range: span.into(),
+                selection_range: name.span().unwrap().into(), // always in code
+                children: None,
+            });
+        }
+
+        for Declaration { span, name, typ } in &compiled.program.declarations {
+            let mut detail = String::new();
+            typ.pretty(&mut detail, 0).unwrap();
+            symbols.insert(name, lsp::DocumentSymbol {
+                name: name.to_string(),
+                detail: Some(detail),
+                kind: lsp::SymbolKind::FUNCTION, // something else for non-functions?
+                tags: None,
+                deprecated: None, // must be specified
+                range: span.into(),
+                selection_range: name.span().unwrap().into(), // always in code
+                children: None,
+            });
+        }
+
+        for Definition { span, name, .. } in &compiled.program.definitions {
+            let range = span.into();
+            let selection_range = name.span().unwrap().into(); // always in code
+            symbols.entry(name)
+                .and_modify(|symbol| {
+                    symbol.range = range;
+                    symbol.selection_range = selection_range;
+                })
+                .or_insert(lsp::DocumentSymbol {
+                    name: name.to_string(),
+                    detail: None,
+                    kind: lsp::SymbolKind::FUNCTION, // something else for non-functions?
+                    tags: None,
+                    deprecated: None, // must be specified
+                    range,
+                    selection_range,
+                    children: None,
+                });
+        }
+
+        Some(DocumentSymbolResponse::Nested(
+            symbols.into_iter().map(|(_, v)| v).collect()
+        ))
     }
 
     pub fn compile(&mut self) -> Result<(), CompileError> {

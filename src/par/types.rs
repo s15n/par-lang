@@ -348,7 +348,7 @@ impl<Name: Eq + Hash> Type<Name> {
                 body: Box::new(body.map_names(f)),
             },
             Self::Self_(span, label) => Type::Self_(span, map_label(label, f)),
-            Self::SendTypes(span, mut names, body) => {
+            Self::SendTypes(span, names, body) => {
                 let mapped = names.into_iter().map(&mut *f).collect();
                 Type::SendTypes(span, mapped, Box::new(body.map_names(f)))
             }

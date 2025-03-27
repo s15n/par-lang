@@ -38,7 +38,7 @@ impl FeedbackBookKeeper {
     /// The last feedback with empty diagnostics
     /// for all URIs, so that the client can clear
     pub fn cleanup(&mut self) -> &mut Feedback {
-        let mut feedback = Feedback::new();
+        let feedback = Feedback::new();
         let last_feedback = std::mem::replace(&mut self.feedback, feedback);
         for (uri, diagnostics) in last_feedback.diagnostics.into_iter() {
             if !diagnostics.is_empty() {

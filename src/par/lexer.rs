@@ -1,5 +1,6 @@
-use super::parse::{comment};
-use core::{ops::Range, str::FromStr};
+use super::parse::comment;
+use crate::location::{Point, Span};
+use core::str::FromStr;
 use winnow::{
     combinator::{alt, peek},
     error::{EmptyError, ParserError},
@@ -7,7 +8,6 @@ use winnow::{
     token::{any, literal, take_while},
     Parser, Result,
 };
-use crate::location::{Point, Span};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TokenKind {

@@ -2324,6 +2324,7 @@ dependencies = [
  "miette",
  "pest_derive",
  "rfd",
+ "serde",
  "serde_json",
  "stacker",
  "tokio",

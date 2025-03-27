@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use lsp_server::{Connection};
 use lsp_types::{self as lsp, InitializeParams, Uri};
 use lsp_types::notification::DidSaveTextDocument;
-use crate::language_server::feedback::{diagnostic_for_error, Feedback, FeedbackBookKeeper};
+use lsp_types::request::DocumentSymbolRequest;
+use crate::language_server::feedback::{diagnostic_for_error, FeedbackBookKeeper};
 use crate::language_server::instance::Instance;
 use super::{io::IO};
 
@@ -20,7 +20,7 @@ pub struct LanguageServer<'c> {
 impl<'c> LanguageServer<'c> {
     pub fn new(
         connection: &'c Connection
-    ) -> LanguageServer {
+    ) -> LanguageServer<'c> {
         let initialize_params = initialize_lsp(connection);
         Self {
             connection,
@@ -50,13 +50,21 @@ impl<'c> LanguageServer<'c> {
 
         let request_id = request.id.clone();
         let method = request.method.as_str();
-        let payload = match method {
+        let response = match method {
             HoverRequest::METHOD => {
                 let params = extract_request::<HoverRequest>(request);
-                //self.handle_hover(params)
                 self.handle_request_instance(
+                    request_id,
                     &params.text_document_position_params.text_document.uri,
                     |instance| instance.handle_hover(&params)
+                )
+            }
+            DocumentSymbolRequest::METHOD => {
+                let params = extract_request::<DocumentSymbolRequest>(request);
+                self.handle_request_instance(
+                    request_id,
+                    &params.text_document.uri,
+                    |instance| instance.handle_document_symbols(&params)
                 )
             }
             _ => {
@@ -65,7 +73,6 @@ impl<'c> LanguageServer<'c> {
             }
         };
 
-        let response = lsp_server::Response::new_ok(request_id, payload);
         tracing::debug!("Responding {:?}", response);
         self.connection.sender
             .send(lsp_server::Message::Response(response))
@@ -119,15 +126,16 @@ impl<'c> LanguageServer<'c> {
         self.connection.handle_shutdown(request).expect("Protocol error while handling shutdown")
     }
 
-    fn handle_request_instance<R>(
+    fn handle_request_instance<R: serde::Serialize>(
         &mut self,
+        id: lsp_server::RequestId,
         uri: &Uri,
         handler: impl FnOnce(&mut Instance) -> R
-    ) -> R {
+    ) -> lsp_server::Response {
         self.compile(uri);
         let instance = self.instance_for(uri);
         let response = handler(instance);
-        response
+        lsp_server::Response::new_ok(id, response)
     }
 
     fn publish_feedback(&mut self) {
@@ -153,7 +161,7 @@ impl<'c> LanguageServer<'c> {
     fn compile(&mut self, uri: &Uri) {
         let instance = self.instance_for(uri);
         let compile_result = instance.compile();
-        let mut feedback = self.feedback.cleanup();
+        let feedback = self.feedback.cleanup();
         match compile_result {
             Ok(_) => { /* warnings */ },
             Err(err) => {
@@ -180,6 +188,7 @@ fn initialize_lsp(connection: &Connection) -> InitializeParams {
     let server_capabilities = lsp::ServerCapabilities {
         text_document_sync: Some(lsp::TextDocumentSyncCapability::Kind(lsp::TextDocumentSyncKind::FULL)),
         hover_provider: Some(lsp::HoverProviderCapability::Simple(true)),
+        document_symbol_provider: Some(lsp::OneOf::Left(true)),
         ..lsp::ServerCapabilities::default()
     };
     let server_capabilities_json = serde_json::to_value(&server_capabilities).unwrap();
