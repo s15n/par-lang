@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use lsp_server::{Connection};
 use lsp_types::{self as lsp, InitializeParams, Uri};
 use lsp_types::notification::DidSaveTextDocument;
-use lsp_types::request::DocumentSymbolRequest;
+use lsp_types::request::{DocumentSymbolRequest, GotoDeclaration, GotoDefinition, SemanticTokensFullRequest};
+use crate::language_server::data::{SEMANTIC_TOKEN_MODIFIERS, SEMANTIC_TOKEN_TYPES};
 use crate::language_server::feedback::{diagnostic_for_error, FeedbackBookKeeper};
 use crate::language_server::instance::Instance;
 use super::{io::IO};
@@ -64,7 +65,31 @@ impl<'c> LanguageServer<'c> {
                 self.handle_request_instance(
                     request_id,
                     &params.text_document.uri,
-                    |instance| instance.handle_document_symbols(&params)
+                    |instance| instance.provide_document_symbols(&params)
+                )
+            }
+            GotoDeclaration::METHOD => {
+                let params = extract_request::<GotoDeclaration>(request);
+                self.handle_request_instance(
+                    request_id,
+                    &params.text_document_position_params.text_document.uri,
+                    |instance| instance.handle_goto_declaration(&params)
+                )
+            }
+            GotoDefinition::METHOD => {
+                let params = extract_request::<GotoDefinition>(request);
+                self.handle_request_instance(
+                    request_id,
+                    &params.text_document_position_params.text_document.uri,
+                    |instance| instance.handle_goto_definition(&params)
+                )
+            }
+            SemanticTokensFullRequest::METHOD => {
+                let params = extract_request::<SemanticTokensFullRequest>(request);
+                self.handle_request_instance(
+                    request_id,
+                    &params.text_document.uri,
+                    |instance| instance.provide_semantic_tokens(&params)
                 )
             }
             _ => {
@@ -115,6 +140,7 @@ impl<'c> LanguageServer<'c> {
                 self.compile(uri);
                 self.publish_feedback();
             }
+            // todo: handle closing
             _ => {
                 tracing::warn!("Unhandled notification: {:?}", notification);
                 return
@@ -189,6 +215,36 @@ fn initialize_lsp(connection: &Connection) -> InitializeParams {
         text_document_sync: Some(lsp::TextDocumentSyncCapability::Kind(lsp::TextDocumentSyncKind::FULL)),
         hover_provider: Some(lsp::HoverProviderCapability::Simple(true)),
         document_symbol_provider: Some(lsp::OneOf::Left(true)),
+        declaration_provider: Some(lsp::DeclarationCapability::Simple(true)),
+        definition_provider: Some(lsp::OneOf::Left(true)),
+        // todo: semantic tokens are not requested by vscode? there seems to be a bug
+        // also, do we even need semantic highlighting?
+        semantic_tokens_provider: Some(lsp::SemanticTokensServerCapabilities::SemanticTokensOptions(
+            lsp::SemanticTokensOptions {
+                work_done_progress_options: Default::default(),
+                legend: lsp::SemanticTokensLegend {
+                    token_types: Vec::from(SEMANTIC_TOKEN_TYPES),
+                    token_modifiers: Vec::from(SEMANTIC_TOKEN_MODIFIERS),
+                },
+                range: None,
+                full: Some(lsp::SemanticTokensFullOptions::Bool(true)),
+            }
+        )),
+        /* todo:
+        language:
+        goto type definition
+        goto implementation (?)
+        find references
+        inlay hints
+        completion
+        diagnostic provider (response to request, not push)
+        signature help?
+        code actions
+        formatting
+        rename / linked editing (?)
+        workspace:
+        workspace symbols?
+         */
         ..lsp::ServerCapabilities::default()
     };
     let server_capabilities_json = serde_json::to_value(&server_capabilities).unwrap();

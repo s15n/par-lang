@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use lsp_types::{self as lsp, DocumentSymbolResponse, Uri};
+use lsp_types::{self as lsp, Uri};
+use crate::language_server::data::{SEMANTIC_TOKEN_TYPES};
 use crate::par::language::{Declaration, Definition, Internal, Name, TypeDef};
 use crate::location::Span;
 use crate::par::types::TypeError;
@@ -97,8 +98,12 @@ impl Instance {
         Some(hover)
     }
 
-    pub fn handle_document_symbols(&self, params: &lsp::DocumentSymbolParams) -> Option<DocumentSymbolResponse> {
-        tracing::info!("Handling symbols request with params: {:?}", params);
+    /* todo:
+    look at C language servers, how they handle split declaration/definition
+    look at Rust language servers, what "kind" they use for type aliases & traits
+     */
+    pub fn provide_document_symbols(&self, params: &lsp::DocumentSymbolParams) -> Option<lsp::DocumentSymbolResponse> {
+        tracing::debug!("Handling symbols request with params: {:?}", params);
 
         let Some(Ok(compiled)) = &self.compiled else {
             return None;
@@ -114,7 +119,7 @@ impl Instance {
                 tags: None,
                 deprecated: None, // must be specified
                 range: span.into(),
-                selection_range: name.span().unwrap().into(), // always in code
+                selection_range: name.span().unwrap().into(),
                 children: None,
             });
         }
@@ -129,14 +134,14 @@ impl Instance {
                 tags: None,
                 deprecated: None, // must be specified
                 range: span.into(),
-                selection_range: name.span().unwrap().into(), // always in code
+                selection_range: name.span().unwrap().into(),
                 children: None,
             });
         }
 
         for Definition { span, name, .. } in &compiled.program.definitions {
             let range = span.into();
-            let selection_range = name.span().unwrap().into(); // always in code
+            let selection_range = name.span().unwrap().into();
             symbols.entry(name)
                 .and_modify(|symbol| {
                     symbol.range = range;
@@ -154,9 +159,120 @@ impl Instance {
                 });
         }
 
-        Some(DocumentSymbolResponse::Nested(
+        Some(lsp::DocumentSymbolResponse::Nested(
             symbols.into_iter().map(|(_, v)| v).collect()
         ))
+    }
+
+    pub fn handle_goto_declaration(&self, params: &lsp::GotoDefinitionParams) -> Option<lsp::GotoDefinitionResponse> {
+        // todo: locals
+
+        tracing::debug!("Handling goto declaration request with params: {:?}", params);
+        let Some(Ok(compiled)) = &self.compiled else {
+            return None;
+        };
+
+        let pos = params.text_document_position_params.position;
+
+        let mut original = None;
+
+        for definition in &compiled.program.definitions {
+            if is_inside(pos, &definition.name.span().unwrap()) {
+                let Some(declaration) = compiled.program.declarations.iter().find(|dec| {
+                    dec.name == definition.name
+                }) else {
+                    return None;
+                };
+
+                original = Some(declaration);
+                break;
+            }
+        }
+
+        for declaration in &compiled.program.declarations {
+            if is_inside(pos, &declaration.name.span().unwrap()) {
+                original = Some(declaration);
+                break;
+            }
+        }
+
+        let declaration = original?;
+
+        Some(lsp::GotoDefinitionResponse::Scalar(
+            lsp::Location {
+                uri: self.uri.clone(),
+                range: declaration.name.span().unwrap().into()
+            }
+        ))
+    }
+
+    pub fn handle_goto_definition(&self, params: &lsp::GotoDefinitionParams) -> Option<lsp::GotoDefinitionResponse> {
+        // todo: locals
+
+        tracing::debug!("Handling goto definition request with params: {:?}", params);
+        let Some(Ok(compiled)) = &self.compiled else {
+            return None;
+        };
+
+        let pos = params.text_document_position_params.position;
+
+        let mut original = None;
+
+        for declaration in &compiled.program.declarations {
+            if is_inside(pos, &declaration.name.span().unwrap()) {
+                let Some(definition) = compiled.program.definitions.iter().find(|definition| {
+                    definition.name == declaration.name
+                }) else {
+                    return None;
+                };
+
+                original = Some(definition);
+                break;
+            }
+        }
+
+        for definition in &compiled.program.definitions {
+            if is_inside(pos, &definition.name.span().unwrap()) {
+                original = Some(definition);
+                break;
+            }
+        }
+
+        let definition = original?;
+
+        Some(lsp::GotoDefinitionResponse::Scalar(
+            lsp::Location {
+                uri: self.uri.clone(),
+                range: definition.name.span().unwrap().into()
+            }
+        ))
+    }
+
+    pub fn provide_semantic_tokens(&self, params: &lsp::SemanticTokensParams) -> Option<lsp::SemanticTokensResult> {
+        tracing::info!("Handling semantic tokens request with params: {:?}", params);
+        let Some(Ok(compiled)) = &self.compiled else {
+            return None;
+        };
+
+        let mut semantic_tokens = Vec::new();
+
+        for TypeDef { span, name, .. } in &compiled.program.type_defs {
+            let name_span = name.span().unwrap();
+            semantic_tokens.push(lsp::SemanticToken {
+                delta_line: name_span.start.row as u32,
+                delta_start: name_span.start.column as u32,
+                length: name_span.len() as u32,
+                token_type: SEMANTIC_TOKEN_TYPES::TYPE,
+                token_modifiers_bitset: 0u32
+            });
+        }
+
+        let result = Some(lsp::SemanticTokensResult::Tokens(lsp::SemanticTokens {
+            result_id: None,
+            data: semantic_tokens,
+        }));
+        tracing::info!("Providing semantic tokens: {:?}", result);
+        result
     }
 
     pub fn compile(&mut self) -> Result<(), CompileError> {
