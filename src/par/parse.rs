@@ -24,6 +24,7 @@ use winnow::{
     Parser,
 };
 use winnow::token::literal;
+use crate::location::{Point, Span, Spanning};
 use crate::par::language::{Declaration, Definition, Name, Program, TypeDef};
 
 impl From<&Token<'_>> for Name {
@@ -370,19 +371,33 @@ fn program(
 #[diagnostic(severity(Error))]
 pub struct SyntaxError {
     #[label]
-    span: SourceSpan,
+    source_span: SourceSpan,
     // Generate these with the miette! macro.
     // #[related]
     // related: Arc<[miette::ErrReport]>,
     #[help]
     help: String,
+
+    span: Span
 }
-impl core::fmt::Display for SyntaxError {
+impl Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         "Syntax error.".fmt(f)
     }
 }
 impl core::error::Error for SyntaxError {}
+
+impl Spanning for SyntaxError {
+    fn span(&self) -> Span {
+        self.span.clone()
+    }
+}
+
+impl SyntaxError {
+    pub fn message(&self) -> &str {
+        "Syntax error."
+    }
+}
 
 pub fn set_miette_hook() {
     _ = miette::set_hook(Box::new(|_| {
@@ -408,9 +423,11 @@ pub fn parse_program(
     };
     // Empty input doesn't error so this won't panic.
     let error_tok = tokens.get(e.offset()).unwrap_or(tokens.last().unwrap()).clone();
+    let error_tok_span = error_tok.span.clone();
     Err(SyntaxError {
-        span: SourceSpan::new(SourceOffset::from(error_tok.span.start), {
-            match error_tok.span.len() {
+        span: error_tok_span,
+        source_span: SourceSpan::new(SourceOffset::from(error_tok_span.start.offset), {
+            match error_tok_span.len() {
                 // miette unicode format for 1 length span is a hard-to-notice line, so don't set length to 1.
                 x if x == 1 => 0,
                 x => x,
@@ -426,15 +443,24 @@ pub fn parse_program(
 }
 
 fn type_def(input: &mut Input) -> Result<TypeDef<Name>> {
-    commit_after(t(TokenKind::Type), (with_loc(name), type_params, t(TokenKind::Eq), typ))
-        .map(|((name, loc), type_params, _, typ)| (loc, name, type_params, typ))
+    commit_after(t(TokenKind::Type), (name, type_params, t(TokenKind::Eq), typ))
+        .map(|(pre, (name, type_params, _, typ))| TypeDef {
+            span: pre.span.join(typ.span()),
+            name,
+            params: type_params.map_or_else(Vec::new, |(_, params)| params),
+            typ,
+        })
         .context(StrContext::Label("type definition"))
         .parse_next(input)
 }
 
 fn declaration(input: &mut Input) -> Result<Declaration<Name>> {
-    commit_after(t(TokenKind::Dec), (with_loc(name), t(TokenKind::Colon), typ))
-        .map(|((name, loc), _, typ)| (loc, name, typ))
+    commit_after(t(TokenKind::Dec), (name, t(TokenKind::Colon), typ))
+        .map(|(pre, (name, _, typ))| Declaration {
+            span: pre.span.join(typ.span()),
+            name,
+            typ,
+        })
         .context(StrContext::Label("declaration"))
         .parse_next(input)
 }
@@ -442,22 +468,31 @@ fn declaration(input: &mut Input) -> Result<Declaration<Name>> {
 fn definition(
     input: &mut Input,
 ) -> Result<(Definition<Name, Expression<Name>>, Option<Type<Name>>)> {
-    commit_after(t(TokenKind::Def), (with_loc(name), annotation, t(TokenKind::Eq), expression))
-        .map(|((name, loc), annotation, _, expression)| (loc, name, annotation, expression))
+    commit_after(t(TokenKind::Def), (name, annotation, t(TokenKind::Eq), expression))
+        .map(|(pre, (name, annotation, _, expression))| (
+            Definition {
+                span: pre.span.join(expression.span()),
+                name,
+                expression,
+            },
+            annotation,
+        ))
         .context(StrContext::Label("definition"))
         .parse_next(input)
 }
 
 fn branches_body<'i, P, O>(
     branch: P,
-) -> impl Parser<Input<'i>, IndexMap<Name, O>, Error> + use<'i, P, O>
+) -> impl Parser<Input<'i>, (Span, IndexMap<Name, O>), Error> + use<'i, P, O>
 where
     P: Parser<Input<'i>, O, Error>,
 {
     commit_after(
         t(TokenKind::LCrl),
-        terminated(
-            repeat(0.., (t(TokenKind::Dot), name, cut_err(branch), opt(t(TokenKind::Comma)))).fold(
+        (
+            repeat(0.., (
+                t(TokenKind::Dot), name, cut_err(branch), opt(t(TokenKind::Comma))
+            )).fold(
                 || IndexMap::new(),
                 |mut branches, (_, name, branch, _)| {
                     branches.insert(name, branch);
@@ -467,7 +502,11 @@ where
             t(TokenKind::RCrl),
         ),
     )
-    .context(StrContext::Label("either/choice branches"))
+        .map(|(open, (branches, close))| (
+            open.span.join(close.span),
+            branches,
+        ))
+        .context(StrContext::Label("either/choice branches"))
 }
 
 fn typ(input: &mut Input) -> Result<Type<Name>> {
@@ -493,172 +532,210 @@ fn typ(input: &mut Input) -> Result<Type<Name>> {
 fn typ_name(input: &mut Input) -> Result<Type<Name>> {
     trace(
         "typ_name",
-        with_loc((name, type_args)).map(|((name, typ_args), loc)| Type::Name(loc, name, typ_args)),
+        (name, type_args)
+            .map(|(name, type_args)| match type_args {
+                Some((type_args_span, type_args)) => Type::Name(
+                    name.span.join(type_args_span),
+                    name,
+                    type_args,
+                ),
+                None => Type::Name(name.span.clone(), name, vec![]),
+            })
     )
     .parse_next(input)
 }
 
 fn typ_chan(input: &mut Input) -> Result<Type<Name>> {
-    with_loc(commit_after(
+    commit_after(
         t(TokenKind::Chan),
         typ.context(StrContext::Label("chan type")),
-    ))
-    .map(|(typ, loc)| Type::Chan(Loc::from(loc), Box::new(typ)))
-    .parse_next(input)
+    )
+        .map(|(pre, typ)| Type::Chan(
+            pre.span.join(typ.span()),
+            Box::new(typ)
+        ))
+        .parse_next(input)
 }
 
 fn typ_send(input: &mut Input) -> Result<Type<Name>> {
-    with_loc(commit_after(t(TokenKind::LPar), (terminated(list(typ), t(TokenKind::RPar)), typ)))
-        .map(|((args, then), span)| {
-            args.into_iter().rev().fold(then, |then, arg| {
-                Type::Send(Loc::from(span.clone()), Box::new(arg), Box::new(then))
-            })
-        })
+    commit_after(t(TokenKind::LPar), (list(typ), t(TokenKind::RPar), typ))
+        .map(|(open, (args, _, then))| Type::Send(
+            open.span.join(then.span()),
+            args,
+            Box::new(then),
+        ))
         .parse_next(input)
 }
 
 fn typ_receive(input: &mut Input) -> Result<Type<Name>> {
-    with_loc(commit_after(t(TokenKind::LBkt), (terminated(list(typ), t(TokenKind::RBkt)), typ)))
-        .map(|((args, then), span)| {
-            args.into_iter().rev().fold(then, |then, arg| {
-                Type::Receive(Loc::from(span.clone()), Box::new(arg), Box::new(then))
-            })
-        })
+    commit_after(t(TokenKind::LBkt), (list(typ), t(TokenKind::RBkt), typ))
+        .map(|(open, (args, _, then))| Type::Receive(
+            open.span.join(then.span()),
+            args,
+            Box::new(then),
+        ))
         .parse_next(input)
 }
 
 fn typ_either(input: &mut Input) -> Result<Type<Name>> {
-    with_loc(commit_after(t(TokenKind::Either), branches_body(typ)))
-        .map(|(branches, span)| Type::Either(Loc::from(span), branches))
+    commit_after(t(TokenKind::Either), branches_body(typ))
+        .map(|(pre, (branches_span, branches))| Type::Either(
+            pre.span.join(branches_span),
+            branches,
+        ))
         .parse_next(input)
 }
 
 fn typ_choice(input: &mut Input) -> Result<Type<Name>> {
-    with_loc(branches_body(typ_branch))
-        .map(|(branches, span)| Type::Choice(Loc::from(span), branches))
+    branches_body(typ_branch)
+        .map(|(span, branches)| Type::Choice(span, branches))
         .parse_next(input)
 }
 
 fn typ_break(input: &mut Input) -> Result<Type<Name>> {
-    with_loc(t(TokenKind::Bang))
-        .map(|(_, span)| Type::Break(Loc::from(span)))
+    t(TokenKind::Bang)
+        .map(|token| Type::Break(token.span))
         .parse_next(input)
 }
 
 fn typ_continue(input: &mut Input) -> Result<Type<Name>> {
-    with_loc(t(TokenKind::Quest))
-        .map(|(_, span)| Type::Continue(Loc::from(span)))
+    t(TokenKind::Quest)
+        .map(|token| Type::Continue(token.span))
         .parse_next(input)
 }
 
 fn typ_recursive(input: &mut Input) -> Result<Type<Name>> {
-    with_loc(commit_after(t(TokenKind::Recursive), (loop_label, typ)))
-        .map(|((label, typ), loc)| {
-            Type::Recursive(Loc::from(loc), Default::default(), label, Box::new(typ))
+    commit_after(t(TokenKind::Recursive), (loop_label, typ))
+        .map(|(pre, (label, typ))| Type::Recursive {
+            span: pre.span.join(typ.span()),
+            asc: Default::default(),
+            label,
+            body: Box::new(typ),
         })
         .parse_next(input)
 }
 
-fn typ_iterative<'s>(input: &mut Input) -> Result<Type<Name>> {
-    with_loc(commit_after(
+fn typ_iterative(input: &mut Input) -> Result<Type<Name>> {
+    commit_after(
         t(TokenKind::Iterative),
         (loop_label, typ).context(StrContext::Label("iterative type body")),
-    ))
-    .map(|((name, typ), span)| {
-        Type::Iterative(Loc::from(span), Default::default(), name, Box::new(typ))
+    )
+    .map(|(pre, (label, typ))| Type::Iterative {
+        span: pre.span.join(typ.span()),
+        asc: Default::default(),
+        label,
+        body: Box::new(typ),
     })
     .parse_next(input)
 }
 
-fn typ_self<'s>(input: &mut Input) -> Result<Type<Name>> {
-    with_loc(commit_after(
+fn typ_self(input: &mut Input) -> Result<Type<Name>> {
+    commit_after(
         t(TokenKind::Self_),
         loop_label.context(StrContext::Label("self type loop label")),
+    )
+    .map(|(token, label)| Type::Self_(
+        match &label {
+            Some(label) => token.span.join(label.span),
+            None => token.span.clone(),
+        },
+        label
     ))
-    .map(|(label, span)| Type::Self_(Loc::from(span), label))
     .parse_next(input)
 }
 
 fn typ_send_type<'s>(input: &mut Input) -> Result<Type<Name>> {
-    with_loc(commit_after(
+    commit_after(
         tn!("(type": TokenKind::LPar, TokenKind::Type),
         (
             list(name).context(StrContext::Label("list of type names to send")),
             t(TokenKind::RPar),
             typ,
         ),
+    )
+    .map(|((open, _), (names, _, typ))| Type::SendTypes(
+        open.span.join(typ.span()),
+        names,
+        Box::new(typ)
     ))
-    .map(|((names, _, typ), span)| {
-        names.into_iter().rev().fold(typ, |body, name| {
-            Type::SendTypes(Loc::from(span.clone()), name, Box::new(body))
-        })
-    })
     .parse_next(input)
 }
 
-fn typ_recv_type<'s>(input: &mut Input<'s>) -> Result<Type<Name>> {
-    with_loc(commit_after(
+fn typ_recv_type(input: &mut Input) -> Result<Type<Name>> {
+    commit_after(
         tn!("[type": TokenKind::LBkt, TokenKind::Type),
         (
             list(name).context(StrContext::Label("list of type names to receive")),
             t(TokenKind::RBkt),
             typ,
         ),
+    )
+    .map(|((open, _), (names, _, typ))| Type::ReceiveTypes(
+        open.span.join(typ.span()),
+        names,
+        Box::new(typ)
     ))
-    .map(|((names, _, typ), span)| {
-        names.into_iter().rev().fold(typ, |body, name| {
-            Type::ReceiveType(Loc::from(span.clone()), name, Box::new(body))
-        })
-    })
     .parse_next(input)
 }
 
-fn type_params<'s>(input: &mut Input) -> Result<Vec<Name>> {
-    opt(delimited(t(TokenKind::Lt), list(name), t(TokenKind::Gt))) // TODO should be able to use `<` to improve error message
-        .map(Option::unwrap_or_default)
+fn type_params(input: &mut Input) -> Result<Option<(Span, Vec<Name>)>> {
+    // TODO should be able to use `<` to improve error message
+    opt((t(TokenKind::Lt), list(name), t(TokenKind::Gt)))
+        .map(|opt| opt.map(|(open, names, close)| (
+            open.span.join(close.span),
+            names
+        )))
         .parse_next(input)
 }
 
-fn type_args<'s>(input: &mut Input) -> Result<Vec<Type<Name>>> {
-    opt(delimited(t(TokenKind::Lt), list(typ), t(TokenKind::Gt))) // TODO should be able to use `<` to improve error message
-        .map(Option::unwrap_or_default)
+fn type_args<'s>(input: &mut Input) -> Result<Option<(Span, Vec<Type<Name>>)>> {
+    // TODO should be able to use `<` to improve error message
+    opt((t(TokenKind::Lt), list(typ), t(TokenKind::Gt)))
+        .map(|opt| opt.map(|(open, types, close)| (
+            open.span.join(close.span),
+            types
+        )))
         .parse_next(input)
 }
 
-fn typ_branch<'s>(input: &mut Input<'s>) -> Result<Type<Name>> {
+fn typ_branch(input: &mut Input) -> Result<Type<Name>> {
     // try recv_type first so `(` is unambiguous on `typ_branch_received`
     alt((typ_branch_then, typ_branch_recv_type, typ_branch_receive)).parse_next(input)
 }
 
-fn typ_branch_then<'s>(input: &mut Input<'s>) -> Result<Type<Name>> {
-    commit_after(t(TokenKind::Arrow), typ).parse_next(input)
-}
-
-fn typ_branch_receive<'s>(input: &mut Input<'s>) -> Result<Type<Name>> {
-    with_loc(commit_after(t(TokenKind::LPar, (list(typ), t(TokenKind::RPar), typ_branch)))
-        .map(|((args, _, then), span)| {
-            args.into_iter().rev().fold(then, |acc, arg| {
-                Type::Receive(Loc::from(span.clone()), Box::new(arg), Box::new(acc))
-            })
-        })
+fn typ_branch_then(input: &mut Input) -> Result<Type<Name>> {
+    commit_after(t(TokenKind::Arrow), typ)
+        .map(|(_, typ)| typ)
         .parse_next(input)
 }
 
-fn typ_branch_recv_type<'s>(input: &mut Input<'s>) -> Result<Type<Name>> {
-    with_loc(preceded(
+fn typ_branch_receive(input: &mut Input) -> Result<Type<Name>> {
+    commit_after(t(TokenKind::LPar), (list(typ), t(TokenKind::RPar), typ_branch))
+        .map(|(open, (args, _, then))| Type::Receive(
+            open.span.join(then.span()),
+            args,
+            Box::new(then),
+        ))
+        .parse_next(input)
+}
+
+fn typ_branch_recv_type(input: &mut Input) -> Result<Type<Name>> {
+    (
         tn!("(type": TokenKind::LPar, TokenKind::Type),
         cut_err((list(name), t(TokenKind::RPar), typ_branch)),
+    )
+    .map(|((open, _), (names, _, body))| Type::ReceiveTypes(
+        open.span.join(body.span()),
+        names,
+        Box::new(body),
     ))
-    .map(|((names, _, body), span)| {
-        names.into_iter().rev().fold(body, |acc, name| {
-            Type::ReceiveType(Loc::from(span.clone()), name, Box::new(acc))
-        })
-    })
     .parse_next(input)
 }
 
 fn annotation(input: &mut Input) -> Result<Option<Type<Name>>> {
-    opt(commit_after(t(TokenKind::Colon), typ)).parse_next(input)
+    opt(commit_after(t(TokenKind::Colon), typ))
+        .map(|opt| opt.map(|(_, typ)| typ))
+        .parse_next(input)
 }
 
 // pattern           = { pattern_name | pattern_receive | pattern_continue | pattern_recv_type }
@@ -673,39 +750,44 @@ fn pattern(input: &mut Input) -> Result<Pattern<Name>> {
 }
 
 fn pattern_name(input: &mut Input) -> Result<Pattern<Name>> {
-    with_loc((name, annotation))
-        .map(|((name, annotation), loc)| Pattern::Name(loc, name, annotation))
+    (name, annotation)
+        .map(|(name, annotation)| Pattern::Name(
+            match &annotation {
+                Some(typ) => name.span.join(typ.span()),
+                None => name.span.clone(),
+            },
+            name,
+            annotation,
+        ))
         .parse_next(input)
 }
 
 fn pattern_receive(input: &mut Input) -> Result<Pattern<Name>> {
-    with_loc(commit_after(t(TokenKind::LPar, (list(pattern), t(TokenKind::RPar), pattern)))
-        .map(|((patterns, _, mut rest), loc)| {
-            for pattern in patterns.into_iter().rev() {
-                rest = Pattern::Receive(loc.clone(), Box::new(pattern), Box::new(rest));
-            }
-            rest
-        })
+    commit_after(t(TokenKind::LPar), (list(pattern), t(TokenKind::RPar), pattern))
+        .map(|(open, (patterns, _, rest))| Pattern::Receive(
+            open.span.join(rest.span()),
+            patterns,
+            Box::new(rest),
+        ))
         .parse_next(input)
 }
 
 fn pattern_continue(input: &mut Input) -> Result<Pattern<Name>> {
-    with_loc(t(TokenKind::Bang))
-        .map(|(_, loc)| Pattern::Continue(loc))
+    t(TokenKind::Bang)
+        .map(|token| Pattern::Continue(token.span))
         .parse_next(input)
 }
 
 fn pattern_receive_type(input: &mut Input) -> Result<Pattern<Name>> {
-    with_loc(commit_after(
+    commit_after(
         tn!("(type": TokenKind::LPar, TokenKind::Type),
         (list(name), t(TokenKind::RPar), pattern),
+    )
+    .map(|((open, _), (names, _, rest))| Pattern::ReceiveTypes(
+        open.span.join(rest.span()),
+        names,
+        Box::new(rest),
     ))
-    .map(|((names, _, mut rest), loc)| {
-        for name in names.into_iter().rev() {
-            rest = Pattern::ReceiveType(loc.clone(), name, Box::new(rest));
-        }
-        rest
-    })
     .parse_next(input)
 }
 
@@ -715,31 +797,48 @@ fn expression(input: &mut Input) -> Result<Expression<Name>> {
         expr_do,
         expr_fork,
         application,
-        with_loc(construction).map(|(cons, loc)| Expression::Construction(loc, cons)),
-        delimited(t(TokenKind::LCrl), expression, t(TokenKind::RCrl)),
+        construction.map(Expression::Construction),
+        expr_grouped,
     ))
     .context(StrContext::Label("expression"))
     .parse_next(input)
 }
 
+fn expr_grouped(input: &mut Input) -> Result<Expression<Name>> {
+    (t(TokenKind::LCrl), expression, t(TokenKind::RCrl))
+        .map(|(open, expr, close)| Expression::Grouped(
+            open.span.join(close.span),
+            Box::new(expr),
+        ))
+        .parse_next(input)
+}
+
 fn expr_let(input: &mut Input) -> Result<Expression<Name>> {
-    with_loc(commit_after(
+    commit_after(
         t(TokenKind::Let),
         (pattern, t(TokenKind::Eq), expression, t(TokenKind::In), expression),
-    ))
-    .map(|((pattern, _, expression, _, body), loc)| {
-        Expression::Let(loc, pattern, Box::new(expression), Box::new(body))
+    )
+    .map(|(pre, (pattern, _, expression, _, body))| Expression::Let {
+        span: pre.span.join(body.span()),
+        pattern,
+        expression: Box::new(expression),
+        then: Box::new(body),
     })
     .parse_next(input)
 }
 
 fn expr_do(input: &mut Input) -> Result<Expression<Name>> {
-    with_loc(commit_after(
+    commit_after(
         t(TokenKind::Do),
-        (t(TokenKind::LCrl), process, (t(TokenKind::RCrl), t(TokenKind::In)), expression),
-    ))
-    .map(|((_, process, _, expression), loc)| {
-        Expression::Do(loc, Box::new(process), Box::new(expression))
+        (t(TokenKind::LCrl), opt(process), (t(TokenKind::RCrl), t(TokenKind::In)), expression),
+    )
+    .map(|(pre, (open, process, _, expression))| Expression::Do {
+        span: pre.span.join(expression.span()),
+        process: match process {
+            Some(process) => Box::new(process),
+            None => Box::new(Process::Noop(open.span.end)),
+        },
+        then: Box::new(expression),
     })
     .parse_next(input)
 }
@@ -747,10 +846,16 @@ fn expr_do(input: &mut Input) -> Result<Expression<Name>> {
 fn expr_fork(input: &mut Input) -> Result<Expression<Name>> {
     commit_after(
         t(TokenKind::Chan),
-        (with_loc(name), annotation, t(TokenKind::LCrl), process, t(TokenKind::RCrl)),
+        (name, annotation, t(TokenKind::LCrl), opt(process), t(TokenKind::RCrl)),
     )
-    .map(|((name, loc), annotation, _, process, _)| {
-        Expression::Fork(loc, name, annotation, Box::new(process))
+    .map(|(pre, (channel, annotation, open, process, close))| Expression::Fork {
+        span: pre.span.join(close.span),
+        channel,
+        annotation,
+        process: match process {
+            Some(process) => Box::new(process),
+            None => Box::new(Process::Noop(open.span.end)),
+        },
     })
     .parse_next(input)
 }
@@ -773,103 +878,119 @@ fn construction(input: &mut Input) -> Result<Construct<Name>> {
 }
 
 fn cons_then(input: &mut Input) -> Result<Construct<Name>> {
-    with_loc(alt((
+    alt((
         expr_fork,
         expr_let,
         expr_do,
         application,
-        delimited(t(TokenKind::LCrl), expression, t(TokenKind::RCrl)),
-    )))
-    .map(|(expr, loc)| Construct::Then(loc, Box::new(expr)))
-    .parse_next(input)
+        expr_grouped,
+    ))
+        .map(Box::new)
+        .map(Construct::Then)
+        .parse_next(input)
 }
 
 fn cons_send(input: &mut Input) -> Result<Construct<Name>> {
-    with_loc(commit_after(
+    commit_after(
         t(TokenKind::LPar),
         (list(expression), t(TokenKind::RPar), construction),
+    )
+    .map(|(open, (arguments, _, construct))| Construct::Send(
+        open.span.join(construct.span()),
+        arguments,
+        Box::new(construct),
     ))
-    .map(|((arguments, _, mut construct), loc)| {
-        for argument in arguments.into_iter().rev() {
-            construct = Construct::Send(loc.clone(), Box::new(argument), Box::new(construct));
-        }
-        construct
-    })
     .parse_next(input)
 }
 
 fn cons_receive(input: &mut Input) -> Result<Construct<Name>> {
-    with_loc(commit_after(t(TokenKind::LBkt), (list(pattern), t(TokenKind::RBkt), construction)))
-        .map(|((patterns, _, mut construct), loc)| {
-            for pattern in patterns.into_iter().rev() {
-                construct = Construct::Receive(loc.clone(), pattern, Box::new(construct));
-            }
-            construct
-        })
+    commit_after(t(TokenKind::LBkt), (list(pattern), t(TokenKind::RBkt), construction))
+        .map(|(open, (patterns, _, construct))| Construct::Receive(
+            open.span.join(construct.span()),
+            patterns,
+            Box::new(construct),
+        ))
         .parse_next(input)
 }
 
 fn cons_choose(input: &mut Input) -> Result<Construct<Name>> {
     // Note this can't be a commit_after because its possible that this is not a choose construction, and instead a branch of an either.
-    with_loc(preceded(t(TokenKind::Dot), (name, construction)))
-        .map(|((chosen, construct), loc)| Construct::Choose(loc, chosen, Box::new(construct)))
+    (t(TokenKind::Dot), (name, construction))
+        .map(|(pre, (chosen, construct))| Construct::Choose(
+            pre.span.join(construct.span()),
+            chosen,
+            Box::new(construct)
+        ))
         .parse_next(input)
 }
 
 fn cons_either(input: &mut Input) -> Result<Construct<Name>> {
-    with_loc(branches_body(cons_branch))
-        .map(|(branches, loc)| Construct::Either(loc, ConstructBranches(branches)))
+    branches_body(cons_branch)
+        .map(|(span, branches)| Construct::Either(
+            span,
+            ConstructBranches(branches)
+        ))
         .parse_next(input)
 }
 
 fn cons_break(input: &mut Input) -> Result<Construct<Name>> {
-    with_loc(t(TokenKind::Bang))
-        .map(|(_, loc)| Construct::Break(loc))
+    t(TokenKind::Bang)
+        .map(|token| Construct::Break(token.span))
         .parse_next(input)
 }
 
 fn cons_begin(input: &mut Input) -> Result<Construct<Name>> {
-    with_loc(opt_commit_after(
+    opt_commit_after(
         t(TokenKind::Unfounded),
         commit_after(t(TokenKind::Begin), (loop_label, construction)),
-    ))
-    .map(|((unfounded, (label, construct)), loc)| {
-        Construct::Begin(loc, unfounded.is_some(), label, Box::new(construct))
+    )
+    .map(|(unfounded, (begin, (label, construct)))| Construct::Begin {
+        span: match unfounded {
+            Some(unfounded) => unfounded.span.join(construct.span()),
+            None => begin.span.join(construct.span()),
+        },
+        unfounded: unfounded.is_some(),
+        label,
+        then: Box::new(construct)
     })
     .parse_next(input)
 }
 
 fn cons_loop(input: &mut Input) -> Result<Construct<Name>> {
-    with_loc(commit_after(t(TokenKind::Loop), loop_label))
-        .map(|(label, loc)| (Construct::Loop(loc, label)))
+    commit_after(t(TokenKind::Loop), loop_label)
+        .map(|(token, label)| Construct::Loop(
+            match &label {
+                Some(label) => token.span.join(label.span),
+                None => token.span.clone(),
+            },
+            label
+        ))
         .parse_next(input)
 }
 
 fn cons_send_type(input: &mut Input) -> Result<Construct<Name>> {
-    with_loc(commit_after(
+    commit_after(
         tn!("(type": TokenKind::LPar, TokenKind::Type),
         (list(typ), t(TokenKind::RPar), construction),
+    )
+    .map(|((open, _), (names, _, construct))| Construct::SendTypes(
+        open.span.join(construct.span()),
+        names,
+        Box::new(construct),
     ))
-    .map(|((names, _, mut construct), loc)| {
-        for name in names.into_iter().rev() {
-            construct = Construct::SendType(loc.clone(), name, Box::new(construct));
-        }
-        construct
-    })
     .parse_next(input)
 }
 
 fn cons_recv_type(input: &mut Input) -> Result<Construct<Name>> {
-    with_loc(commit_after(
+    commit_after(
         tn!("[type": TokenKind::LBkt, TokenKind::Type),
         (list(name), t(TokenKind::RBkt), construction),
+    )
+    .map(|((open, _), (names, _, construct))| Construct::ReceiveTypes(
+        open.span.join(construct.span()),
+        names,
+        Box::new(construct),
     ))
-    .map(|((names, _, mut construct), loc)| {
-        for name in names.into_iter().rev() {
-            construct = Construct::ReceiveType(loc.clone(), name, Box::new(construct));
-        }
-        construct
-    })
     .parse_next(input)
 }
 
@@ -878,117 +999,159 @@ fn cons_branch(input: &mut Input) -> Result<ConstructBranch<Name>> {
 }
 
 fn cons_branch_then(input: &mut Input) -> Result<ConstructBranch<Name>> {
-    with_loc(commit_after(t(TokenKind::Arrow), expression))
-        .map(|(expression, loc)| ConstructBranch::Then(loc, expression))
+    commit_after(t(TokenKind::Arrow), expression)
+        .map(|(pre, expression)| ConstructBranch::Then(
+            pre.span.join(expression.span()),
+            expression,
+        ))
         .parse_next(input)
 }
 
 fn cons_branch_receive(input: &mut Input) -> Result<ConstructBranch<Name>> {
-    with_loc(commit_after(t(TokenKind::LPar), (list(pattern), t(TokenKind::RPar), cons_branch)))
-        .map(|((patterns, _, mut branch), loc)| {
-            for pattern in patterns.into_iter().rev() {
-                branch = ConstructBranch::Receive(loc.clone(), pattern, Box::new(branch));
-            }
-            branch
-        })
+    commit_after(t(TokenKind::LPar), (list(pattern), t(TokenKind::RPar), cons_branch))
+        .map(|(open, (patterns, _, branch))| ConstructBranch::Receive(
+            open.span.join(branch.span()),
+            patterns,
+            Box::new(branch),
+        ))
         .parse_next(input)
 }
 
 fn cons_branch_recv_type(input: &mut Input) -> Result<ConstructBranch<Name>> {
-    with_loc(commit_after(
+    commit_after(
         tn!("(type": TokenKind::LPar, TokenKind::Type),
         (list(name), t(TokenKind::RPar), cons_branch),
+    )
+    .map(|((open, _), (names, _, branch))| ConstructBranch::ReceiveTypes(
+        open.span.join(branch.span()),
+        names,
+        Box::new(branch),
     ))
-    .map(|((names, _, mut branch), loc)| {
-        for name in names.into_iter().rev() {
-            branch = ConstructBranch::ReceiveType(loc.clone(), name, Box::new(branch));
-        }
-        branch
-    })
     .parse_next(input)
 }
 
 fn application(input: &mut Input) -> Result<Expression<Name>> {
-    with_loc((
+    (
         alt((
-            with_loc(name).map(|(name, loc)| Expression::Reference(loc, name)),
-            delimited(t(TokenKind::LCrl), expression, t(TokenKind::RCrl)),
+            name.map(|name| Expression::Reference(name.span, name)),
+            expr_grouped,
         )),
         apply,
-    ))
-    .map(|((expr, apply), loc)| Expression::Application(loc, Box::new(expr), apply))
+    )
+    .map(|(expr, apply)| match apply {
+        Some(apply) => Expression::Application(
+            expr.span().join(apply.span()),
+            Box::new(expr),
+            apply,
+        ),
+        None => expr,
+    })
     .context(StrContext::Label("application"))
     .parse_next(input)
 }
 
-fn apply(input: &mut Input) -> Result<Apply<Name>> {
-    alt((
+fn apply(input: &mut Input) -> Result<Option<Apply<Name>>> {
+    opt(alt((
         apply_begin,
         apply_loop,
         apply_choose,
         apply_either,
         apply_send_type,
         apply_send,
-        apply_noop,
-    ))
-    .parse_next(input)
+    )))
+        .parse_next(input)
 }
 
 fn apply_send(input: &mut Input) -> Result<Apply<Name>> {
-    with_loc(commit_after(t(TokenKind::LPar), (list(expression), t(TokenKind::RPar), apply)))
-        .map(|((arguments, _, mut apply), loc)| {
-            for argument in arguments.into_iter().rev() {
-                apply = Apply::Send(loc.clone(), Box::new(argument), Box::new(apply));
-            }
-            apply
+    commit_after(t(TokenKind::LPar), (list(expression), t(TokenKind::RPar), apply))
+        .map(|(open, (arguments, close, apply))| {
+            let apply = match apply {
+                Some(apply) => apply,
+                None => Apply::Noop(close.span.end)
+            };
+            Apply::Send(
+                open.span.join(apply.span()),
+                arguments,
+                Box::new(apply),
+            )
         })
         .parse_next(input)
 }
 
 fn apply_choose(input: &mut Input) -> Result<Apply<Name>> {
-    with_loc(commit_after(t(TokenKind::Dot), (name, apply)))
-        .map(|((chosen, then), loc)| Apply::Choose(loc, chosen, Box::new(then)))
+    commit_after(t(TokenKind::Dot), (name, apply))
+        .map(|(pre, (chosen, then))| {
+            let then = match then {
+                Some(then) => then,
+                None => Apply::Noop(chosen.span.end)
+            };
+            Apply::Choose(
+                pre.span.join(then.span()),
+                chosen,
+                Box::new(then)
+            )
+        })
         .parse_next(input)
 }
 
 fn apply_either(input: &mut Input) -> Result<Apply<Name>> {
-    with_loc(branches_body(apply_branch))
-        .map(|(branches, loc)| Apply::Either(loc, ApplyBranches(branches)))
+    branches_body(apply_branch)
+        .map(|(span, branches)| Apply::Either(span, ApplyBranches(branches)))
         .parse_next(input)
 }
 
 fn apply_begin(input: &mut Input) -> Result<Apply<Name>> {
-    with_loc(opt_commit_after(
+    opt_commit_after(
         t(TokenKind::Unfounded),
         commit_after(t(TokenKind::Begin), (loop_label, apply)),
-    ))
-    .map(|((unfounded, (label, then)), loc)| {
-        Apply::Begin(loc, unfounded.is_some(), label, Box::new(then))
+    )
+    .map(|(unfounded, (begin, (label, then)))| {
+        let then = match (&label, then) {
+            (_, Some(then)) => then,
+            (Some(label), None) => Apply::Noop(label.span.end),
+            (None, None) => Apply::Noop(begin.span.end),
+        };
+        Apply::Begin {
+            span: match unfounded {
+                Some(unfounded) => unfounded.span.join(then.span()),
+                None => begin.span.join(then.span()),
+            },
+            unfounded: unfounded.is_some(),
+            label,
+            then: Box::new(then),
+        }
     })
     .parse_next(input)
 }
 
 fn apply_loop(input: &mut Input) -> Result<Apply<Name>> {
-    with_loc(commit_after(t(TokenKind::Loop), loop_label))
-        .map(|(label, loc)| Apply::Loop(loc, label))
+    commit_after(t(TokenKind::Loop), loop_label)
+        .map(|(token, label)| Apply::Loop(
+            match &label {
+                Some(label) => token.span.join(label.span),
+                None => token.span.clone(),
+            },
+            label
+        ))
         .parse_next(input)
 }
 
 fn apply_send_type(input: &mut Input) -> Result<Apply<Name>> {
-    with_loc(commit_after(
-        tn!("(type": TokenKind::LPar, TokenKind::Type), (list(typ), t(TokenKind::RPar), apply)))
-        .map(|((types, _, mut apply), loc)| {
-            for typ in types.into_iter().rev() {
-                apply = Apply::SendType(loc.clone(), typ, Box::new(apply));
-            }
-            apply
+    commit_after(
+        tn!("(type": TokenKind::LPar, TokenKind::Type),
+        (list(typ), t(TokenKind::RPar), apply)
+    )
+        .map(|((open, _), (types, close, apply))| {
+            let apply = match apply {
+                Some(apply) => apply,
+                None => Apply::Noop(close.span.end)
+            };
+            Apply::SendTypes(
+                open.span.join(apply.span()),
+                types,
+                Box::new(apply),
+            )
         })
-        .parse_next(input)
-}
-
-fn apply_noop(input: &mut Input) -> Result<Apply<Name>> {
-    with_loc(empty)
-        .map(|((), loc)| Apply::Noop(loc))
         .parse_next(input)
 }
 
@@ -1003,196 +1166,283 @@ fn apply_branch(input: &mut Input) -> Result<ApplyBranch<Name>> {
 }
 
 fn apply_branch_then(input: &mut Input) -> Result<ApplyBranch<Name>> {
-    (with_loc(name), cut_err((t(TokenKind::Arrow), expression)))
-        .map(|((name, loc), (_, expression))| ApplyBranch::Then(loc, name, expression))
+    (name, cut_err((t(TokenKind::Arrow), expression)))
+        .map(|(name, (_, expression))| ApplyBranch::Then(
+            name.span.join(expression.span()),
+            name,
+            expression
+        ))
         .parse_next(input)
 }
 
 fn apply_branch_receive(input: &mut Input) -> Result<ApplyBranch<Name>> {
-    with_loc(commit_after(t(TokenKind::LPar), (list(pattern), t(TokenKind::RPar), apply_branch)))
-        .map(|((patterns, _, mut branch), loc)| {
-            for pattern in patterns.into_iter().rev() {
-                branch = ApplyBranch::Receive(loc.clone(), pattern, Box::new(branch));
-            }
-            branch
-        })
+    commit_after(t(TokenKind::LPar), (list(pattern), t(TokenKind::RPar), apply_branch))
+        .map(|(open, (patterns, _, branch))| ApplyBranch::Receive(
+            open.span.join(branch.span()),
+            patterns,
+            Box::new(branch)
+        ))
         .parse_next(input)
 }
 
 fn apply_branch_continue(input: &mut Input) -> Result<ApplyBranch<Name>> {
-    with_loc(commit_after(t(TokenKind::Bang), (t(TokenKind::Arrow), expression)))
-        .map(|((_, expression), loc)| ApplyBranch::Continue(loc, expression))
+    commit_after(t(TokenKind::Bang), (t(TokenKind::Arrow), expression))
+        .map(|(token, (_, expression))| ApplyBranch::Continue(
+            token.span.join(expression.span()),
+            expression
+        ))
         .parse_next(input)
 }
 
 fn apply_branch_recv_type(input: &mut Input) -> Result<ApplyBranch<Name>> {
-    with_loc(commit_after(
+    commit_after(
         tn!("(type": TokenKind::LPar, TokenKind::Type),
         (list(name), t(TokenKind::RPar), apply_branch),
+    )
+    .map(|((open, _), (names, _, branch))| ApplyBranch::ReceiveTypes(
+        open.span.join(branch.span()),
+        names,
+        Box::new(branch),
     ))
-    .map(|((names, _, mut branch), loc)| {
-        for name in names.into_iter().rev() {
-            branch = ApplyBranch::ReceiveType(loc.clone(), name, Box::new(branch))
-        }
-        branch
-    })
     .parse_next(input)
 }
 
 fn process(input: &mut Input) -> Result<Process<Name>> {
-    alt((proc_let, proc_telltypes, command, proc_noop))
+    alt((proc_let, proc_telltypes, command))
         .context(StrContext::Label("process"))
         .parse_next(input)
 }
 
 fn proc_let(input: &mut Input) -> Result<Process<Name>> {
-    with_loc(commit_after(
+    commit_after(
         t(TokenKind::Let),
-        (pattern, t(TokenKind::Eq), expression, process),
-    ))
-    .map(|((pattern, _, expression, process), loc)| {
-        Process::Let(loc, pattern, Box::new(expression), Box::new(process))
+        (pattern, t(TokenKind::Eq), expression, opt(process)),
+    )
+    .map(|(pre, (pattern, _, expression, process))| Process::Let {
+        span: pre.span.join(expression.span()),
+        pattern,
+        then: match process {
+            Some(process) => Box::new(process),
+            None => Box::new(Process::Noop(expression.span().end))
+        },
+        value: Box::new(expression),
     })
     .parse_next(input)
 }
 
 fn proc_telltypes(input: &mut Input) -> Result<Process<Name>> {
-    with_loc(commit_after(t(TokenKind::Telltypes), process))
-        .map(|(process, loc)| Process::Telltypes(loc, Box::new(process)))
-        .parse_next(input)
-}
-
-fn proc_noop(input: &mut Input) -> Result<Process<Name>> {
-    with_loc(empty)
-        .map(|((), loc)| Process::Noop(loc))
+    commit_after(t(TokenKind::Telltypes), opt(process))
+        .map(|(token, process)| Process::Telltypes(
+            token.span,
+            match process {
+                Some(process) => Box::new(process),
+                None => Box::new(Process::Noop(token.span.end))
+            }
+        ))
         .parse_next(input)
 }
 
 fn command(input: &mut Input) -> Result<Process<Name>> {
     (name, cmd)
-        .map(|(name, cmd)| Process::Command(name, cmd))
+        .map(|(name, cmd)| match cmd {
+            Some(cmd) => Process::Command(name, cmd),
+            None => {
+                let noop_span = name.span.end;
+                Process::Command(name, noop_cmd(noop_span))
+            }
+        })
         .parse_next(input)
 }
 
-fn cmd(input: &mut Input) -> Result<Command<Name>> {
-    alt((
-        cmd_link,
-        cmd_choose,
-        cmd_either,
-        cmd_break,
-        cmd_continue,
-        cmd_begin,
-        cmd_loop,
-        cmd_send_type,
-        cmd_send,
-        cmd_recv_type,
-        cmd_receive,
-        cmd_then,
-    ))
-    .context(StrContext::Label("command"))
-    .parse_next(input)
+fn noop_cmd<Name>(point: Point) -> Command<Name> {
+    Command::Then(Box::new(Process::Noop(point)))
 }
 
-fn cmd_then(input: &mut Input) -> Result<Command<Name>> {
-    process
-        .map(|x| Command::Then(Box::new(x)))
+fn cmd(input: &mut Input) -> Result<Option<Command<Name>>> {
+    alt((
+        alt((
+            cmd_link,
+            cmd_choose,
+            cmd_either,
+            cmd_break,
+            cmd_continue,
+            cmd_begin,
+            cmd_loop,
+            cmd_send_type,
+            cmd_send,
+            cmd_recv_type,
+            cmd_receive,
+        )).map(Some),
+        cmd_then
+    ))
+        .context(StrContext::Label("command"))
+        .parse_next(input)
+}
+
+fn cmd_then(input: &mut Input) -> Result<Option<Command<Name>>> {
+    opt(process)
+        .map(|opt| opt.map(|process| Command::Then(Box::new(process))))
         .parse_next(input)
 }
 
 fn cmd_link(input: &mut Input) -> Result<Command<Name>> {
-    with_loc(commit_after(t(TokenKind::Link), expression))
-        .map(|(expression, loc)| Command::Link(loc, Box::new(expression)))
+    commit_after(t(TokenKind::Link), expression)
+        .map(|(token, expression)| Command::Link(
+            token.span.join(expression.span()),
+            Box::new(expression)
+        ))
         .parse_next(input)
 }
 
 fn cmd_send(input: &mut Input) -> Result<Command<Name>> {
-    with_loc(commit_after(t(TokenKind::LPar), (list(expression), t(TokenKind::RPar), cmd)))
-        .map(|((expressions, _, mut cmd), loc)| {
-            for expression in expressions.into_iter().rev() {
-                cmd = Command::Send(loc.clone(), Box::new(expression), Box::new(cmd));
-            }
-            cmd
+    commit_after(t(TokenKind::LPar), (list(expression), t(TokenKind::RPar), cmd))
+        .map(|(open, (expressions, close, cmd))| {
+            let cmd = match cmd {
+                Some(cmd) => cmd,
+                None => noop_cmd(close.span.end)
+            };
+            Command::Send(
+                open.span.join(cmd.span()),
+                expressions,
+                Box::new(cmd),
+            )
         })
         .parse_next(input)
 }
 
 fn cmd_receive(input: &mut Input) -> Result<Command<Name>> {
-    with_loc(commit_after(t(TokenKind::LBkt), (list(pattern), t(TokenKind::RBkt), cmd)))
-        .map(|((patterns, _, mut cmd), loc)| {
-            for pattern in patterns.into_iter().rev() {
-                cmd = Command::Receive(loc.clone(), pattern, Box::new(cmd));
-            }
-            cmd
+    commit_after(t(TokenKind::LBkt), (list(pattern), t(TokenKind::RBkt), cmd))
+        .map(|(open, (patterns, close, cmd))| {
+            let cmd = match cmd {
+                Some(cmd) => cmd,
+                None => noop_cmd(close.span.end)
+            };
+            Command::Receive(
+                open.span.join(cmd.span()),
+                patterns,
+                Box::new(cmd),
+            )
         })
         .parse_next(input)
 }
 
 fn cmd_choose(input: &mut Input) -> Result<Command<Name>> {
-    with_loc(commit_after(t(TokenKind::Dot), (name, cmd)))
-        .map(|((name, cmd), loc)| Command::Choose(loc, name, Box::new(cmd)))
+    commit_after(t(TokenKind::Dot), (name, cmd))
+        .map(|(pre, (name, cmd))| {
+            let cmd = match cmd {
+                Some(cmd) => cmd,
+                None => noop_cmd(name.span.end)
+            };
+            Command::Choose(
+                pre.span.join(cmd.span()),
+                name,
+                Box::new(cmd)
+            )
+        })
         .parse_next(input)
 }
 
 fn cmd_either(input: &mut Input) -> Result<Command<Name>> {
-    with_loc((
-        branches_body(cmd_branch).map(CommandBranches),
-        opt(pass_process),
-    ))
-    .map(|((branches, pass_process), loc)| {
-        Command::Either(loc, branches, pass_process.map(Box::new))
-    })
-    .parse_next(input)
+    (branches_body(cmd_branch), opt(pass_process))
+        .map(|((span, branches), pass_process)| Command::Either(
+            span,
+            CommandBranches(branches),
+            pass_process.map(Box::new),
+        ))
+        .parse_next(input)
 }
 
 fn cmd_break(input: &mut Input) -> Result<Command<Name>> {
-    with_loc(t(TokenKind::Bang))
-        .map(|(_, loc)| Command::Break(loc))
+    t(TokenKind::Bang)
+        .map(|token| Command::Break(token.span))
         .parse_next(input)
 }
 
 fn cmd_continue(input: &mut Input) -> Result<Command<Name>> {
-    with_loc((t(TokenKind::Quest), process))
-        .map(|((_, process), loc)| Command::Continue(loc, Box::new(process)))
+    (t(TokenKind::Quest), opt(process))
+        .map(|(token, process)| match process {
+            Some(process) => Command::Continue(
+                token.span.join(process.span()),
+                Box::new(process)
+            ),
+            None => Command::Continue(
+                token.span.clone(),
+                Box::new(Process::Noop(token.span.end))
+            ),
+        })
         .parse_next(input)
 }
 
 fn cmd_begin(input: &mut Input) -> Result<Command<Name>> {
-    with_loc(opt_commit_after(
+    opt_commit_after(
         t(TokenKind::Unfounded),
         commit_after(t(TokenKind::Begin), (loop_label, cmd)),
-    ))
-    .map(|((unfounded, (label, cmd)), loc)| {
-        Command::Begin(loc, unfounded.is_some(), label, Box::new(cmd))
+    )
+    .map(|(unfounded, (begin, (label, cmd)))| {
+        let cmd = match (&label, cmd) {
+            (_, Some(cmd)) => cmd,
+            (Some(label), None) => noop_cmd(label.span.end),
+            (None, None) => noop_cmd(begin.span.end),
+        };
+        Command::Begin {
+            span: match unfounded {
+                Some(unfounded) => unfounded.span.join(cmd.span()),
+                None => begin.span.join(cmd.span()),
+            },
+            unfounded: unfounded.is_some(),
+            label,
+            then: Box::new(cmd)
+        }
     })
     .parse_next(input)
 }
 
 fn cmd_loop(input: &mut Input) -> Result<Command<Name>> {
-    with_loc(commit_after(t(TokenKind::Loop), loop_label))
-        .map(|(label, loc)| Command::Loop(loc, label))
+    commit_after(t(TokenKind::Loop), loop_label)
+        .map(|(token, label)| Command::Loop(
+            match &label {
+                Some(label) => token.span.join(label.span),
+                None => token.span.clone(),
+            },
+            label
+        ))
         .parse_next(input)
 }
 
 fn cmd_send_type(input: &mut Input) -> Result<Command<Name>> {
-    with_loc(commit_after(
-        tn!("(type": TokenKind::LPar, TokenKind::Type), (list(typ), t(TokenKind::RPar), cmd)))
-        .map(|((types, _, mut cmd), loc)| {
-            for typ in types.into_iter().rev() {
-                cmd = Command::SendType(loc.clone(), typ, Box::new(cmd));
-            }
-            cmd
+    commit_after(
+        tn!("(type": TokenKind::LPar, TokenKind::Type),
+        (list(typ), t(TokenKind::RPar), cmd)
+    )
+        .map(|((open, _), (types, close, cmd))| {
+            let cmd = match cmd {
+                Some(cmd) => cmd,
+                None => noop_cmd(close.span.end)
+            };
+            Command::SendTypes(
+                open.span.join(cmd.span()),
+                types,
+                Box::new(cmd),
+            )
         })
         .parse_next(input)
 }
 
 fn cmd_recv_type(input: &mut Input) -> Result<Command<Name>> {
-    with_loc(commit_after(
-        tn!("[type": TokenKind::LBkt, TokenKind::Type),(list(name), t(TokenKind::RBkt), cmd)))
-        .map(|((names, _, mut cmd), loc)| {
-            for name in names.into_iter().rev() {
-                cmd = Command::ReceiveType(loc.clone(), name, Box::new(cmd));
-            }
-            cmd
+    commit_after(
+        tn!("[type": TokenKind::LBkt, TokenKind::Type),
+        (list(name), t(TokenKind::RBkt), cmd)
+    )
+        .map(|((open, _), (names, close, cmd))| {
+            let cmd = match cmd {
+                Some(cmd) => cmd,
+                None => noop_cmd(close.span.end)
+            };
+            Command::ReceiveTypes(
+                open.span.join(cmd.span()),
+                names,
+                Box::new(cmd),
+            )
         })
         .parse_next(input)
 }
@@ -1212,43 +1462,53 @@ fn cmd_branch(input: &mut Input) -> Result<CommandBranch<Name>> {
 }
 
 fn cmd_branch_then(input: &mut Input) -> Result<CommandBranch<Name>> {
-    commit_after(t(TokenKind::Arrow), (t(TokenKind::LCrl), process, t(TokenKind::RCrl)))
-        .map(|(_, process, _)| CommandBranch::Then(process))
+    commit_after(t(TokenKind::Arrow), (t(TokenKind::LCrl), opt(process), t(TokenKind::RCrl)))
+        .map(|(pre, (open, process, close))| CommandBranch::Then(
+            pre.span.join(close.span),
+            match process {
+                Some(process) => process,
+                None => Process::Noop(open.span.end),
+            }
+        ))
         .parse_next(input)
 }
 
 fn cmd_branch_receive(input: &mut Input) -> Result<CommandBranch<Name>> {
-    with_loc(commit_after(t(TokenKind::LPar), (list(pattern), t(TokenKind::RPar), cmd_branch)))
-        .map(|((patterns, _, mut branch), loc)| {
-            for pattern in patterns.into_iter().rev() {
-                branch = CommandBranch::Receive(loc.clone(), pattern, Box::new(branch));
-            }
-            branch
-        })
+    commit_after(t(TokenKind::LPar), (list(pattern), t(TokenKind::RPar), cmd_branch))
+        .map(|(open, (patterns, _, branch))| CommandBranch::Receive(
+            open.span.join(branch.span()),
+            patterns,
+            Box::new(branch),
+        ))
         .parse_next(input)
 }
 
 fn cmd_branch_continue(input: &mut Input) -> Result<CommandBranch<Name>> {
-    with_loc(commit_after(t(TokenKind::Bang), (t(TokenKind::Arrow), t(TokenKind::LCrl), process, t(TokenKind::RCrl))))
-        .map(|((_, _, process, _), loc)| CommandBranch::Continue(loc, process))
+    commit_after(t(TokenKind::Bang), (t(TokenKind::Arrow), t(TokenKind::LCrl), opt(process), t(TokenKind::RCrl)))
+        .map(|(token, (_, open, process, close))| CommandBranch::Continue(
+            token.span.join(close.span),
+            match process {
+                Some(process) => process,
+                None => Process::Noop(open.span.end),
+            }
+        ))
         .parse_next(input)
 }
 
 fn cmd_branch_recv_type(input: &mut Input) -> Result<CommandBranch<Name>> {
-    with_loc(commit_after(
-        tn!("(", "type"),
+    commit_after(
+        tn!("(type": TokenKind::LPar, TokenKind::Type),
         (list(name), t(TokenKind::RPar), cmd_branch),
+    )
+    .map(|((open, _), (names, _, branch))| CommandBranch::ReceiveTypes(
+        open.span.join(branch.span()),
+        names,
+        Box::new(branch),
     ))
-    .map(|((names, _, mut branch), loc)| {
-        for name in names.into_iter().rev() {
-            branch = CommandBranch::ReceiveType(loc.clone(), name, Box::new(branch));
-        }
-        branch
-    })
     .parse_next(input)
 }
 
-fn loop_label<'s>(input: &mut Input<'s>) -> Result<Option<Name>> {
+fn loop_label(input: &mut Input) -> Result<Option<Name>> {
     opt(preceded(t(TokenKind::Colon), name)).parse_next(input)
 }
 
@@ -1285,7 +1545,7 @@ mod test {
             );
         }
     }
-    */
+
     #[test]
     fn test_loop_label() {
         let toks = lex(":one");
@@ -1300,7 +1560,7 @@ mod test {
             )
         );
     }
-
+*/
     #[test]
     fn test_parse_examples() {
         let input = include_str!("../../examples/sample.par");

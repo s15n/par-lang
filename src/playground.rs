@@ -13,8 +13,8 @@ use indexmap::IndexMap;
 use crate::{
     interact::{Event, Handle, Request},
     par::{
-        language::{CompileError, Internal, Program},
-        parse::{parse_program, Name, SyntaxError},
+        language::{CompileError, Internal, Name, Program},
+        parse::{parse_program, SyntaxError},
         process,
         runtime::{self, Context, Operation},
         types::{self, Type, TypeError},
@@ -23,7 +23,7 @@ use crate::{
 };
 use miette::{LabeledSpan, SourceOffset, SourceSpan};
 use crate::location::Span;
-use crate::par::language::Definition;
+use crate::par::language::{Declaration, Definition, TypeDef};
 
 pub struct Playground {
     file_path: Option<PathBuf>,
@@ -50,36 +50,36 @@ impl Compiled {
                 let type_defs = program
                     .type_defs
                     .into_iter()
-                    .map(|(loc, name, params, typ)| {
-                        (
-                            loc,
-                            Internal::Original(name),
-                            params.into_iter().map(Internal::Original).collect(),
-                            typ.map_names(&mut Internal::Original),
-                        )
+                    .map(|TypeDef { span, name, params, typ }| {
+                        TypeDef {
+                            span,
+                            name: Internal::Original(name),
+                            params: params.into_iter().map(Internal::Original).collect(),
+                            typ: typ.map_names(&mut Internal::Original),
+                        }
                     })
                     .collect();
                 let declarations = program
                     .declarations
                     .into_iter()
-                    .map(|(loc, name, typ)| {
-                        (
-                            loc,
-                            Internal::Original(name),
-                            typ.map_names(&mut Internal::Original),
-                        )
+                    .map(|Declaration { span, name, typ }| {
+                        Declaration {
+                            span,
+                            name: Internal::Original(name),
+                            typ: typ.map_names(&mut Internal::Original),
+                        }
                     })
                     .collect();
                 let compile_result = program
                     .definitions
                     .into_iter()
-                    .map(|(loc, name, def)| {
-                        def.compile().map(|compiled| {
-                            (
-                                loc,
-                                Internal::Original(name.clone()),
-                                compiled.optimize().fix_captures(&IndexMap::new()).0,
-                            )
+                    .map(|Definition { span, name, expression }| {
+                        expression.compile().map(|compiled| {
+                            Definition {
+                                span,
+                                name: Internal::Original(name.clone()),
+                                expression: compiled.optimize().fix_captures(&IndexMap::new()).0,
+                            }
                         })
                     })
                     .collect::<Result<_, CompileError>>();
@@ -125,11 +125,11 @@ impl Compiled {
             declarations: program.declarations.clone(),
             definitions,
         };
-        return Compiled {
+        Compiled {
             program,
             pretty,
             checked: Ok(Checked::from_program(new_program)),
-        };
+        }
     }
 }
 
@@ -148,7 +148,7 @@ impl Checked {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Error {
     Parse(SyntaxError),
     Compile(CompileError),

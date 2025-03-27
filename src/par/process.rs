@@ -304,6 +304,15 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Expression<Loc, Name, Typ>
     }
 }
 
+impl<Loc, Name, Typ> Expression<Loc, Name, Typ> {
+    pub fn get_type(&self) -> &Typ {
+        match self {
+            Self::Reference(_, _, typ) => typ,
+            Self::Fork(_, _, _, _, typ, _) => typ,
+        }
+    }
+}
+
 impl<Loc, Name: Display, Typ> Process<Loc, Name, Typ> {
     pub fn pretty(&self, f: &mut impl Write, indent: usize) -> fmt::Result {
         match self {

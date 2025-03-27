@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use lsp_types::{self as lsp, Uri};
 use miette::Diagnostic;
 use crate::language_server::instance::CompileError;
-use crate::location::Span;
+use crate::location::{Span, Spanning};
 
 pub struct Feedback {
     diagnostics: HashMap<Uri, Vec<lsp::Diagnostic>>,
@@ -56,16 +56,34 @@ impl FeedbackBookKeeper {
 pub fn diagnostic_for_error(err: &CompileError) -> lsp::Diagnostic {
     use crate::playground::Error;
 
-    let (span, message, help) = match err {
+    let (span, message, help, related_span) = match err {
         CompileError::Compile(Error::Parse(err))
-        => (err.span(), err.message().to_string(), err.help().map(|s| s.to_string())),
+        => (
+            err.span(),
+            err.message().to_string(),
+            err.help().map(|s| s.to_string()),
+            None,
+        ),
 
         CompileError::Compile(Error::Compile(err))
-        => (err.span(), err.message().to_string(), Some("Help".to_string())),
+        => (
+            err.span(),
+            err.message().to_string(),
+            Some("Help".to_string()),
+            None,
+        ),
 
         | CompileError::Compile(Error::Type(err))
         | CompileError::Types(err)
-        => (err.span(), "Type Error".to_string(), Some("Help".to_string())),
+        => {
+            let (span, related_span) = err.spans();
+            (
+                span,
+                "Type Error".to_string(),
+                Some("Help".to_string()),
+                related_span,
+            )
+        },
 
         CompileError::Compile(Error::Runtime(_)) => {
             unreachable!("Runtime error at compile time")
@@ -76,19 +94,19 @@ pub fn diagnostic_for_error(err: &CompileError) -> lsp::Diagnostic {
         None => message,
     };
     lsp::Diagnostic {
-        range: span_to_lsp_range(span),
+        range: span_to_lsp_range(&span),
         severity: Some(lsp::DiagnosticSeverity::ERROR),
         code: None,
         code_description: None,
         source: None,
         message,
-        related_information: None,
+        related_information: None, // todo
         tags: None,
         data: None,
     }
 }
 
-fn span_to_lsp_range(span: Span) {
+fn span_to_lsp_range(span: &Span) -> lsp::Range {
     lsp::Range {
         start: lsp::Position {
             line: span.start.row as u32,
@@ -98,5 +116,5 @@ fn span_to_lsp_range(span: Span) {
             line: span.end.row as u32,
             character: span.end.column as u32,
         }
-    };
+    }
 }

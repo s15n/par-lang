@@ -42,6 +42,7 @@ pub enum TokenKind {
     Loop,
     Recursive,
     Self_,
+    Telltypes,
     Type,
     Unfounded,
 
@@ -100,6 +101,7 @@ impl TokenKind {
             TokenKind::Loop => "loop",
             TokenKind::Recursive => "recursive",
             TokenKind::Self_ => "self",
+            TokenKind::Telltypes => "telltypes",
             TokenKind::Type => "type",
             TokenKind::Unfounded => "unfounded",
 
@@ -154,14 +156,32 @@ pub fn lex<'s>(input: &'s str) -> Vec<Token<'s>> {
         while let Ok(c) = peek(any::<&str, Error>).parse_next(input) {
             let column = last_newline - input.len(); // starting column
             let Some((raw, kind)) = (match c {
-                'a'..='z' | 'A'..='Z' | '0'..='9' | '_' => {
-                    let ident = take_while(
+                'a'..='z' | 'A'..='Z' | '_' => {
+                    let raw = take_while(
                         0..,
                         |c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_'),
                     )
-                    .take()
-                    .parse_next(input)?;
-                    Some((ident, TokenKind::Identifier))
+                        .take()
+                        .parse_next(input)?;
+                    let kind = match raw {
+                        "begin" => TokenKind::Begin,
+                        "chan" => TokenKind::Chan,
+                        "dec" => TokenKind::Dec,
+                        "def" => TokenKind::Def,
+                        "do" => TokenKind::Do,
+                        "either" => TokenKind::Either,
+                        "in" => TokenKind::In,
+                        "iterative" => TokenKind::Iterative,
+                        "let" => TokenKind::Let,
+                        "loop" => TokenKind::Loop,
+                        "recursive" => TokenKind::Recursive,
+                        "self" => TokenKind::Self_,
+                        "telltypes" => TokenKind::Telltypes,
+                        "type" => TokenKind::Type,
+                        "unfounded" => TokenKind::Unfounded,
+                        _ => TokenKind::Identifier,
+                    };
+                    Some((raw, kind))
                 }
                 '\n' => {
                     let _ = any::<&str, Error>.parse_next(input);

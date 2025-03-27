@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use lsp_server::{Connection};
 use lsp_types::{self as lsp, InitializeParams, Uri};
+use lsp_types::notification::DidSaveTextDocument;
 use crate::language_server::feedback::{diagnostic_for_error, Feedback, FeedbackBookKeeper};
 use crate::language_server::instance::Instance;
 use super::{io::IO};
@@ -84,10 +85,13 @@ impl<'c> LanguageServer<'c> {
         match method {
             DidOpenTextDocument::METHOD => {
                 let params = extract_notification::<DidOpenTextDocument>(notification);
+                let uri = &params.text_document.uri;
                 self.cache_file(
-                    &params.text_document.uri,
+                    uri,
                     params.text_document.text,
                 );
+                self.compile(uri);
+                self.publish_feedback();
             }
             DidChangeTextDocument::METHOD => {
                 let params = extract_notification::<DidChangeTextDocument>(notification);
@@ -97,6 +101,12 @@ impl<'c> LanguageServer<'c> {
                         last_change.text,
                     );
                 }
+            }
+            DidSaveTextDocument::METHOD => {
+                let params = extract_notification::<DidSaveTextDocument>(notification);
+                let uri = &params.text_document.uri;
+                self.compile(uri);
+                self.publish_feedback();
             }
             _ => {
                 tracing::warn!("Unhandled notification: {:?}", notification);
@@ -114,19 +124,9 @@ impl<'c> LanguageServer<'c> {
         uri: &Uri,
         handler: impl FnOnce(&mut Instance) -> R
     ) -> R {
+        self.compile(uri);
         let instance = self.instance_for(uri);
-
-        let compile_result = instance.compile();
         let response = handler(instance);
-
-        let mut feedback = self.feedback.cleanup();
-        match compile_result {
-            Ok(_) => { /* warnings */ },
-            Err(err) => {
-                feedback.add_diagnostic(uri.clone(), diagnostic_for_error(&err));
-            }
-        };
-
         response
     }
 
@@ -150,10 +150,23 @@ impl<'c> LanguageServer<'c> {
         }
     }
 
+    fn compile(&mut self, uri: &Uri) {
+        let instance = self.instance_for(uri);
+        let compile_result = instance.compile();
+        let mut feedback = self.feedback.cleanup();
+        match compile_result {
+            Ok(_) => { /* warnings */ },
+            Err(err) => {
+                feedback.add_diagnostic(uri.clone(), diagnostic_for_error(&err));
+            }
+        };
+    }
+
     fn cache_file(&mut self, uri: &Uri, text: String) {
         tracing::info!("Caching file: {:?}", uri);
         self.io.update_file(uri, text);
-        self.instance_for(uri).mark_dirty();
+        let instance = self.instance_for(uri);
+        instance.mark_dirty();
     }
 
     fn instance_for(&mut self, uri: &Uri) -> &mut Instance {

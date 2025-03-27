@@ -31,6 +31,10 @@ impl Instance {
         }
     }
 
+    pub fn uri(&self) -> &Uri {
+        &self.uri
+    }
+
     pub fn handle_hover(&self, params: &lsp::HoverParams) -> Option<lsp::Hover> {
         tracing::info!("Handling hover request with params: {:?}", params);
 
@@ -60,18 +64,21 @@ impl Instance {
                         let mut msg = format!("Declaration: {}: ", name.to_string());
                         let indent = msg.len();
                         typ.pretty(&mut msg, indent + 1).unwrap();
-                        message = Some(format!("{} ({:?})", msg, typ));
+                        message = Some(msg);
                         break;
                     }
                 }
 
                 if !inside_item {
-                    for Definition { span, name, .. } in &compiled.program.definitions {
+                    for Definition { span, name, expression } in &compiled.program.definitions {
                         if !is_inside(pos, span) {
                             continue;
                         }
                         inside_item = true;
-                        message = Some(format!("Definition: {}", name.to_string()));
+                        let mut msg = format!("Definition: {}: ", name.to_string());
+                        let indent = msg.len();
+                        expression.pretty(&mut msg, indent + 1).unwrap();
+                        message = Some(msg);
                         break;
                     }
                 }
@@ -96,7 +103,9 @@ impl Instance {
     }
 
     pub fn compile(&mut self) -> Result<(), CompileError> {
+        tracing::info!("Compiling: {:?}", self.uri);
         if !self.dirty {
+            tracing::info!("No changes");
             tracing::debug!("No changes to compile");
             return Ok(());
         }

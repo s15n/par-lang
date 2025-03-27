@@ -25,10 +25,19 @@ impl Span {
         self.end.offset - self.start.offset
     }
 
-    pub fn join(&self, other: &Span) -> Span {
+    pub fn join(&self, other: Span) -> Span {
         Span {
             start: self.start,
             end: other.end,
+        }
+    }
+}
+
+impl Point {
+    pub fn point_span(&self) -> Span {
+        Span {
+            start: *self,
+            end: *self,
         }
     }
 }
