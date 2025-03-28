@@ -38,11 +38,13 @@ impl Instance {
 
         let payload = match &self.compiled {
             Some(Ok(compiled)) => {
+                let checked = compiled.checked.as_ref().unwrap();
+
                 let mut message: Option<String> = Some(format!("{}:{}", pos.line, pos.character));
 
                 let mut inside_item = false;
 
-                for TypeDef { span, name, .. } in &compiled.program.type_defs {
+                for TypeDef { span, name, .. } in &checked.program.type_defs {
                     if !is_inside(pos, span) {
                         continue;
                     }
@@ -52,7 +54,7 @@ impl Instance {
                 }
 
                 if !inside_item {
-                    for Declaration { span, name, typ } in &compiled.program.declarations {
+                    for Declaration { span, name, typ } in &checked.program.declarations {
                         if !is_inside(pos, span) {
                             continue;
                         }
@@ -66,14 +68,14 @@ impl Instance {
                 }
 
                 if !inside_item {
-                    for Definition { span, name, expression } in &compiled.program.definitions {
+                    for Definition { span, name, expression } in &checked.program.definitions {
                         if !is_inside(pos, span) {
                             continue;
                         }
                         inside_item = true;
                         let mut msg = format!("Definition: {}: ", name.to_string());
                         let indent = msg.len();
-                        expression.pretty(&mut msg, indent + 1).unwrap();
+                        expression.get_type().pretty(&mut msg, indent + 1).unwrap();
                         message = Some(msg);
                         break;
                     }

@@ -1060,7 +1060,7 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
 pub struct Context<Name> {
     type_defs: TypeDefs<Name>,
     declarations: Arc<IndexMap<Name, (Span, Type<Name>)>>,
-    unchecked_definitions: Arc<IndexMap<Name, (Span, Arc<process::Expression<Span, Name, ()>>)>>,
+    unchecked_definitions: Arc<IndexMap<Name, (Span, Arc<process::Expression<Name, ()>>)>>,
     checked_definitions: Arc<RwLock<IndexMap<Name, CheckedDef<Name>>>>,
     current_deps: IndexSet<Name>,
     variables: IndexMap<Name, Type<Name>>,
@@ -1070,7 +1070,7 @@ pub struct Context<Name> {
 #[derive(Clone, Debug)]
 struct CheckedDef<Name> {
     span: Span,
-    def: Arc<process::Expression<Span, Name, Type<Name>>>,
+    def: Arc<process::Expression<Name, Type<Name>>>,
     typ: Type<Name>,
 }
 
@@ -1079,7 +1079,7 @@ where
     Name: Clone + Eq + Hash,
 {
     pub fn new_with_type_checking(
-        program: &Program<Name, Arc<process::Expression<Span, Name, ()>>>,
+        program: &Program<Name, Arc<process::Expression<Name, ()>>>,
     ) -> Result<Self, TypeError<Name>> {
         let type_defs = TypeDefs::new_with_validation(&program.type_defs)?;
 
@@ -1178,7 +1178,7 @@ where
 
     pub fn get_checked_definitions(
         &self,
-    ) -> Vec<Definition<Name, Arc<process::Expression<Span, Name, Type<Name>>>>> {
+    ) -> Vec<Definition<Name, Arc<process::Expression<Name, Type<Name>>>>> {
         self.checked_definitions
             .read()
             .unwrap()
@@ -1959,9 +1959,9 @@ where
     pub fn check_expression(
         &mut self,
         inference_subject: Option<&Name>,
-        expression: &process::Expression<Span, Name, ()>,
+        expression: &process::Expression<Name, ()>,
         target_type: &Type<Name>,
-    ) -> Result<Arc<process::Expression<Span, Name, Type<Name>>>, TypeError<Name>> {
+    ) -> Result<Arc<process::Expression<Name, Type<Name>>>, TypeError<Name>> {
         match expression {
             process::Expression::Reference(span, name, ()) => {
                 if Some(name) == inference_subject {
@@ -1979,27 +1979,28 @@ where
                 )))
             }
 
-            process::Expression::Fork(span, captures, channel, annotation, (), process) => {
+            process::Expression::Fork { span, captures, chan_name: channel, chan_annotation: annotation, process, .. } => {
                 let target_dual = target_type.dual(&self.type_defs)?;
-                let typ = match annotation {
+                let (chan_type, expr_type) = match annotation {
                     Some(annotated_type) => {
                         annotated_type.check_assignable(span, &target_dual, &self.type_defs)?;
-                        annotated_type.clone()
+                        (annotated_type.clone(), target_type) // or annotated_type.dual() ???
                     }
-                    None => target_dual,
+                    None => (target_dual, target_type),
                 };
                 let mut context = self.split();
                 self.capture(inference_subject, captures, &mut context)?;
-                context.put(span, channel.clone(), typ.clone())?;
+                context.put(span, channel.clone(), chan_type.clone())?;
                 let process = context.check_process(process)?;
-                Ok(Arc::new(process::Expression::Fork(
-                    span.clone(),
-                    captures.clone(),
-                    channel.clone(),
-                    annotation.clone(),
-                    typ,
+                Ok(Arc::new(process::Expression::Fork {
+                    span: span.clone(),
+                    captures: captures.clone(),
+                    chan_name: channel.clone(),
+                    chan_annotation: annotation.clone(),
+                    chan_type,
+                    expr_type: expr_type.clone(),
                     process,
-                )))
+                }))
             }
         }
     }
@@ -2007,8 +2008,8 @@ where
     pub fn infer_expression(
         &mut self,
         inference_subject: Option<&Name>,
-        expression: &process::Expression<Span, Name, ()>,
-    ) -> Result<(Arc<process::Expression<Span, Name, Type<Name>>>, Type<Name>), TypeError<Name>>
+        expression: &process::Expression<Name, ()>,
+    ) -> Result<(Arc<process::Expression<Name, Type<Name>>>, Type<Name>), TypeError<Name>>
     {
         match expression {
             process::Expression::Reference(span, name, ()) => {
@@ -2029,7 +2030,7 @@ where
                 ))
             }
 
-            process::Expression::Fork(span, captures, channel, annotation, (), process) => {
+            process::Expression::Fork { span, captures, chan_name: channel, chan_annotation: annotation, process, .. } => {
                 let mut context = self.split();
                 self.capture(inference_subject, captures, &mut context)?;
                 let (process, typ) = match annotation {
@@ -2041,14 +2042,15 @@ where
                 };
                 let dual = typ.dual(&self.type_defs)?;
                 Ok((
-                    Arc::new(process::Expression::Fork(
-                        span.clone(),
-                        captures.clone(),
-                        channel.clone(),
-                        annotation.clone(),
-                        typ,
+                    Arc::new(process::Expression::Fork {
+                        span: span.clone(),
+                        captures: captures.clone(),
+                        chan_name: channel.clone(),
+                        chan_annotation: annotation.clone(),
+                        chan_type: typ,
+                        expr_type: dual.clone(),
                         process,
-                    )),
+                    }),
                     dual,
                 ))
             }

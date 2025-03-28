@@ -272,7 +272,7 @@ impl<Name: Clone + Hash + Eq> Pattern<Name> {
     pub fn compile_let(
         &self,
         loc: &Span,
-        expression: Arc<process::Expression<Span, Internal<Name>, ()>>,
+        expression: Arc<process::Expression<Internal<Name>, ()>>,
         process: Arc<process::Process<Span, Internal<Name>, ()>>,
     ) -> Arc<process::Process<Span, Internal<Name>, ()>> {
         if let Self::Name(_, name, annotation) = self {
@@ -416,7 +416,7 @@ impl<Name> Spanning for Pattern<Name> {
 impl<Name: Clone + Hash + Eq> Expression<Name> {
     pub fn compile(
         &self,
-    ) -> Result<Arc<process::Expression<Span, Internal<Name>, ()>>, CompileError> {
+    ) -> Result<Arc<process::Expression<Internal<Name>, ()>>, CompileError> {
         Ok(match self {
             Self::Reference(loc, name) => Arc::new(process::Expression::Reference(
                 loc.clone(),
@@ -429,13 +429,14 @@ impl<Name: Clone + Hash + Eq> Expression<Name> {
             Self::Let { span, pattern, expression, then: body} => {
                 let expression = expression.compile()?;
                 let body = body.compile()?;
-                Arc::new(process::Expression::Fork(
-                    span.clone(),
-                    Captures::new(),
-                    Internal::Result(None),
-                    None,
-                    (),
-                    pattern.compile_let(
+                Arc::new(process::Expression::Fork {
+                    span: span.clone(),
+                    captures: Captures::new(),
+                    chan_name: Internal::Result(None),
+                    chan_annotation: None,
+                    chan_type: (),
+                    expr_type: (),
+                    process: pattern.compile_let(
                         span,
                         expression,
                         Arc::new(process::Process::Do(
@@ -445,7 +446,7 @@ impl<Name: Clone + Hash + Eq> Expression<Name> {
                             process::Command::Link(body),
                         )),
                     ),
-                ))
+                })
             }
 
             Self::Do { span, process, then: expression } => {
@@ -456,35 +457,38 @@ impl<Name: Clone + Hash + Eq> Expression<Name> {
                     (),
                     process::Command::Link(expression),
                 ))))?;
-                Arc::new(process::Expression::Fork(
-                    span.clone(),
-                    Captures::new(),
-                    Internal::Result(None),
-                    None,
-                    (),
-                    body,
-                ))
+                Arc::new(process::Expression::Fork {
+                    span: span.clone(),
+                    captures: Captures::new(),
+                    chan_name: Internal::Result(None),
+                    chan_annotation: None,
+                    chan_type: (),
+                    expr_type: (),
+                    process: body,
+                })
             }
 
-            Self::Fork { span, channel, annotation, process} => Arc::new(process::Expression::Fork(
-                span.clone(),
-                Captures::new(),
-                Internal::Original(channel.clone()),
-                original(annotation),
-                (),
-                process.compile(None)?,
-            )),
+            Self::Fork { span, channel, annotation, process} => Arc::new(process::Expression::Fork {
+                span: span.clone(),
+                captures: Captures::new(),
+                chan_name: Internal::Original(channel.clone()),
+                chan_annotation: original(annotation),
+                chan_type: (),
+                expr_type: (),
+                process: process.compile(None)?,
+            }),
 
             Self::Construction(construct) => {
                 let process = construct.compile()?;
-                Arc::new(process::Expression::Fork(
-                    construct.span().clone(),
-                    Captures::new(),
-                    Internal::Result(None),
-                    None,
-                    (),
+                Arc::new(process::Expression::Fork {
+                    span: construct.span().clone(),
+                    captures: Captures::new(),
+                    chan_name: Internal::Result(None),
+                    chan_annotation: None,
+                    chan_type: (),
+                    expr_type: (),
                     process,
-                ))
+                })
             }
 
             Self::Application(_, expr, Apply::Noop(_)) => expr.compile()?,
@@ -492,13 +496,14 @@ impl<Name: Clone + Hash + Eq> Expression<Name> {
             Self::Application(loc, expr, apply) => {
                 let expr = expr.compile()?;
                 let process = apply.compile()?;
-                Arc::new(process::Expression::Fork(
-                    loc.clone(),
-                    Captures::new(),
-                    Internal::Result(None),
-                    None,
-                    (),
-                    Arc::new(process::Process::Let(
+                Arc::new(process::Expression::Fork {
+                    span: loc.clone(),
+                    captures: Captures::new(),
+                    chan_name: Internal::Result(None),
+                    chan_annotation: None,
+                    chan_type: (),
+                    expr_type: (),
+                    process: Arc::new(process::Process::Let(
                         loc.clone(),
                         Internal::Object(None),
                         None,
@@ -506,7 +511,7 @@ impl<Name: Clone + Hash + Eq> Expression<Name> {
                         expr,
                         process,
                     )),
-                ))
+                })
             }
         })
     }

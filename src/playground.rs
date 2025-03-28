@@ -37,7 +37,7 @@ pub struct Playground {
 
 #[derive(Clone)]
 pub(crate) struct Compiled {
-    pub(crate) program: Program<Internal<Name>, Arc<process::Expression<Span, Internal<Name>, ()>>>,
+    pub(crate) program: Program<Internal<Name>, Arc<process::Expression<Internal<Name>, ()>>>,
     pub(crate) pretty: String,
     pub(crate) checked: Result<Checked, TypeError<Internal<Name>>>,
 }
@@ -95,7 +95,7 @@ impl Compiled {
     }
 
     pub(crate) fn from_program(
-        program: Program<Internal<Name>, Arc<process::Expression<Span, Internal<Name>, ()>>>,
+        program: Program<Internal<Name>, Arc<process::Expression<Internal<Name>, ()>>>,
     ) -> Self {
         let pretty = program
             .definitions
@@ -133,18 +133,21 @@ impl Compiled {
     }
 }
 
+type CheckedProgram = Program<Internal<Name>, Arc<process::Expression<Internal<Name>, Type<Internal<Name>>>>>;
+
 #[derive(Clone)]
-pub(crate) struct Checked {}
+pub(crate) struct Checked {
+    pub(crate) program: CheckedProgram,
+}
 
 impl Checked {
     pub(crate) fn from_program(
         // not used for anything, so there's no reason to store it ATM.
-        _: Program<
-            Internal<Name>,
-            Arc<process::Expression<Span, Internal<Name>, Type<Internal<Name>>>>,
-        >,
+        program: CheckedProgram,
     ) -> Self {
-        Checked {}
+        Self {
+            program
+        }
     }
 }
 
@@ -311,7 +314,7 @@ impl Playground {
     fn run(
         interact: &mut Option<Interact>,
         ui: &mut egui::Ui,
-        program: &Program<Internal<Name>, Arc<process::Expression<Span, Internal<Name>, ()>>>,
+        program: &Program<Internal<Name>, Arc<process::Expression<Internal<Name>, ()>>>,
         compiled_code: Arc<str>,
     ) {
         egui::ScrollArea::vertical().show(ui, |ui| {
