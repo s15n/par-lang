@@ -433,6 +433,84 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
         })
     }
 
+    pub fn is_linear(&self, type_defs: &TypeDefs<Loc, Name>) -> Result<bool, TypeError<Loc, Name>> {
+        Ok(!self.is_positive(type_defs)?)
+    }
+
+    pub fn is_positive(
+        &self,
+        type_defs: &TypeDefs<Loc, Name>,
+    ) -> Result<bool, TypeError<Loc, Name>> {
+        Ok(match self {
+            Type::Chan(_, t) => t.is_negative(type_defs)?,
+            Type::Var(_, _) => false,
+            Type::Name(loc, name, args) => {
+                type_defs.get(loc, name, args)?.is_positive(type_defs)?
+            }
+            Type::Send(_, t, u) => t.is_positive(type_defs)? && u.is_positive(type_defs)?,
+            Type::Receive(_, _, _) => false,
+            Type::Either(_, branches) => {
+                for (_, t) in branches {
+                    if !t.is_positive(type_defs)? {
+                        return Ok(false);
+                    }
+                }
+                true
+            }
+            Type::Choice(_, _) => false,
+            Type::Break(_) => true,
+            Type::Continue(_) => false,
+            Type::Recursive(_, _, _, t) => t.is_positive(type_defs)?,
+            Type::Iterative(_, _, _, t) => t.is_positive(type_defs)?,
+            Type::Self_(_, _) => true,
+            Type::SendType(loc, name, t) => t
+                .clone()
+                .substitute(name, &Type::Var(loc.clone(), name.clone()))?
+                .is_positive(type_defs)?,
+            Type::ReceiveType(loc, name, t) => t
+                .clone()
+                .substitute(name, &Type::Var(loc.clone(), name.clone()))?
+                .is_positive(type_defs)?,
+        })
+    }
+
+    pub fn is_negative(
+        &self,
+        type_defs: &TypeDefs<Loc, Name>,
+    ) -> Result<bool, TypeError<Loc, Name>> {
+        Ok(match self {
+            Type::Chan(_, t) => t.is_positive(type_defs)?,
+            Type::Var(_, _) => false,
+            Type::Name(loc, name, args) => {
+                type_defs.get(loc, name, args)?.is_negative(type_defs)?
+            }
+            Type::Send(_, _, _) => false,
+            Type::Receive(_, t, u) => t.is_positive(type_defs)? && u.is_negative(type_defs)?,
+            Type::Either(_, _) => false,
+            Type::Choice(_, branches) => {
+                for (_, t) in branches {
+                    if !t.is_negative(type_defs)? {
+                        return Ok(false);
+                    }
+                }
+                true
+            }
+            Type::Break(_) => false,
+            Type::Continue(_) => true,
+            Type::Recursive(_, _, _, t) => t.is_negative(type_defs)?,
+            Type::Iterative(_, _, _, t) => t.is_negative(type_defs)?,
+            Type::Self_(_, _) => true,
+            Type::SendType(loc, name, t) => t
+                .clone()
+                .substitute(name, &Type::Var(loc.clone(), name.clone()))?
+                .is_negative(type_defs)?,
+            Type::ReceiveType(loc, name, t) => t
+                .clone()
+                .substitute(name, &Type::Var(loc.clone(), name.clone()))?
+                .is_negative(type_defs)?,
+        })
+    }
+
     pub fn check_assignable(
         &self,
         loc: &Loc,
