@@ -157,9 +157,9 @@ pub(crate) enum Error {
 }
 
 #[derive(Clone)]
-struct Interact {
-    code: Arc<str>,
-    handle: Arc<Mutex<Handle<Span, Internal<Name>, ()>>>,
+pub(crate) struct Interact {
+    pub(crate) code: Arc<str>,
+    pub(crate) handle: Arc<Mutex<Handle<Span, Internal<Name>, ()>>>,
 }
 
 impl Playground {

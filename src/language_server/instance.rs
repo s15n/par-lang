@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use lsp_types::{self as lsp, Uri};
-use crate::language_server::data::{SEMANTIC_TOKEN_TYPES};
+use crate::language_server::data::{semantic_token_modifiers, semantic_token_types, SEMANTIC_TOKEN_MODIFIERS, SEMANTIC_TOKEN_TYPES};
 use crate::par::language::{Declaration, Definition, Internal, Name, TypeDef};
 use crate::location::Span;
 use crate::par::types::TypeError;
@@ -248,6 +248,7 @@ impl Instance {
         ))
     }
 
+    // todo: caching
     pub fn provide_semantic_tokens(&self, params: &lsp::SemanticTokensParams) -> Option<lsp::SemanticTokensResult> {
         tracing::info!("Handling semantic tokens request with params: {:?}", params);
         let Some(Ok(compiled)) = &self.compiled else {
@@ -256,15 +257,51 @@ impl Instance {
 
         let mut semantic_tokens = Vec::new();
 
-        for TypeDef { span, name, .. } in &compiled.program.type_defs {
+        for TypeDef { name, .. } in &compiled.program.type_defs {
             let name_span = name.span().unwrap();
             semantic_tokens.push(lsp::SemanticToken {
                 delta_line: name_span.start.row as u32,
                 delta_start: name_span.start.column as u32,
                 length: name_span.len() as u32,
-                token_type: SEMANTIC_TOKEN_TYPES::TYPE,
+                token_type: semantic_token_types::TYPE,
                 token_modifiers_bitset: 0u32
             });
+        }
+
+        for Declaration { name, .. } in &compiled.program.declarations {
+            let name_span = name.span().unwrap();
+            semantic_tokens.push(lsp::SemanticToken {
+                delta_line: name_span.start.row as u32,
+                delta_start: name_span.start.column as u32,
+                length: name_span.len() as u32,
+                token_type: semantic_token_types::FUNCTION, // maybe also something else
+                token_modifiers_bitset: semantic_token_modifiers::DECLARATION,
+            });
+        }
+
+        for Definition { name, .. } in &compiled.program.definitions {
+            let name_span = name.span().unwrap();
+            semantic_tokens.push(lsp::SemanticToken {
+                delta_line: name_span.start.row as u32,
+                delta_start: name_span.start.column as u32,
+                length: name_span.len() as u32,
+                token_type: semantic_token_types::FUNCTION, // maybe also something else
+                token_modifiers_bitset: semantic_token_modifiers::DEFINITION,
+            });
+        }
+
+        semantic_tokens.sort_by(|a, b| a.delta_line.cmp(&b.delta_line));
+        let mut line = 0;
+        let mut start = 0;
+        for token in &mut semantic_tokens {
+            token.delta_line -= line;
+            if token.delta_line == 0 {
+                token.delta_start -= start;
+                start += token.delta_start;
+            } else {
+                start = 0;
+            }
+            line += token.delta_line;
         }
 
         let result = Some(lsp::SemanticTokensResult::Tokens(lsp::SemanticTokens {
@@ -273,6 +310,48 @@ impl Instance {
         }));
         tracing::info!("Providing semantic tokens: {:?}", result);
         result
+    }
+
+    pub fn provide_code_lens(&self, params: &lsp::CodeLensParams) -> Option<Vec<lsp::CodeLens>> {
+        tracing::debug!("Handling code lens request with params: {:?}", params);
+        let Some(Ok(compiled)) = &self.compiled else {
+            return None;
+        };
+
+        // todo: display run button over declaration if it is exactly one line above definition
+        Some(compiled.program.definitions.iter().map(|definition| {
+            lsp::CodeLens {
+                range: definition.name.span().unwrap().into(),
+                command: Some(lsp::Command {
+                    title: "$(play) Run".to_owned(),
+                    command: "run".to_owned(),
+                    arguments: Some(vec![
+                        self.uri.to_string().into(),
+                        definition.name.to_string().into(),
+                    ]),
+                }),
+                data: None,
+            }
+        }).collect())
+    }
+
+    pub fn run_in_playground(&self, def_name: &str) -> Option<serde_json::Value> {
+        tracing::info!("Handling playground request with def_name: {:?}", def_name);
+        let Some(Ok(compiled)) = &self.compiled else {
+            return None;
+        };
+
+        let Some(definition) = compiled.program.definitions.iter().find(|definition| {
+            definition.name.to_string().as_str() == def_name
+        }) else {
+            return None;
+        };
+
+        tracing::warn!("Run in playground is not supported!");
+
+        // todo: run
+
+        None
     }
 
     pub fn compile(&mut self) -> Result<(), CompileError> {

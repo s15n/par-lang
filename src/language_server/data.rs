@@ -28,35 +28,61 @@ impl Into<lsp::Position> for Point {
 // todo: are these macros the best way to go?
 
 macro_rules! running_constants {
-    ($($x:ident),*) => {
-        running_constants!(0 => $($x),*);
+    (linear, $($x:ident),*) => {
+        running_constants!(linear, 0 => $($x),*);
     };
-    ($index:expr => $first:ident, $($x:ident),*) => {
+    (bitset, $($x:ident),*) => {
+        running_constants!(bitset, 0 => $($x),*);
+    };
+    (linear, $index:expr => $first:ident, $($x:ident),*) => {
         pub const $first: u32 = $index;
-        running_constants!($index + 1 => $($x),*);
+        running_constants!(linear, $index + 1 => $($x),*);
     };
-    ($index:expr => $last:ident) => {
+    (bitset, $index:expr => $first:ident, $($x:ident),*) => {
+        pub const $first: u32 = 1 << $index;
+        running_constants!(bitset, $index + 1 => $($x),*);
+    };
+    (linear, $index:expr => $last:ident) => {
         pub const $last: u32 = $index;
+        #[allow(non_upper_case_globals)]
+        pub const count: usize = $index + 1;
+    };
+    (bitset, $index:expr => $last:ident) => {
+        pub const $last: u32 = 1 << $index;
         #[allow(non_upper_case_globals)]
         pub const count: usize = $index + 1;
     };
 }
 
-macro_rules! semantic_token_legend {
-    ($variant:ident($lsp:ident): $($x:ident),*) => {
-        pub const $variant: [
-            lsp::$lsp;
-            $variant::count
+macro_rules! semantic_token_types {
+    ($($x:ident),*) => {
+        pub const SEMANTIC_TOKEN_TYPES: [
+            lsp::SemanticTokenType;
+            semantic_token_types::count
         ] = [
-            $(lsp::$lsp::$x,)*
+            $(lsp::SemanticTokenType::$x,)*
         ];
 
-        #[allow(non_snake_case)]
-        pub mod $variant {
-            running_constants!($($x),*);
+        pub mod semantic_token_types {
+            running_constants!(linear, $($x),*);
         }
     };
 }
 
-semantic_token_legend!(SEMANTIC_TOKEN_TYPES(SemanticTokenType): TYPE);
-semantic_token_legend!(SEMANTIC_TOKEN_MODIFIERS(SemanticTokenModifier): DECLARATION, DEFINITION);
+macro_rules! semantic_token_modifiers {
+    ($($x:ident),*) => {
+        pub const SEMANTIC_TOKEN_MODIFIERS: [
+            lsp::SemanticTokenModifier;
+            semantic_token_modifiers::count
+        ] = [
+            $(lsp::SemanticTokenModifier::$x,)*
+        ];
+
+        pub mod semantic_token_modifiers {
+            running_constants!(bitset, $($x),*);
+        }
+    };
+}
+
+semantic_token_types!(TYPE, FUNCTION);
+semantic_token_modifiers!(DECLARATION, DEFINITION);

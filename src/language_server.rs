@@ -4,3 +4,4 @@ mod feedback;
 mod instance;
 mod io;
 mod data;
+mod playground_run;

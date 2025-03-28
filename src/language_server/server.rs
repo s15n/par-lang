@@ -1,8 +1,9 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 use lsp_server::{Connection};
 use lsp_types::{self as lsp, InitializeParams, Uri};
 use lsp_types::notification::DidSaveTextDocument;
-use lsp_types::request::{DocumentSymbolRequest, GotoDeclaration, GotoDefinition, SemanticTokensFullRequest};
+use lsp_types::request::{CodeLensRequest, DocumentSymbolRequest, ExecuteCommand, GotoDeclaration, GotoDefinition, SemanticTokensFullRequest};
 use crate::language_server::data::{SEMANTIC_TOKEN_MODIFIERS, SEMANTIC_TOKEN_TYPES};
 use crate::language_server::feedback::{diagnostic_for_error, FeedbackBookKeeper};
 use crate::language_server::instance::Instance;
@@ -92,9 +93,36 @@ impl<'c> LanguageServer<'c> {
                     |instance| instance.provide_semantic_tokens(&params)
                 )
             }
+            CodeLensRequest::METHOD => {
+                let params = extract_request::<CodeLensRequest>(request);
+                self.handle_request_instance(
+                    request_id,
+                    &params.text_document.uri,
+                    |instance| instance.provide_code_lens(&params)
+                )
+            }
+            ExecuteCommand::METHOD => {
+                let params = extract_request::<ExecuteCommand>(request);
+                match params.command.as_str() {
+                    "run" => {
+                        let Some(uri_str) = params.arguments.get(0).and_then(|v| v.as_str()) else { return; };
+                        let Some(def_name) = params.arguments.get(1).and_then(|v| v.as_str()) else { return; };
+                        let Ok(uri) = Uri::from_str(uri_str) else { return; };
+                        self.handle_request_instance(
+                            request_id,
+                            &uri,
+                            |instance| instance.run_in_playground(def_name)
+                        )
+                    },
+                    _ => {
+                        tracing::warn!("Unhandled command: {:?}", params);
+                        return;
+                    }
+                }
+            }
             _ => {
                 tracing::warn!("Unhandled request: {:?}", request);
-                return
+                return;
             }
         };
 
@@ -217,8 +245,7 @@ fn initialize_lsp(connection: &Connection) -> InitializeParams {
         document_symbol_provider: Some(lsp::OneOf::Left(true)),
         declaration_provider: Some(lsp::DeclarationCapability::Simple(true)),
         definition_provider: Some(lsp::OneOf::Left(true)),
-        // todo: semantic tokens are not requested by vscode? there seems to be a bug
-        // also, do we even need semantic highlighting?
+        // must be enabled in vs code (depends on color theme)
         semantic_tokens_provider: Some(lsp::SemanticTokensServerCapabilities::SemanticTokensOptions(
             lsp::SemanticTokensOptions {
                 work_done_progress_options: Default::default(),
@@ -230,6 +257,13 @@ fn initialize_lsp(connection: &Connection) -> InitializeParams {
                 full: Some(lsp::SemanticTokensFullOptions::Bool(true)),
             }
         )),
+        code_lens_provider: Some(lsp::CodeLensOptions {
+            resolve_provider: None,
+        }),
+        execute_command_provider: Some(lsp::ExecuteCommandOptions {
+            commands: vec!["run".to_owned()],
+            work_done_progress_options: Default::default()
+        }),
         /* todo:
         language:
         goto type definition
