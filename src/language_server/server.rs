@@ -3,7 +3,7 @@ use std::str::FromStr;
 use lsp_server::{Connection};
 use lsp_types::{self as lsp, InitializeParams, Uri};
 use lsp_types::notification::DidSaveTextDocument;
-use lsp_types::request::{CodeLensRequest, DocumentSymbolRequest, ExecuteCommand, GotoDeclaration, GotoDefinition, SemanticTokensFullRequest};
+use lsp_types::request::{CodeLensRequest, DocumentSymbolRequest, ExecuteCommand, GotoDeclaration, GotoDefinition, InlayHintRequest, SemanticTokensFullRequest};
 use crate::language_server::data::{SEMANTIC_TOKEN_MODIFIERS, SEMANTIC_TOKEN_TYPES};
 use crate::language_server::feedback::{diagnostic_for_error, FeedbackBookKeeper};
 use crate::language_server::instance::Instance;
@@ -99,6 +99,14 @@ impl<'c> LanguageServer<'c> {
                     request_id,
                     &params.text_document.uri,
                     |instance| instance.provide_code_lens(&params)
+                )
+            }
+            InlayHintRequest::METHOD => {
+                let params = extract_request::<InlayHintRequest>(request);
+                self.handle_request_instance(
+                    request_id,
+                    &params.text_document.uri,
+                    |instance| instance.provide_inlay_hints(&params)
                 )
             }
             ExecuteCommand::METHOD => {
@@ -264,6 +272,7 @@ fn initialize_lsp(connection: &Connection) -> InitializeParams {
             commands: vec!["run".to_owned()],
             work_done_progress_options: Default::default()
         }),
+        inlay_hint_provider: Some(lsp::OneOf::Left(true)),
         /* todo:
         language:
         goto type definition

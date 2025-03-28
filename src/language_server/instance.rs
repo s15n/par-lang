@@ -337,6 +337,38 @@ impl Instance {
         }).collect())
     }
 
+    pub fn provide_inlay_hints(&self, params: &lsp::InlayHintParams) -> Option<Vec<lsp::InlayHint>> {
+        tracing::debug!("Handling inlay hints request with params: {:?}", params);
+        let Some(Ok(compiled)) = &self.compiled else {
+            return None;
+        };
+        let checked = compiled.checked.as_ref().unwrap();
+
+        Some(checked.program.definitions.iter()
+            .filter(|definition| {
+                !checked.program.declarations.iter().any(|declaration| {
+                    definition.name == declaration.name
+                })
+            })
+            .map(|Definition { name, expression, .. }| {
+                let mut label = ": ".to_owned();
+                expression.get_type().pretty(&mut label, 0).unwrap();
+
+                lsp::InlayHint {
+                    position: name.span().unwrap().end.into(),
+                    label: lsp::InlayHintLabel::String(label),
+                    kind: Some(lsp::InlayHintKind::TYPE),
+                    text_edits: None,
+                    tooltip: None,
+                    padding_left: None,
+                    padding_right: None,
+                    data: None,
+                }
+            })
+            .collect()
+        )
+    }
+
     pub fn run_in_playground(&self, def_name: &str) -> Option<serde_json::Value> {
         tracing::info!("Handling playground request with def_name: {:?}", def_name);
         let Some(Ok(compiled)) = &self.compiled else {
