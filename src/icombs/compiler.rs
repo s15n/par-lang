@@ -286,11 +286,11 @@ impl<'program> Compiler<'program> {
             let (tree, kind) = self.use_var(&Var::Loop(label.0.clone()))?;
             vars.insert(Var::Loop(label.0.clone()), (tree, kind));
         }
-        let mut loop_points_before = self.context.loop_points.clone();
+        let loop_points_before = self.context.loop_points.clone();
         core::mem::swap(&mut vars, &mut self.context.vars);
         let t = f(self);
-        core::mem::swap(&mut vars, &mut self.context.vars);
-        core::mem::swap(&mut loop_points_before, &mut self.context.loop_points);
+        self.context.vars = vars;
+        self.context.loop_points = loop_points_before;
         t
     }
 
@@ -307,7 +307,7 @@ impl<'program> Compiler<'program> {
         }
     }
 
-    fn instantiate_variable(&mut self, name: &Name) -> Result<TypedTree> {
+    fn instantiate_name(&mut self, name: &Name) -> Result<TypedTree> {
         let (value, kind) = self.use_name(name)?;
         if kind == VariableKind::Boxed {
             todo!()
@@ -439,7 +439,7 @@ impl<'program> Compiler<'program> {
         expr: &Expression<Loc, Name, Type<Loc, Name>>,
     ) -> Result<TypedTree> {
         match expr {
-            Expression::Reference(_, name, _) => self.instantiate_variable(name),
+            Expression::Reference(_, name, _) => self.instantiate_name(name),
             Expression::Fork(_, captures, name, _, typ, proc) => {
                 self.with_captures(captures, |this| {
                     let (v0, v1) = this.create_typed_wire(typ.clone());
@@ -452,7 +452,7 @@ impl<'program> Compiler<'program> {
     }
 
     fn compile_process(&mut self, proc: &Process<Loc, Name, Type<Loc, Name>>) -> Result<()> {
-        let debug = true;
+        let debug = false;
         if debug {
             let mut s = String::new();
             proc.pretty(&mut s, 0).unwrap();
@@ -460,8 +460,8 @@ impl<'program> Compiler<'program> {
             self.show_state();
         }
         match proc {
-            Process::Let(_, key, _, _, value, rest) => {
-                let value = self.compile_expression(value)?;
+            Process::Let(_, key, _, _, expr, rest) => {
+                let value = self.compile_expression(expr)?;
                 self.context
                     .vars
                     .insert(Var::Name(key.clone()), (value, VariableKind::Linear));
@@ -483,31 +483,30 @@ impl<'program> Compiler<'program> {
         cmd: &Command<Loc, Name, Type<Loc, Name>>,
     ) -> Result<()> {
         match cmd {
-            Command::Link(a) => {
-                let a = self.compile_expression(a)?;
-                let b = self.instantiate_variable(&name)?;
-                self.link_typed(a, b);
+            Command::Link(expr) => {
+                let subject = self.instantiate_name(&name)?;
+                let value = self.compile_expression(expr)?;
+                self.link_typed(subject, value);
                 self.end_context()?;
             }
             // types get erased.
             Command::SendType(target_type, process) => {
-                let a = self.instantiate_variable(&name)?;
-                let Type::ReceiveType(_, src_name, ret_type) = self.normalize_type(a.ty.clone())
+                let subject = self.instantiate_name(&name)?;
+                let Type::ReceiveType(_, src_name, ret_type) = self.normalize_type(subject.ty.clone())
                 else {
-                    panic!("Unexpected type for SendType: {:?}", a.ty);
+                    panic!("Unexpected type for SendType: {:?}", subject.ty);
                 };
                 let ret_type = ret_type.substitute(&src_name, target_type).unwrap();
-                self.bind_variable(&name, a.tree.with_type(ret_type))?;
+                self.bind_variable(&name, subject.tree.with_type(ret_type))?;
                 self.compile_process(process)?;
             }
             Command::ReceiveType(_, process) => {
-                let a = self.instantiate_variable(&name)?;
-                let Type::SendType(_, dest_name, ret_type) = self.normalize_type(a.ty.clone())
+                let subject = self.instantiate_name(&name)?;
+                let Type::SendType(_, dest_name, ret_type) = self.normalize_type(subject.ty.clone())
                 else {
-                    panic!("Unexpected type for ReceiveType: {:?}", a.ty);
+                    panic!("Unexpected type for ReceiveType: {:?}", subject.ty);
                 };
-                self.bind_variable(&name, a.tree.with_type(*ret_type))?;
-
+                self.bind_variable(&name, subject.tree.with_type(*ret_type))?;
                 let was_empty_before = self.type_variables.insert(dest_name.clone());
                 self.compile_process(process)?;
                 if was_empty_before {
@@ -520,16 +519,14 @@ impl<'program> Compiler<'program> {
                 // name = free
                 // free = (name < expr >)
                 // < process >
-                let a = self.instantiate_variable(&name)?;
-                let Type::Receive(_, _, ret_type) = self.normalize_type(a.ty.clone()) else {
-                    panic!("Unexpected type for Receive: {:?}", a.ty);
+                let subject = self.instantiate_name(&name)?;
+                let Type::Receive(_, _, ret_type) = self.normalize_type(subject.ty.clone()) else {
+                    panic!("Unexpected type for Receive: {:?}", subject.ty);
                 };
                 let expr = self.compile_expression(expr)?;
-
                 let (v0, v1) = self.create_typed_wire(*ret_type);
                 self.bind_variable(&name, v0)?;
-                //
-                self.net.link(Tree::c(v1.tree, expr.tree), a.tree);
+                self.net.link(Tree::c(v1.tree, expr.tree), subject.tree);
                 self.compile_process(process)?;
             }
             Command::Receive(target, _, process) => {
@@ -538,23 +535,21 @@ impl<'program> Compiler<'program> {
                 // name = free
                 // free = (name target)
                 // < process >
-                let a = self.instantiate_variable(&name)?;
-                let Type::Send(_, arg_type, ret_type) = self.normalize_type(a.ty.clone()) else {
-                    panic!("Unexpected type for Receive: {:?}", a.ty);
+                let subject = self.instantiate_name(&name)?;
+                let Type::Send(_, arg_type, ret_type) = self.normalize_type(subject.ty.clone()) else {
+                    panic!("Unexpected type for Receive: {:?}", subject.ty);
                 };
                 let (v0, v1) = self.create_typed_wire(*arg_type);
                 let (w0, w1) = self.create_typed_wire(*ret_type);
                 self.bind_variable(&name, w0)?;
                 self.bind_variable(&target, v0)?;
-                //
-                self.net.link(Tree::c(w1.tree, v1.tree), a.tree);
+                self.net.link(Tree::c(w1.tree, v1.tree), subject.tree);
                 self.compile_process(process)?;
             }
             Command::Choose(chosen, process) => {
-                let a = self.instantiate_variable(&name)?;
-
-                let Type::Choice(_, branches) = self.normalize_type(a.ty.clone()) else {
-                    panic!("Unexpected type for Choose: {:?}", a.ty);
+                let subject = self.instantiate_name(&name)?;
+                let Type::Choice(_, branches) = self.normalize_type(subject.ty.clone()) else {
+                    panic!("Unexpected type for Choose: {:?}", subject.ty);
                 };
                 let Some(branch_type) = branches.get(chosen) else {
                     unreachable!()
@@ -562,13 +557,13 @@ impl<'program> Compiler<'program> {
                 let branch_index = branches.get_index_of(chosen).unwrap();
                 let (v0, v1) = self.create_typed_wire(branch_type.clone());
                 let choosing_tree = self.either_instance(v1.tree, branch_index, branches.len());
-                self.net.link(choosing_tree, a.tree);
+                self.net.link(choosing_tree, subject.tree);
                 self.bind_variable(&name, v0)?;
                 self.compile_process(process)?;
             }
             Command::Match(names, processes) => {
                 self.context.unguarded_loop_labels.clear();
-                let old_tree = self.instantiate_variable(&name)?;
+                let old_tree = self.instantiate_name(&name)?;
                 // Multiplex all other variables in the context.
                 let (context_in, pack_data) = self.context.pack(None, &mut self.net);
 
@@ -598,7 +593,7 @@ impl<'program> Compiler<'program> {
                 // < name ! >
                 // ==
                 // name = *
-                let a = self.instantiate_variable(&name)?.tree;
+                let a = self.instantiate_name(&name)?.tree;
                 self.net.link(a, Tree::e());
                 self.end_context()?;
             }
@@ -607,7 +602,7 @@ impl<'program> Compiler<'program> {
                 // ==
                 // name = *
                 // < process >
-                let a = self.instantiate_variable(&name)?.tree;
+                let a = self.instantiate_name(&name)?.tree;
                 self.net.link(a, Tree::e());
                 self.compile_process(process)?;
             }

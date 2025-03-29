@@ -641,15 +641,15 @@ pub enum ReadbackResult {
     Choice(Tree, Vec<(Name, Tree, TypedTree)>),
     Named(TypedTree),
     Expand(TypedTree),
-    Halted(TypedTree),
-    Unsupported(TypedTree),
+    Suspended(TypedTree),
     Waiting(TypedTree, async_watch::Receiver<bool>),
     Variable(usize),
+    Unsupported(TypedTree),
 }
 
 impl TypedTree {
     fn into_readback_result(self) -> ReadbackResult {
-        ReadbackResult::Halted(self)
+        ReadbackResult::Suspended(self)
     }
 
     fn into_readback_result_boxed(self) -> Box<ReadbackResult> {

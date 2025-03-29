@@ -99,7 +99,7 @@ impl TestingState {
                 ReadbackResult::Either(name, payload) => {
                     ReadbackPattern::Either(name, Box::new(self.result_to_pattern(*payload).await))
                 }
-                ReadbackResult::Halted(mut tree) => {
+                ReadbackResult::Suspended(mut tree) => {
                     tree.ty = crate::readback::prepare_type_for_readback(
                         &self.prog.type_defs,
                         tree.ty,
@@ -110,7 +110,7 @@ impl TestingState {
                 }
                 ReadbackResult::Expand(package) => {
                     let tree = self.shared.expand_once(package.tree).await;
-                    self.result_to_pattern(ReadbackResult::Halted(tree.with_type(package.ty)))
+                    self.result_to_pattern(ReadbackResult::Suspended(tree.with_type(package.ty)))
                         .await
                 }
                 a => {
@@ -161,10 +161,10 @@ impl TestingState {
                         return false.into();
                     };
                     let payload = self.shared.choose_choice(name, ctx, options, &self.spawner);
-                    self.matches(ReadbackResult::Halted(payload), *pattern_payload)
+                    self.matches(ReadbackResult::Suspended(payload), *pattern_payload)
                         .await
                 }
-                ReadbackResult::Halted(mut tree) => {
+                ReadbackResult::Suspended(mut tree) => {
                     tree.ty = crate::readback::prepare_type_for_readback(
                         &self.prog.type_defs,
                         tree.ty,
@@ -176,7 +176,7 @@ impl TestingState {
 
                 ReadbackResult::Expand(package) => {
                     let tree = self.shared.expand_once(package.tree).await;
-                    self.matches(ReadbackResult::Halted(tree.with_type(package.ty)), pattern)
+                    self.matches(ReadbackResult::Suspended(tree.with_type(package.ty)), pattern)
                         .await
                 }
                 ReadbackResult::Variable(_) => todo!(),
@@ -309,7 +309,7 @@ async fn test_whole_programs() -> Result<(), String> {
                         .lock()
                         .unwrap()
                         .inject_net(ic_compiled.get_with_name(&def_name).unwrap());
-                    let res = ReadbackResult::Halted(
+                    let res = ReadbackResult::Suspended(
                         tree.with_type(prog.declarations.get(&def_name).unwrap().clone().1),
                     );
                     state.result_to_pattern(res).await
@@ -318,7 +318,7 @@ async fn test_whole_programs() -> Result<(), String> {
             };
             let testing_result = state
                 .matches(
-                    ReadbackResult::Halted(
+                    ReadbackResult::Suspended(
                         tree.with_type(prog.declarations.get(&def_name).unwrap().clone().1),
                     ),
                     pattern,

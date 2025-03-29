@@ -281,7 +281,7 @@ impl ReadbackStateInner {
                                         .spawn(async move {
                                             this.readback_result(
                                                 handle,
-                                                ReadbackResult::Halted(payload),
+                                                ReadbackResult::Suspended(payload),
                                                 prog,
                                             )
                                             .await;
@@ -382,7 +382,7 @@ impl ReadbackStateInner {
                     let mut lock = handle_2.lock().unwrap();
                     lock.set_end(Some(Request::Expand(package)));
                 }
-                ReadbackResult::Halted(mut tree) => {
+                ReadbackResult::Suspended(mut tree) => {
                     let mut this = self.clone();
                     self.spawner
                         .spawn(async move {
