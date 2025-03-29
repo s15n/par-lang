@@ -376,9 +376,17 @@ impl<'program> Compiler<'program> {
         println!("Variables:");
         for (name, (value, _)) in &self.context.vars {
             println!(
-                "    {:?}: {:?} = {:?}",
-                name,
-                value.ty,
+                "    {}: {} = {:?}",
+                if let Var::Name(name) = name {
+                    format!("{}", name)
+                } else {
+                    format!("{:?}", name)
+                },
+                {
+                    let mut s = String::new();
+                    value.ty.pretty(&mut s, 4);
+                    s
+                },
                 self.net.show_tree(&value.tree)
             )
         }
@@ -430,6 +438,14 @@ impl<'program> Compiler<'program> {
             Type::Iterative(_, asc, name, body) => self.normalize_type(
                 Type::expand_iterative(&asc, &name, &body, &self.program.type_defs).unwrap(),
             ),
+            Type::Chan(loc, body) => {
+                let dual = body.dual(&self.program.type_defs).unwrap();
+                if matches!(dual, Type::Chan(..)) {
+                    dual
+                } else {
+                    self.normalize_type(dual)
+                }
+            }
             a => a,
         }
     }
@@ -482,6 +498,7 @@ impl<'program> Compiler<'program> {
         ty: Type<Loc, Name>,
         cmd: &Command<Loc, Name, Type<Loc, Name>>,
     ) -> Result<()> {
+        println!("{:?}", loc);
         match cmd {
             Command::Link(a) => {
                 let a = self.compile_expression(a)?;
