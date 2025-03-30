@@ -241,10 +241,10 @@ impl Compiler {
             Some((_, expr)) => expr,
             _ => return Err(Error::GlobalNotFound(name.clone())),
         };
-        let debug = true;
+        /*let debug = false;
         if debug {
             println!("{global:#?}");
-        }
+        }*/
 
         let (id, typ) = self.in_package(
             |this, _| {
@@ -252,7 +252,6 @@ impl Compiler {
                 global.pretty(&mut s, 0).unwrap();
                 this.compile_expression(global.as_ref())
             },
-            debug,
         )?;
         self.global_name_to_id.insert(name.clone(), id);
         self.compile_global_stack.shift_remove(name);
@@ -262,7 +261,7 @@ impl Compiler {
     fn in_package(
         &mut self,
         f: impl FnOnce(&mut Self, usize) -> Result<TypedTree>,
-        debug: bool,
+        //debug: bool,
     ) -> Result<(usize, Type<Loc, Name>)> {
         let id = self.id_to_package.len();
         let old_net = core::mem::take(&mut self.net);
@@ -273,9 +272,9 @@ impl Compiler {
         self.net.ports.push_back(tree.tree);
 
         self.net.packages = Arc::new(self.id_to_package.clone().into_iter().enumerate().collect());
-        if debug {
+        /*if debug {
             println!("{}", self.net.show());
-        }
+        }*/
         self.net.assert_valid_with(
             self.lazy_redexes
                 .iter()
@@ -287,9 +286,9 @@ impl Compiler {
             .redexes
             .append(&mut core::mem::take(&mut self.lazy_redexes).into());
         self.net.assert_valid();
-        if debug {
+        /*if debug {
             println!("{}", self.net.show());
-        }
+        }*/
         *self.id_to_ty.get_mut(id).unwrap() = tree.ty.clone();
         *self.id_to_package.get_mut(id).unwrap() = core::mem::take(&mut self.net);
         self.net = old_net;
@@ -500,13 +499,13 @@ impl Compiler {
     }
 
     fn compile_process(&mut self, proc: &Process<Loc, Name, Type<Loc, Name>>) -> Result<()> {
-        let debug = false;
+        /*let debug = false;
         if debug {
             let mut s = String::new();
             proc.pretty(&mut s, 0).unwrap();
             println!("{s}");
             self.show_state();
-        }
+        }*/
         match proc {
             Process::Let(_, name, _, _, expr, rest) => {
                 let value = self.compile_expression(expr)?;
@@ -529,7 +528,7 @@ impl Compiler {
         ty: Type<Loc, Name>,
         cmd: &Command<Loc, Name, Type<Loc, Name>>,
     ) -> Result<()> {
-        println!("{:?}", loc);
+        //println!("{:?}", loc);
         match cmd {
             Command::Link(expr) => {
                 let subject = self.instantiate_name(&name, true)?;
@@ -691,7 +690,7 @@ impl Compiler {
                         this.compile_process(process)?;
                         Ok(context_out.with_type(Type::Break(External)))
                     },
-                    true,
+                    //true,
                 )?;
                 self.net.link(def1, Tree::Package(id));
                 self.net.link(context_in, Tree::Package(id));

@@ -259,7 +259,7 @@ impl Net {
 
     /// Returns whether a reduction was carried out
     pub fn reduce_one(&mut self) -> bool {
-        eprintln!("{}\n----------", self.show());
+        //eprintln!("{}\n----------", self.show());
         if let Some((a, b)) = self.redexes.pop_front() {
             self.interact(a, b);
             true
