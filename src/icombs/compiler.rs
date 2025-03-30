@@ -701,7 +701,7 @@ impl Compiler {
                 if self.context.unguarded_loop_labels.contains(&label) {
                     return Err(Error::UnguardedLoop(loc.clone(), label.clone().0));
                 }
-                let (tree, _) = self.use_var(&Var::Loop(label.0.clone()), true)?;
+                let (tree, _) = self.use_var(&Var::Loop(label.0.clone()), false)?;
                 let labels_in_scope = self.context.loop_points.get(&label).unwrap().clone();
                 self.context.vars.sort_keys();
                 let (context_in, _) = self.context.pack(Some(captures), Some(&labels_in_scope), &mut self.net);
