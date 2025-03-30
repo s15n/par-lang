@@ -172,7 +172,8 @@ impl Clone for Tree {
 pub struct Net {
     pub ports: VecDeque<Tree>,
     pub redexes: VecDeque<(Tree, Tree)>,
-    pub vars: BTreeMap<usize, Option<Tree>>,
+    pub vars: BTreeMap<VarId, Option<Tree>>,
+    pub free_vars: Vec<VarId>,
     pub packages: Arc<IndexMap<usize, Net>>,
 }
 
@@ -232,8 +233,7 @@ impl Net {
             if let Some(id) = package_to_net.get(&var_id) {
                 id.clone()
             } else {
-                let id = self.allocate_var_id();
-                self.vars.insert(id, None);
+                let id = self.alloc_var(None);
                 package_to_net.insert(var_id, id);
                 id
             }
@@ -277,6 +277,7 @@ impl Net {
             t @ Tree::Var(_) => {
                 let Tree::Var(id) = t else { unreachable!() };
                 if let Some(Some(mut a)) = self.vars.remove(id) {
+                    self.dealloc_var(*id);
                     self.substitute_tree(&mut a);
                     *t = a;
                 } else {
@@ -321,6 +322,7 @@ impl Net {
 
             }) {
                 Some(a) => {
+                    self.dealloc_var(id);
                     self.link(a, b);
                 }
                 None => {
@@ -334,18 +336,22 @@ impl Net {
         }
     }
 
-    pub fn allocate_var_id(&mut self) -> VarId {
-        for i in 0.. {
-            if self.vars.get(&i).is_none() {
-                return i;
-            }
-        }
-        unreachable!();
+    pub fn alloc_var(&mut self, value: Option<Tree>) -> VarId {
+        let id = match self.free_vars.pop() {
+            Some(i) => i,
+            None => self.vars.len(),
+        };
+        assert!(self.vars.insert(id, value).is_none());
+        id
+    }
+
+    pub fn dealloc_var(&mut self, id: VarId) -> Option<Option<Tree>> {
+        self.free_vars.push(id);
+        self.vars.remove(&id)
     }
 
     pub fn create_wire(&mut self) -> (Tree, Tree) {
-        let id = self.allocate_var_id();
-        self.vars.insert(id, None);
+        let id = self.alloc_var(None);
         (Tree::Var(id), Tree::Var(id))
     }
 
