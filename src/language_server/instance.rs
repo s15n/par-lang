@@ -4,7 +4,7 @@ use crate::language_server::data::{semantic_token_modifiers, semantic_token_type
 use crate::par::language::{Declaration, Definition, Internal, Name, TypeDef};
 use crate::location::Span;
 use crate::par::types::TypeError;
-use crate::playground::Compiled;
+use crate::playground::{Checked, Compiled};
 use super::io::IO;
 
 #[derive(Debug, Clone)]
@@ -12,7 +12,7 @@ pub enum CompileError {
     Compile(crate::playground::Error),
     Types(TypeError<Internal<Name>>),
 }
-pub type CompileResult = Result<Compiled, CompileError>;
+pub type CompileResult = Result<Checked, CompileError>;
 
 pub struct Instance {
     uri: Uri,
@@ -38,13 +38,11 @@ impl Instance {
 
         let payload = match &self.compiled {
             Some(Ok(compiled)) => {
-                let checked = compiled.checked.as_ref().unwrap();
-
                 let mut message: Option<String> = Some(format!("{}:{}", pos.line, pos.character));
 
                 let mut inside_item = false;
 
-                for TypeDef { span, name, .. } in &checked.program.type_defs {
+                for TypeDef { span, name, .. } in &compiled.program.type_defs {
                     if !is_inside(pos, span) {
                         continue;
                     }
@@ -54,7 +52,7 @@ impl Instance {
                 }
 
                 if !inside_item {
-                    for Declaration { span, name, typ } in &checked.program.declarations {
+                    for Declaration { span, name, typ } in &compiled.program.declarations {
                         if !is_inside(pos, span) {
                             continue;
                         }
@@ -68,7 +66,7 @@ impl Instance {
                 }
 
                 if !inside_item {
-                    for Definition { span, name, expression } in &checked.program.definitions {
+                    for Definition { span, name, expression } in &compiled.program.definitions {
                         if !is_inside(pos, span) {
                             continue;
                         }
@@ -84,7 +82,7 @@ impl Instance {
                 if let Some(message) = message {
                     message
                 } else {
-                    format!("Compiled:\n{}", compiled.pretty.clone())
+                    return None;
                 }
             },
             Some(Err(e)) => format!("Compiled error: {:?}", e),
@@ -342,11 +340,10 @@ impl Instance {
         let Some(Ok(compiled)) = &self.compiled else {
             return None;
         };
-        let checked = compiled.checked.as_ref().unwrap();
 
-        Some(checked.program.definitions.iter()
+        Some(compiled.program.definitions.iter()
             .filter(|definition| {
-                !checked.program.declarations.iter().any(|declaration| {
+                !compiled.program.declarations.iter().any(|declaration| {
                     definition.name == declaration.name
                 })
             })
@@ -398,15 +395,11 @@ impl Instance {
         let code = self.io.read(&self.uri);
 
         // todo: progress reporting
-        let mut compiled = stacker::grow(32 * 1024 * 1024, || {
+        let compiled = stacker::grow(32 * 1024 * 1024, || {
             Compiled::from_string(&code.unwrap())
-        }).map_err(|err| CompileError::Compile(err));
-        match compiled {
-            Ok(Compiled { checked: Err(err), .. }) => {
-                compiled = Err(CompileError::Types(err));
-            }
-            _ => {}
-        }
+        }).map_err(|err| CompileError::Compile(err)).and_then(
+            |compiled| compiled.checked.map_err(|err| CompileError::Types(err))
+        );
 
         let result = match &compiled {
             Ok(_) => {
