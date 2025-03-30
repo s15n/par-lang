@@ -8,7 +8,6 @@ use futures::{
     future::{join, select, BoxFuture, Either},
     FutureExt, SinkExt, StreamExt,
 };
-use indexmap::IndexSet;
 use std::{
     any::Any,
     fmt::Debug,
@@ -25,13 +24,6 @@ pub struct CoroState {
     new_redex: Mutex<Vec<futures::channel::mpsc::Sender<()>>>,
     new_var: AtomicUsize,
     type_defs: TypeDefs<Loc, Name>,
-}
-
-fn unwrap_err_or<T, E>(value: Result<T, E>, default: E) -> E {
-    match value {
-        Ok(_) => default,
-        Err(e) => e,
-    }
 }
 
 impl Debug for CoroState {
@@ -230,61 +222,14 @@ impl SharedState {
         }
     }
 
-    pub fn as_era_with_visited(
-        &self,
-        tree: Tree,
-        mut visited: IndexSet<usize>,
-    ) -> BoxFuture<Result<(), Tree>> {
-        async move {
-            match tree {
-                Tree::Era => Ok(()),
-                Tree::Con(a, b) => {
-                    let (a, b) = join(
-                        self.read_era_with_visited(*a, visited.clone()),
-                        self.read_era_with_visited(*b, visited.clone()),
-                    )
-                    .await;
-                    if a.is_ok() && b.is_ok() {
-                        Ok(())
-                    } else {
-                        Err(Tree::c(
-                            unwrap_err_or(a, Tree::Era),
-                            unwrap_err_or(b, Tree::Era),
-                        ))
-                    }
-                }
-                Tree::Dup(a, b) => {
-                    let (a, b) = join(
-                        self.read_era_with_visited(*a, visited.clone()),
-                        self.read_era_with_visited(*b, visited.clone()),
-                    )
-                    .await;
-                    if a.is_ok() && b.is_ok() {
-                        Ok(())
-                    } else {
-                        Err(Tree::d(
-                            unwrap_err_or(a, Tree::Era),
-                            unwrap_err_or(b, Tree::Era),
-                        ))
-                    }
-                }
-                Tree::Package(id) => {
-                    if visited.insert(id) {
-                        let tree = self.shared.net.lock().unwrap().dereference_package(id);
-                        self.as_era_with_visited(tree, visited).await
-                    } else {
-                        // already exists; return Ok, as infinite era trees are equivalent to eras
-                        Ok(())
-                    }
-                }
-                x => Err(x),
+    pub async fn as_era(&self, tree: Tree) {
+        match tree {
+            Tree::Era => (),
+            other => {
+                // eta expand
+                self.add_redex(other, Tree::e()).await;
             }
         }
-        .boxed()
-    }
-
-    pub async fn as_era(&self, tree: Tree) -> Result<(), Tree> {
-        self.as_era_with_visited(tree, Default::default()).await
     }
 
     /// Eagerly read back a CON node.
@@ -294,17 +239,9 @@ impl SharedState {
         self.as_con(tree).await
     }
 
-    pub async fn read_era_with_visited(
-        &self,
-        tree: Tree,
-        visited: IndexSet<usize>,
-    ) -> Result<(), Tree> {
-        let tree = self.read_port_as_maybe_var(tree).await;
-        self.as_era_with_visited(tree, visited).await
-    }
-
-    pub async fn read_era(&self, tree: Tree) -> Result<(), Tree> {
-        self.read_era_with_visited(tree, Default::default()).await
+    pub async fn read_era(&self, tree: Tree) {
+        let tree = self.read_port_as_tree(tree).await;
+        self.as_era(tree).await
     }
 
     pub async fn as_par(&self, tree: Tree) -> (Tree, Tree) {
@@ -319,7 +256,7 @@ impl SharedState {
         use futures::future::FutureExt;
         async move {
             if len == 0 {
-                self.read_era(tree).await.unwrap();
+                self.read_era(tree).await;
                 vec![]
             } else if len == 1 {
                 vec![tree]
@@ -497,11 +434,11 @@ impl SharedState {
                 ),
 
                 Type::Break(_) => {
-                    self.read_era(tree).await.unwrap();
+                    self.read_era(tree).await;
                     ReadbackResult::Break
                 }
                 Type::Continue(_) => {
-                    self.read_era(tree).await.unwrap();
+                    self.read_era(tree).await;
                     ReadbackResult::Continue
                 }
                 ty @ Type::Name(..) => ReadbackResult::Named(tree.with_type(ty)),
