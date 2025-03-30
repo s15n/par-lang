@@ -1244,8 +1244,10 @@ where
         name: Name,
         typ: Type<Loc, Name>,
     ) -> Result<(), TypeError<Loc, Name>> {
-        if let Some(_) = self.variables.get(&name) {
-            return Err(TypeError::ShadowedObligation(loc.clone(), name));
+        if let Some(typ) = self.variables.get(&name) {
+            if typ.is_linear(&self.type_defs)? {
+                return Err(TypeError::ShadowedObligation(loc.clone(), name));
+            }
         }
         self.variables.insert(name, typ);
         Ok(())
@@ -1270,17 +1272,23 @@ where
                     name.clone(),
                 ));
             }
-            let value = match self.get_variable(name) {
-                Some(value) => value,
+            let typ = match self.get_variable(name) {
+                Some(typ) => typ,
                 None => continue,
             };
-            target.put(loc, name.clone(), value)?;
+            if !typ.is_linear(&self.type_defs)? {
+                self.put(loc, name.clone(), typ.clone())?;
+            }
+            target.put(loc, name.clone(), typ)?;
         }
         Ok(())
     }
 
     pub fn obligations(&self) -> impl Iterator<Item = &Name> {
-        self.variables.iter().map(|(name, _)| name)
+        self.variables
+            .iter()
+            .filter(|(_, typ)| typ.is_linear(&self.type_defs).ok().unwrap_or(true))
+            .map(|(name, _)| name)
     }
 
     pub fn check_process(
@@ -1375,7 +1383,7 @@ where
                 );
             }
         }
-        if !matches!(command, Command::Begin(_, _, _) | Command::Loop(_)) {
+        if !matches!(command, Command::Begin(_, _, _, _) | Command::Loop(_, _)) {
             if let Type::Recursive(_, top_asc, top_label, body) = typ {
                 return self.check_command(
                     inference_subject,
@@ -1548,7 +1556,7 @@ where
                 (Command::Continue(process), inferred_types)
             }
 
-            Command::Begin(unfounded, label, process) => {
+            Command::Begin(unfounded, label, captures, process) => {
                 let Type::Recursive(typ_loc, typ_asc, typ_label, typ_body) = typ else {
                     return Err(TypeError::InvalidOperation(
                         loc.clone(),
@@ -1596,12 +1604,12 @@ where
                 });
 
                 (
-                    Command::Begin(*unfounded, label.clone(), process),
+                    Command::Begin(*unfounded, label.clone(), captures.clone(), process),
                     inferred_iterative,
                 )
             }
 
-            Command::Loop(label) => {
+            Command::Loop(label, captures) => {
                 if !matches!(typ, Type::Recursive(_, _, _, _)) {
                     return Err(TypeError::InvalidOperation(
                         loc.clone(),
@@ -1656,7 +1664,7 @@ where
                 self.cannot_have_obligations(loc)?;
 
                 (
-                    Command::Loop(label.clone()),
+                    Command::Loop(label.clone(), captures.clone()),
                     inferred_loop.or(Some(Type::Self_(loc.clone(), label.clone()))),
                 )
             }
@@ -1849,14 +1857,14 @@ where
                 (Command::Continue(process), Type::Break(loc.clone()))
             }
 
-            Command::Begin(unfounded, label, process) => {
+            Command::Begin(unfounded, label, captures, process) => {
                 self.loop_points.insert(
                     label.clone(),
                     (subject.clone(), Arc::new(self.variables.clone())),
                 );
                 let (process, body) = self.infer_process(process, subject)?;
                 (
-                    Command::Begin(*unfounded, label.clone(), process),
+                    Command::Begin(*unfounded, label.clone(), captures.clone(), process),
                     Type::Recursive(
                         loc.clone(),
                         if *unfounded {
@@ -1870,7 +1878,7 @@ where
                 )
             }
 
-            Command::Loop(label) => {
+            Command::Loop(label, captures) => {
                 let Some((driver, variables)) = self.loop_points.get(label).cloned() else {
                     return Err(TypeError::NoSuchLoopPoint(loc.clone(), label.clone()));
                 };
@@ -1904,7 +1912,7 @@ where
                 self.cannot_have_obligations(loc)?;
 
                 (
-                    Command::Loop(label.clone()),
+                    Command::Loop(label.clone(), captures.clone()),
                     Type::Self_(loc.clone(), label.clone()),
                 )
             }
@@ -1943,6 +1951,9 @@ where
                 }
                 let typ = self.get(loc, name)?;
                 typ.check_assignable(loc, target_type, &self.type_defs)?;
+                if !typ.is_linear(&self.type_defs)? {
+                    self.put(loc, name.clone(), typ.clone())?;
+                }
                 Ok(Arc::new(Expression::Reference(
                     loc.clone(),
                     name.clone(),
@@ -1990,6 +2001,9 @@ where
                     ));
                 }
                 let typ = self.get(loc, name)?;
+                if !typ.is_linear(&self.type_defs)? {
+                    self.put(loc, name.clone(), typ.clone())?;
+                }
                 Ok((
                     Arc::new(Expression::Reference(
                         loc.clone(),
