@@ -1577,7 +1577,12 @@ where
                     (
                         object.clone(),
                         Arc::new({
-                            let mut variables = self.variables.clone();
+                            let mut variables = self
+                                .variables
+                                .iter()
+                                .filter(|&(name, _)| captures.names.contains_key(name))
+                                .map(|(name, typ)| (name.clone(), typ.clone()))
+                                .collect::<IndexMap<_, _>>();
                             variables.insert(
                                 object.clone(),
                                 Type::Recursive(
