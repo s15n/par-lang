@@ -3,7 +3,10 @@ use std::{
     sync::Arc,
 };
 
-use crate::{par::parse::Loc, playground::CheckedProgram};
+use crate::{
+    par::{parse::Loc, types::TypeDefs},
+    playground::CheckedProgram,
+};
 use indexmap::{IndexMap, IndexSet};
 use std::hash::Hash;
 
@@ -88,6 +91,12 @@ pub enum Var {
     Loop(Option<Name>),
 }
 
+impl From<Name> for Var {
+    fn from(value: Name) -> Self {
+        Var::Name(value)
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LoopLabel(Option<Name>);
 
@@ -108,6 +117,7 @@ pub struct PackData {
 impl Context {
     pub fn pack(
         &mut self,
+        captures: Option<&Captures<Loc, Name>>,
         labels_in_scope: Option<&Vec<LoopLabel>>,
         net: &mut Net,
     ) -> (Tree, PackData) {
@@ -116,6 +126,14 @@ impl Context {
         let mut m_vars = vec![];
         let mut m_kind = vec![];
         for (name, (tree, kind)) in core::mem::take(&mut self.vars) {
+            if let Some(captures) = captures {
+                if let Var::Name(name) = &name {
+                    if !captures.names.contains_key(name) {
+                        net.link(tree.tree, Tree::e());
+                        continue;
+                    }
+                }
+            }
             if let Some(labels_in_scope) = labels_in_scope {
                 if let Var::Loop(label) = &name {
                     if !labels_in_scope.contains(&LoopLabel(label.clone())) {
@@ -150,7 +168,7 @@ impl Context {
             .zip(packed.types.iter().zip(packed.kinds.iter()))
         {
             let (v0, v1) = net.create_wire();
-            self.bind_variable_with_kind(&name, v0.with_type(ty.clone()), kind.clone());
+            self.bind_variable_with_kind(name.clone(), v0.with_type(ty.clone()), kind.clone());
             m_trees.push(v1);
         }
         self.loop_points = packed.loop_points.clone();
@@ -159,18 +177,21 @@ impl Context {
         context_out
     }
 
-    fn bind_variable_with_kind(&mut self, var: &Var, tree: TypedTree, kind: VariableKind) {
+    fn bind_variable_with_kind(&mut self, var: Var, tree: TypedTree, kind: VariableKind) {
         assert_ne!(kind, VariableKind::Global);
-        assert!(self.vars.insert(var.clone(), (tree, kind)).is_none())
+        match self.vars.insert(var.clone(), (tree, kind)) {
+            Some(x) => panic!("{:?}", x),
+            None => (),
+        }
     }
 }
 
-pub struct Compiler<'program> {
+pub struct Compiler {
     net: Net,
     context: Context,
-    program: &'program CheckedProgram,
+    type_defs: TypeDefs<Loc, Name>,
+    definitions: IndexMap<Name, (Loc, Arc<Expression<Loc, Name, Type<Loc, Name>>>)>,
     global_name_to_id: IndexMap<Name, usize>,
-    type_variables: IndexSet<Name>,
     id_to_ty: Vec<Type<Loc, Name>>,
     id_to_package: Vec<Net>,
     lazy_redexes: Vec<(Tree, Tree)>,
@@ -194,7 +215,14 @@ pub(crate) fn multiplex_trees(mut trees: Vec<Tree>) -> Tree {
     }
 }
 
-impl<'program> Compiler<'program> {
+impl Compiler {
+    fn get_kind(&self, tree: &TypedTree) -> VariableKind {
+        match tree.ty.is_linear(&self.type_defs).unwrap() {
+            true => VariableKind::Linear,
+            false => VariableKind::Replicable,
+        }
+    }
+
     fn compile_global(&mut self, name: &Name) -> Result<TypedTree> {
         if let Some(id) = self.global_name_to_id.get(name) {
             let ty = self.id_to_ty.get(*id).unwrap().clone();
@@ -209,9 +237,8 @@ impl<'program> Compiler<'program> {
                 dependents: self.compile_global_stack.clone(),
             });
         }
-        let global = self.program.definitions.get(name);
-        let global = match global {
-            Some(a) => &a.1,
+        let global = match self.definitions.get(name).cloned() {
+            Some((_, expr)) => expr,
             _ => return Err(Error::GlobalNotFound(name.clone())),
         };
         let debug = true;
@@ -277,13 +304,13 @@ impl<'program> Compiler<'program> {
     ) -> Result<T> {
         let mut vars = IndexMap::new();
         for (name, _) in captures.names.iter() {
-            let (tree, kind) = self.use_name(name)?;
+            let (tree, kind) = self.use_name(name, false)?;
             if kind != VariableKind::Global {
                 vars.insert(Var::Name(name.clone()), (tree, kind));
             }
         }
         for (label, _) in self.context.loop_points.clone().iter() {
-            let (tree, kind) = self.use_var(&Var::Loop(label.0.clone()))?;
+            let (tree, kind) = self.use_var(&Var::Loop(label.0.clone()), false)?;
             vars.insert(Var::Loop(label.0.clone()), (tree, kind));
         }
         let loop_points_before = self.context.loop_points.clone();
@@ -294,29 +321,34 @@ impl<'program> Compiler<'program> {
         t
     }
 
-    fn bind_variable(&mut self, name: &Name, tree: TypedTree) -> Result<()> {
-        if self
-            .context
-            .vars
-            .insert(Var::Name(name.clone()), (tree, VariableKind::Linear))
-            .is_some()
-        {
-            return Err(Error::UnusedVar(Loc::default()));
-        } else {
-            Ok(())
+    fn bind_variable(&mut self, var: impl Into<Var>, tree: TypedTree) -> Result<()> {
+        let kind = self.get_kind(&tree);
+        let prev = self.context.vars.insert(var.into(), (tree, kind));
+        match prev {
+            Some((prev_tree, prev_kind)) => {
+                if prev_kind == VariableKind::Linear {
+                    return Err(Error::UnusedVar(Loc::default()));
+                }
+                self.net.link(prev_tree.tree, Tree::e());
+                Ok(())
+            }
+            None => Ok(()),
         }
     }
 
-    fn instantiate_name(&mut self, name: &Name) -> Result<TypedTree> {
-        let (value, kind) = self.use_name(name)?;
+    fn instantiate_name(&mut self, name: &Name, in_command: bool) -> Result<TypedTree> {
+        let (value, kind) = self.use_name(name, in_command)?;
         if kind == VariableKind::Boxed {
             todo!()
         }
         Ok(value)
     }
 
-    fn use_var(&mut self, var: &Var) -> Result<(TypedTree, VariableKind)> {
+    fn use_var(&mut self, var: &Var, in_command: bool) -> Result<(TypedTree, VariableKind)> {
         if let Some((tree, kind)) = self.context.vars.swap_remove(var) {
+            if in_command {
+                return Ok((tree, kind))
+            }
             match kind {
                 VariableKind::Linear => Ok((tree, kind)),
                 kind => {
@@ -347,9 +379,9 @@ impl<'program> Compiler<'program> {
         }
     }
 
-    fn use_name(&mut self, name: &Name) -> Result<(TypedTree, VariableKind)> {
+    fn use_name(&mut self, name: &Name, in_command: bool) -> Result<(TypedTree, VariableKind)> {
         if self.context.vars.contains_key(&Var::Name(name.clone())) {
-            return self.use_var(&Var::Name(name.clone()));
+            return self.use_var(&Var::Name(name.clone()), in_command);
         }
         match self.compile_global(name) {
             Ok(value) => Ok((value, VariableKind::Global)),
@@ -367,7 +399,7 @@ impl<'program> Compiler<'program> {
             },
             TypedTree {
                 tree: v1,
-                ty: t.dual(&self.program.type_defs).unwrap(),
+                ty: t.dual(&self.type_defs).unwrap(),
             },
         )
     }
@@ -417,10 +449,10 @@ impl<'program> Compiler<'program> {
     fn normalize_type(&mut self, ty: Type<Loc, Name>) -> Type<Loc, Name> {
         match ty {
             Type::Name(loc, name, args) => {
-                if self.type_variables.contains(&name) {
+                if self.type_defs.vars.contains(&name) {
                     return Type::Name(loc, name, args);
                 } else {
-                    let ty = self.program.type_defs.get(&loc, &name, &args).unwrap();
+                    let ty = self.type_defs.get(&loc, &name, &args).unwrap();
                     self.normalize_type(ty)
                 }
             }
@@ -433,13 +465,13 @@ impl<'program> Compiler<'program> {
                 Type::Choice(loc, index_map)
             }
             Type::Recursive(_, asc, name, body) => self.normalize_type(
-                Type::expand_recursive(&asc, &name, &body, &self.program.type_defs).unwrap(),
+                Type::expand_recursive(&asc, &name, &body, &self.type_defs).unwrap(),
             ),
             Type::Iterative(_, asc, name, body) => self.normalize_type(
-                Type::expand_iterative(&asc, &name, &body, &self.program.type_defs).unwrap(),
+                Type::expand_iterative(&asc, &name, &body, &self.type_defs).unwrap(),
             ),
-            Type::Chan(loc, body) => {
-                let dual = body.dual(&self.program.type_defs).unwrap();
+            Type::Chan(_, body) => {
+                let dual = body.dual(&self.type_defs).unwrap();
                 if matches!(dual, Type::Chan(..)) {
                     dual
                 } else {
@@ -455,11 +487,11 @@ impl<'program> Compiler<'program> {
         expr: &Expression<Loc, Name, Type<Loc, Name>>,
     ) -> Result<TypedTree> {
         match expr {
-            Expression::Reference(_, name, _) => self.instantiate_name(name),
+            Expression::Reference(_, name, _) => self.instantiate_name(name, false),
             Expression::Fork(_, captures, name, _, typ, proc) => {
                 self.with_captures(captures, |this| {
                     let (v0, v1) = this.create_typed_wire(typ.clone());
-                    this.bind_variable(name, v0)?;
+                    this.bind_variable(name.clone(), v0)?;
                     this.compile_process(proc)?;
                     Ok(v1)
                 })
@@ -476,18 +508,17 @@ impl<'program> Compiler<'program> {
             self.show_state();
         }
         match proc {
-            Process::Let(_, key, _, _, expr, rest) => {
+            Process::Let(_, name, _, _, expr, rest) => {
                 let value = self.compile_expression(expr)?;
-                self.context
-                    .vars
-                    .insert(Var::Name(key.clone()), (value, VariableKind::Linear));
+                self.bind_variable(name.clone(), value)?;
                 self.compile_process(rest)
             }
 
             Process::Do(loc, name, target_ty, command) => {
                 self.compile_command(loc, name.clone(), target_ty.clone(), command)
             }
-            _ => todo!(),
+
+            Process::Telltypes(_, _) => unreachable!(),
         }
     }
 
@@ -501,33 +532,37 @@ impl<'program> Compiler<'program> {
         println!("{:?}", loc);
         match cmd {
             Command::Link(expr) => {
-                let subject = self.instantiate_name(&name)?;
+                let subject = self.instantiate_name(&name, true)?;
                 let value = self.compile_expression(expr)?;
                 self.link_typed(subject, value);
                 self.end_context()?;
             }
             // types get erased.
-            Command::SendType(target_type, process) => {
-                let subject = self.instantiate_name(&name)?;
-                let Type::ReceiveType(_, src_name, ret_type) = self.normalize_type(subject.ty.clone())
+            Command::SendType(argument, process) => {
+                let subject = self.instantiate_name(&name, true)?;
+                let Type::ReceiveType(_, type_name, ret_type) = self.normalize_type(subject.ty.clone())
                 else {
                     panic!("Unexpected type for SendType: {:?}", subject.ty);
                 };
-                let ret_type = ret_type.substitute(&src_name, target_type).unwrap();
-                self.bind_variable(&name, subject.tree.with_type(ret_type))?;
+                let ret_type = ret_type.substitute(&type_name, argument).unwrap();
+                self.bind_variable(name, subject.tree.with_type(ret_type))?;
                 self.compile_process(process)?;
             }
-            Command::ReceiveType(_, process) => {
-                let subject = self.instantiate_name(&name)?;
-                let Type::SendType(_, dest_name, ret_type) = self.normalize_type(subject.ty.clone())
+            Command::ReceiveType(parameter, process) => {
+                let subject = self.instantiate_name(&name, true)?;
+                let Type::SendType(_, type_name, ret_type) = self.normalize_type(subject.ty.clone())
                 else {
                     panic!("Unexpected type for ReceiveType: {:?}", subject.ty);
                 };
-                self.bind_variable(&name, subject.tree.with_type(*ret_type))?;
-                let was_empty_before = self.type_variables.insert(dest_name.clone());
+                let ret_type = ret_type
+                    .clone()
+                    .substitute(&type_name, &Type::Var(loc.clone(), parameter.clone()))
+                    .unwrap();
+                let was_empty_before = self.type_defs.vars.insert(parameter.clone());
+                self.bind_variable(name, subject.tree.with_type(ret_type))?;
                 self.compile_process(process)?;
                 if was_empty_before {
-                    self.type_variables.swap_remove(&dest_name);
+                    self.type_defs.vars.shift_remove(parameter);
                 }
             }
             Command::Send(expr, process) => {
@@ -536,13 +571,13 @@ impl<'program> Compiler<'program> {
                 // name = free
                 // free = (name < expr >)
                 // < process >
-                let subject = self.instantiate_name(&name)?;
+                let subject = self.instantiate_name(&name, true)?;
                 let Type::Receive(_, _, ret_type) = self.normalize_type(subject.ty.clone()) else {
                     panic!("Unexpected type for Receive: {:?}", subject.ty);
                 };
                 let expr = self.compile_expression(expr)?;
                 let (v0, v1) = self.create_typed_wire(*ret_type);
-                self.bind_variable(&name, v0)?;
+                self.bind_variable(name, v0)?;
                 self.net.link(Tree::c(v1.tree, expr.tree), subject.tree);
                 self.compile_process(process)?;
             }
@@ -552,19 +587,20 @@ impl<'program> Compiler<'program> {
                 // name = free
                 // free = (name target)
                 // < process >
-                let subject = self.instantiate_name(&name)?;
-                let Type::Send(_, arg_type, ret_type) = self.normalize_type(subject.ty.clone()) else {
+                let subject = self.instantiate_name(&name, true)?;
+                let Type::Send(_, arg_type, ret_type) = self.normalize_type(subject.ty.clone())
+                else {
                     panic!("Unexpected type for Receive: {:?}", subject.ty);
                 };
                 let (v0, v1) = self.create_typed_wire(*arg_type);
                 let (w0, w1) = self.create_typed_wire(*ret_type);
-                self.bind_variable(&name, w0)?;
-                self.bind_variable(&target, v0)?;
+                self.bind_variable(name, w0)?;
+                self.bind_variable(target.clone(), v0)?;
                 self.net.link(Tree::c(w1.tree, v1.tree), subject.tree);
                 self.compile_process(process)?;
             }
             Command::Choose(chosen, process) => {
-                let subject = self.instantiate_name(&name)?;
+                let subject = self.instantiate_name(&name, true)?;
                 let Type::Choice(_, branches) = self.normalize_type(subject.ty.clone()) else {
                     panic!("Unexpected type for Choose: {:?}", subject.ty);
                 };
@@ -575,14 +611,14 @@ impl<'program> Compiler<'program> {
                 let (v0, v1) = self.create_typed_wire(branch_type.clone());
                 let choosing_tree = self.either_instance(v1.tree, branch_index, branches.len());
                 self.net.link(choosing_tree, subject.tree);
-                self.bind_variable(&name, v0)?;
+                self.bind_variable(name, v0)?;
                 self.compile_process(process)?;
             }
             Command::Match(names, processes) => {
                 self.context.unguarded_loop_labels.clear();
-                let old_tree = self.instantiate_name(&name)?;
+                let old_tree = self.instantiate_name(&name, true)?;
                 // Multiplex all other variables in the context.
-                let (context_in, pack_data) = self.context.pack(None, &mut self.net);
+                let (context_in, pack_data) = self.context.pack(None, None, &mut self.net);
 
                 let mut branches = vec![];
                 let Type::Either(_, required_branches) = self.normalize_type(ty.clone()) else {
@@ -596,7 +632,7 @@ impl<'program> Compiler<'program> {
                     .zip(required_branches.values())
                 {
                     let (w0, w1) = self.create_typed_wire(branch.clone());
-                    self.bind_variable(&name, w0)?;
+                    self.bind_variable(name.clone(), w0)?;
 
                     let context_out = self.context.unpack(&pack_data, &mut self.net);
                     self.compile_process(process)?;
@@ -610,7 +646,7 @@ impl<'program> Compiler<'program> {
                 // < name ! >
                 // ==
                 // name = *
-                let a = self.instantiate_name(&name)?.tree;
+                let a = self.instantiate_name(&name, true)?.tree;
                 self.net.link(a, Tree::e());
                 self.end_context()?;
             }
@@ -619,11 +655,11 @@ impl<'program> Compiler<'program> {
                 // ==
                 // name = *
                 // < process >
-                let a = self.instantiate_name(&name)?.tree;
+                let a = self.instantiate_name(&name, true)?.tree;
                 self.net.link(a, Tree::e());
                 self.compile_process(process)?;
             }
-            Command::Begin(_, label, process) => {
+            Command::Begin(_, label, captures, process) => {
                 let label = LoopLabel(label.clone());
                 self.context.vars.sort_keys();
 
@@ -648,7 +684,7 @@ impl<'program> Compiler<'program> {
 
                 self.context.unguarded_loop_labels.push(label.clone());
 
-                let (context_in, pack_data) = self.context.pack(None, &mut self.net);
+                let (context_in, pack_data) = self.context.pack(Some(captures), None, &mut self.net);
                 let (id, _) = self.in_package(
                     |this, _| {
                         let context_out = this.context.unpack(&pack_data, &mut this.net);
@@ -660,15 +696,15 @@ impl<'program> Compiler<'program> {
                 self.net.link(def1, Tree::Package(id));
                 self.net.link(context_in, Tree::Package(id));
             }
-            Command::Loop(label) => {
+            Command::Loop(label, captures) => {
                 let label = LoopLabel(label.clone());
                 if self.context.unguarded_loop_labels.contains(&label) {
                     return Err(Error::UnguardedLoop(loc.clone(), label.clone().0));
                 }
-                let (tree, _) = self.use_var(&Var::Loop(label.0.clone()))?;
+                let (tree, _) = self.use_var(&Var::Loop(label.0.clone()), true)?;
                 let labels_in_scope = self.context.loop_points.get(&label).unwrap().clone();
                 self.context.vars.sort_keys();
-                let (context_in, _) = self.context.pack(Some(&labels_in_scope), &mut self.net);
+                let (context_in, _) = self.context.pack(Some(captures), Some(&labels_in_scope), &mut self.net);
                 self.lazy_redexes.push((tree.tree, context_in));
             }
         };
@@ -697,17 +733,17 @@ pub fn compile_file(program: &CheckedProgram) -> Result<IcCompiled> {
             loop_points: IndexMap::default(),
             unguarded_loop_labels: Default::default(),
         },
+        type_defs: program.type_defs.clone(),
+        definitions: program.definitions.clone(),
         global_name_to_id: Default::default(),
         id_to_package: Default::default(),
         id_to_ty: Default::default(),
-        type_variables: Default::default(),
         compile_global_stack: Default::default(),
         lazy_redexes: vec![],
-        program,
     };
 
-    for k in compiler.program.definitions.clone().keys() {
-        compiler.compile_global(k)?;
+    for name in compiler.definitions.keys().cloned().collect::<Vec<_>>() {
+        compiler.compile_global(&name)?;
     }
 
     Ok(IcCompiled {

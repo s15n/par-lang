@@ -176,8 +176,11 @@ impl TestingState {
 
                 ReadbackResult::Expand(package) => {
                     let tree = self.shared.expand_once(package.tree).await;
-                    self.matches(ReadbackResult::Suspended(tree.with_type(package.ty)), pattern)
-                        .await
+                    self.matches(
+                        ReadbackResult::Suspended(tree.with_type(package.ty)),
+                        pattern,
+                    )
+                    .await
                 }
                 ReadbackResult::Variable(_) => todo!(),
                 _ => todo!(),
