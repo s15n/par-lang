@@ -33,7 +33,12 @@ pub enum Command<Loc, Name, Typ> {
     Match(Arc<[Name]>, Box<[Arc<Process<Loc, Name, Typ>>]>),
     Break,
     Continue(Arc<Process<Loc, Name, Typ>>),
-    Begin(bool, Option<Name>, Captures<Loc, Name>, Arc<Process<Loc, Name, Typ>>),
+    Begin(
+        bool,
+        Option<Name>,
+        Captures<Loc, Name>,
+        Arc<Process<Loc, Name, Typ>>,
+    ),
     Loop(Option<Name>, Captures<Loc, Name>),
 
     SendType(Type<Loc, Name>, Arc<Process<Loc, Name, Typ>>),
@@ -171,10 +176,15 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Process<Loc, Name, Typ> {
                     }
                     Command::Break => Command::Break,
                     Command::Continue(process) => Command::Continue(process.optimize()),
-                    Command::Begin(unfounded, label, captures, process) => {
-                        Command::Begin(unfounded.clone(), label.clone(), captures.clone(), process.optimize())
+                    Command::Begin(unfounded, label, captures, process) => Command::Begin(
+                        unfounded.clone(),
+                        label.clone(),
+                        captures.clone(),
+                        process.optimize(),
+                    ),
+                    Command::Loop(label, captures) => {
+                        Command::Loop(label.clone(), captures.clone())
                     }
-                    Command::Loop(label, captures) => Command::Loop(label.clone(), captures.clone()),
                     Command::SendType(argument, process) => {
                         Command::SendType(argument.clone(), process.optimize())
                     }
@@ -241,14 +251,14 @@ impl<Loc: Clone, Name: Clone + Hash + Eq, Typ: Clone> Command<Loc, Name, Typ> {
                 let mut loop_points = loop_points.clone();
                 loop_points.insert(label.clone(), loop_caps.clone());
                 let (process, caps) = process.fix_captures(&loop_points);
-                (Self::Begin(unfounded.clone(), label.clone(), loop_caps,  process), caps)
+                (
+                    Self::Begin(unfounded.clone(), label.clone(), loop_caps, process),
+                    caps,
+                )
             }
             Self::Loop(label, _) => {
                 let loop_caps = loop_points.get(label).cloned().unwrap_or_default();
-                (
-                    Self::Loop(label.clone(), loop_caps.clone()),
-                    loop_caps,
-                )
+                (Self::Loop(label.clone(), loop_caps.clone()), loop_caps)
             }
             Self::SendType(argument, process) => {
                 let (process, caps) = process.fix_captures(loop_points);

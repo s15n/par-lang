@@ -246,13 +246,11 @@ impl Compiler {
             println!("{global:#?}");
         }*/
 
-        let (id, typ) = self.in_package(
-            |this, _| {
-                let mut s = String::new();
-                global.pretty(&mut s, 0).unwrap();
-                this.compile_expression(global.as_ref())
-            },
-        )?;
+        let (id, typ) = self.in_package(|this, _| {
+            let mut s = String::new();
+            global.pretty(&mut s, 0).unwrap();
+            this.compile_expression(global.as_ref())
+        })?;
         self.global_name_to_id.insert(name.clone(), id);
         self.compile_global_stack.shift_remove(name);
         Ok(Tree::Package(id).with_type(typ))
@@ -346,7 +344,7 @@ impl Compiler {
     fn use_var(&mut self, var: &Var, in_command: bool) -> Result<(TypedTree, VariableKind)> {
         if let Some((tree, kind)) = self.context.vars.swap_remove(var) {
             if in_command {
-                return Ok((tree, kind))
+                return Ok((tree, kind));
             }
             match kind {
                 VariableKind::Linear => Ok((tree, kind)),
@@ -539,7 +537,8 @@ impl Compiler {
             // types get erased.
             Command::SendType(argument, process) => {
                 let subject = self.instantiate_name(&name, true)?;
-                let Type::ReceiveType(_, type_name, ret_type) = self.normalize_type(subject.ty.clone())
+                let Type::ReceiveType(_, type_name, ret_type) =
+                    self.normalize_type(subject.ty.clone())
                 else {
                     panic!("Unexpected type for SendType: {:?}", subject.ty);
                 };
@@ -549,7 +548,8 @@ impl Compiler {
             }
             Command::ReceiveType(parameter, process) => {
                 let subject = self.instantiate_name(&name, true)?;
-                let Type::SendType(_, type_name, ret_type) = self.normalize_type(subject.ty.clone())
+                let Type::SendType(_, type_name, ret_type) =
+                    self.normalize_type(subject.ty.clone())
                 else {
                     panic!("Unexpected type for ReceiveType: {:?}", subject.ty);
                 };
@@ -683,7 +683,8 @@ impl Compiler {
 
                 self.context.unguarded_loop_labels.push(label.clone());
 
-                let (context_in, pack_data) = self.context.pack(Some(captures), None, &mut self.net);
+                let (context_in, pack_data) =
+                    self.context.pack(Some(captures), None, &mut self.net);
                 let (id, _) = self.in_package(
                     |this, _| {
                         let context_out = this.context.unpack(&pack_data, &mut this.net);
@@ -703,7 +704,9 @@ impl Compiler {
                 let (tree, _) = self.use_var(&Var::Loop(label.0.clone()), false)?;
                 let labels_in_scope = self.context.loop_points.get(&label).unwrap().clone();
                 self.context.vars.sort_keys();
-                let (context_in, _) = self.context.pack(Some(captures), Some(&labels_in_scope), &mut self.net);
+                let (context_in, _) =
+                    self.context
+                        .pack(Some(captures), Some(&labels_in_scope), &mut self.net);
                 self.lazy_redexes.push((tree.tree, context_in));
             }
         };
