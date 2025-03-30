@@ -452,6 +452,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Construct<Loc, Name> {
                     process::Command::Begin(
                         *unfounded,
                         Some(Internal::Result(label.clone())),
+                        Captures::new(),
                         process,
                     ),
                 ))
@@ -461,7 +462,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Construct<Loc, Name> {
                 loc.clone(),
                 Internal::Result(None),
                 (),
-                process::Command::Loop(Some(Internal::Result(label.clone()))),
+                process::Command::Loop(Some(Internal::Result(label.clone())), Captures::new()),
             )),
 
             Self::SendType(loc, argument, construct) => {
@@ -584,6 +585,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Apply<Loc, Name> {
                     process::Command::Begin(
                         *unfounded,
                         Some(Internal::Object(label.clone())),
+                        Captures::new(),
                         process,
                     ),
                 ))
@@ -593,7 +595,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Apply<Loc, Name> {
                 loc.clone(),
                 Internal::Object(None),
                 (),
-                process::Command::Loop(Some(Internal::Object(label.clone()))),
+                process::Command::Loop(Some(Internal::Object(label.clone())), Captures::new()),
             )),
 
             Self::SendType(loc, argument, apply) => {
@@ -789,6 +791,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
                     process::Command::Begin(
                         *unfounded,
                         label.clone().map(Internal::Original),
+                        Captures::new(),
                         process,
                     ),
                 ))
@@ -798,7 +801,7 @@ impl<Loc: Clone, Name: Clone + Hash + Eq> Command<Loc, Name> {
                 loc.clone(),
                 object_internal,
                 (),
-                process::Command::Loop(label.clone().map(Internal::Original)),
+                process::Command::Loop(label.clone().map(Internal::Original), Captures::new()),
             )),
 
             Self::SendType(loc, argument, command) => {
