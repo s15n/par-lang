@@ -11,12 +11,12 @@ use winnow::{
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TokenKind {
-    LPar,
-    RPar,
-    LCrl,
-    RCrl,
-    LBkt,
-    RBkt,
+    LParen,
+    RParen,
+    LCurly,
+    RCurly,
+    LBrack,
+    RBrack,
     Lt,
     Gt,
 
@@ -70,12 +70,12 @@ impl PartialEq<TokenKind> for Token<'_> {
 impl TokenKind {
     pub fn expected(&self) -> &'static str {
         match self {
-            TokenKind::LPar => "(",
-            TokenKind::RPar => ")",
-            TokenKind::LCrl => "{",
-            TokenKind::RCrl => "}",
-            TokenKind::LBkt => "[",
-            TokenKind::RBkt => "]",
+            TokenKind::LParen => "(",
+            TokenKind::RParen => ")",
+            TokenKind::LCurly => "{",
+            TokenKind::RCurly => "}",
+            TokenKind::LBrack => "[",
+            TokenKind::RBrack => "]",
             TokenKind::Lt => "<",
             TokenKind::Gt => ">",
 
@@ -201,27 +201,27 @@ pub fn lex<'s>(input: &'s str) -> Vec<Token<'s>> {
                 }
                 '[' => {
                     let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::LBkt))
+                    Some((raw, TokenKind::LBrack))
                 }
                 ']' => {
                     let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::RBkt))
+                    Some((raw, TokenKind::RBrack))
                 }
                 '(' => {
                     let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::LPar))
+                    Some((raw, TokenKind::LParen))
                 }
                 ')' => {
                     let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::RPar))
+                    Some((raw, TokenKind::RParen))
                 }
                 '{' => {
                     let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::LCrl))
+                    Some((raw, TokenKind::LCurly))
                 }
                 '}' => {
                     let raw = any::<&str, Error>.take().parse_next(input)?;
-                    Some((raw, TokenKind::RCrl))
+                    Some((raw, TokenKind::RCurly))
                 }
                 '<' => Some(
                     alt((
@@ -309,15 +309,15 @@ mod test {
         assert_eq!(
             tokens.iter().map(|x| x.kind).collect::<Vec<_>>(),
             vec![
-                TokenKind::LPar,
-                TokenKind::LCrl,
-                TokenKind::LBkt,
+                TokenKind::LParen,
+                TokenKind::LCurly,
+                TokenKind::LBrack,
                 TokenKind::Lt,
                 TokenKind::Gt,
                 TokenKind::Link,
-                TokenKind::RBkt,
-                TokenKind::RCrl,
-                TokenKind::RPar,
+                TokenKind::RBrack,
+                TokenKind::RCurly,
+                TokenKind::RParen,
                 TokenKind::Colon,
                 TokenKind::Identifier,
                 TokenKind::Colon,
