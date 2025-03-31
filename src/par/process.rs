@@ -1,11 +1,11 @@
+use super::types::Type;
+use crate::location::Span;
 use indexmap::IndexMap;
 use std::{
     fmt::{self, Display, Write},
     hash::Hash,
     sync::Arc,
 };
-use crate::location::Span;
-use super::types::Type;
 
 #[derive(Clone, Debug)]
 pub enum Process<Loc, Name, Typ> {
@@ -24,10 +24,7 @@ pub enum Process<Loc, Name, Typ> {
 #[derive(Clone, Debug)]
 pub enum Command<Loc, Name, Typ> {
     Link(Arc<Expression<Name, Typ>>),
-    Send(
-        Arc<Expression<Name, Typ>>,
-        Arc<Process<Loc, Name, Typ>>,
-    ),
+    Send(Arc<Expression<Name, Typ>>, Arc<Process<Loc, Name, Typ>>),
     Receive(Name, Option<Type<Name>>, Arc<Process<Loc, Name, Typ>>),
     Choose(Name, Arc<Process<Loc, Name, Typ>>),
     Match(Arc<[Name]>, Box<[Arc<Process<Loc, Name, Typ>>]>),
@@ -51,7 +48,7 @@ pub enum Expression<Name, Typ> {
         chan_type: Typ,
         expr_type: Typ,
         process: Arc<Process<Span, Name, Typ>>,
-    }
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -151,9 +148,11 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Span, Name, Typ> {
                     Command::Link(expression) => {
                         let expression = expression.optimize();
                         match expression.optimize().as_ref() {
-                            Expression::Fork { chan_name: channel, process, ..} if name == channel => {
-                                return Arc::clone(&process)
-                            }
+                            Expression::Fork {
+                                chan_name: channel,
+                                process,
+                                ..
+                            } if name == channel => return Arc::clone(&process),
                             _ => Command::Link(expression),
                         }
                     }
@@ -270,7 +269,15 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Expression<Name, Typ> {
                 Arc::new(Self::Reference(loc.clone(), name.clone(), typ.clone())),
                 Captures::single(name.clone(), loc.clone()),
             ),
-            Self::Fork { span, chan_name: channel, chan_annotation: annotation, chan_type, expr_type, process, .. } => {
+            Self::Fork {
+                span,
+                chan_name: channel,
+                chan_annotation: annotation,
+                chan_type,
+                expr_type,
+                process,
+                ..
+            } => {
                 let (process, mut caps) = process.fix_captures(loop_points);
                 caps.remove(channel);
                 (
@@ -294,7 +301,15 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Expression<Name, Typ> {
             Self::Reference(loc, name, typ) => {
                 Arc::new(Self::Reference(loc.clone(), name.clone(), typ.clone()))
             }
-            Self::Fork { span, captures, chan_name, chan_annotation, chan_type, expr_type, process } => Arc::new(Self::Fork {
+            Self::Fork {
+                span,
+                captures,
+                chan_name,
+                chan_annotation,
+                chan_type,
+                expr_type,
+                process,
+            } => Arc::new(Self::Fork {
                 span: span.clone(),
                 captures: captures.clone(),
                 chan_name: chan_name.clone(),
@@ -307,11 +322,11 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Expression<Name, Typ> {
     }
 }
 
-impl <Name, Typ: Clone> Expression<Name, Typ> {
+impl<Name, Typ: Clone> Expression<Name, Typ> {
     pub fn get_type(&self) -> Typ {
         match self {
             Self::Reference(_, _, typ) => typ.clone(),
-            Self::Fork { expr_type, ..} => expr_type.clone(),
+            Self::Fork { expr_type, .. } => expr_type.clone(),
         }
     }
 }
@@ -424,7 +439,12 @@ impl<Name: Display, Typ> Expression<Name, Typ> {
                 write!(f, "{}", name)
             }
 
-            Self::Fork { captures, chan_name: channel, process, .. } => {
+            Self::Fork {
+                captures,
+                chan_name: channel,
+                process,
+                ..
+            } => {
                 write!(f, "chan {} |", channel)?;
                 for (i, cap) in captures.names.keys().enumerate() {
                     if i > 0 {

@@ -1,11 +1,11 @@
+use super::process::{Captures, Command, Expression, Process};
+use crate::location::Span;
 use futures::{
     channel::oneshot,
     task::{Spawn, SpawnExt},
 };
 use indexmap::IndexMap;
 use std::{hash::Hash, sync::Arc};
-use crate::location::Span;
-use super::process::{Captures, Command, Expression, Process};
 
 #[derive(Clone, Debug)]
 pub enum Error<Loc, Name> {
@@ -180,7 +180,13 @@ where
         match expression {
             Expression::Reference(loc, name, _) => self.get(loc, name),
 
-            Expression::Fork { span, captures: cap, chan_name: channel, process, .. } => {
+            Expression::Fork {
+                span,
+                captures: cap,
+                chan_name: channel,
+                process,
+                ..
+            } => {
                 let mut context = self.split();
                 self.capture(cap, &mut context)?;
 

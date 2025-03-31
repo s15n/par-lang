@@ -1,7 +1,7 @@
+use lsp_types::Uri;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use lsp_types::Uri;
 
 #[derive(Clone)]
 pub struct IO {

@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-use lsp_types::{self as lsp, Uri};
-use miette::Diagnostic;
 use crate::language_server::instance::CompileError;
 use crate::location::{Span, Spanning};
+use lsp_types::{self as lsp, Uri};
+use miette::Diagnostic;
+use std::collections::HashMap;
 
 pub struct Feedback {
     diagnostics: HashMap<Uri, Vec<lsp::Diagnostic>>,
@@ -57,25 +57,21 @@ pub fn diagnostic_for_error(err: &CompileError) -> lsp::Diagnostic {
     use crate::playground::Error;
 
     let (span, message, help, related_span) = match err {
-        CompileError::Compile(Error::Parse(err))
-        => (
+        CompileError::Compile(Error::Parse(err)) => (
             err.span(),
             err.message().to_string(),
             err.help().map(|s| s.to_string()),
             None,
         ),
 
-        CompileError::Compile(Error::Compile(err))
-        => (
+        CompileError::Compile(Error::Compile(err)) => (
             err.span(),
             err.message().to_string(),
             Some("Help".to_string()),
             None,
         ),
 
-        | CompileError::Compile(Error::Type(err))
-        | CompileError::Types(err)
-        => {
+        CompileError::Compile(Error::Type(err)) | CompileError::Types(err) => {
             let (span, related_span) = err.spans();
             (
                 span,
@@ -83,11 +79,11 @@ pub fn diagnostic_for_error(err: &CompileError) -> lsp::Diagnostic {
                 Some("Help".to_string()),
                 related_span,
             )
-        },
+        }
 
         CompileError::Compile(Error::Runtime(_)) => {
             unreachable!("Runtime error at compile time")
-        },
+        }
     };
     let message = match help {
         Some(help) => format!("{}\n{}", message, help),
@@ -115,6 +111,6 @@ fn span_to_lsp_range(span: &Span) -> lsp::Range {
         end: lsp::Position {
             line: span.end.row as u32,
             character: span.end.column as u32,
-        }
+        },
     }
 }
