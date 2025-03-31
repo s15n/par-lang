@@ -1,5 +1,4 @@
 use super::server::LanguageServer;
-use tracing::Level;
 
 pub fn main() {
     tracing_subscriber::fmt()

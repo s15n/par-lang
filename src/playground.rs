@@ -595,13 +595,13 @@ impl Playground {
 }
 
 /// Create a `LabeledSpan` without a label at `span`
-pub fn labels_from_span(code: &str, span: &Span) -> Vec<LabeledSpan> {
+pub fn labels_from_span(_code: &str, span: &Span) -> Vec<LabeledSpan> {
     vec![LabeledSpan::new_with_span(
         None,
         SourceSpan::new(SourceOffset::from(span.start.offset), span.len()),
     )]
 }
-pub fn span_to_source_span(code: &str, span: &Span) -> Option<SourceSpan> {
+pub fn span_to_source_span(_code: &str, span: &Span) -> Option<SourceSpan> {
     Some(SourceSpan::new(
         SourceOffset::from(span.start.offset),
         span.len(),

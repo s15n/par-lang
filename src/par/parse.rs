@@ -19,7 +19,7 @@ use winnow::{
     error::{
         AddContext, ContextError, ErrMode, ModalError, ParserError, StrContext, StrContextValue,
     },
-    stream::{Accumulate, Compare, Stream, StreamIsPartial},
+    stream::{Accumulate, Stream},
     token::any,
     Parser,
 };
@@ -207,81 +207,6 @@ where
     // .context(StrContext::Label("comment"))
     .take()
 }
-
-fn keyword<I>() -> impl Parser<I, I::Slice, Error>
-where
-    I: Stream + StreamIsPartial + for<'s> Compare<&'s str>,
-{
-    alt((
-        "type",
-        "dec",
-        "def",
-        "chan",
-        "let",
-        "do",
-        "in",
-        "begin",
-        "unfounded",
-        "loop",
-        "telltypes",
-        "either",
-        "recursive",
-        "iterative",
-        "self",
-    ))
-    .context(StrContext::Label("keyword"))
-}
-/*
-fn with_loc<'a, O, E>(
-    mut parser: impl Parser<Input<'a>, O, E>,
-) -> impl Parser<Input<'a>, (O, Loc), E>
-where
-    E: ParserError<Input<'a>> + ModalError,
-{
-    move |input: &mut Input<'a>| -> core::result::Result<(O, Loc), E> {
-        let loc = match peek(any::<_, E>).parse_next(input) {
-            Ok(x) => x.loc.clone(),
-            Err(e) => {
-                let checkpoint = input.checkpoint();
-                input.reset_to_start();
-                let Some(last) = input.last() else {
-                    return Err(e);
-                };
-                let res = match last.loc {
-                    Loc::Code { line, column } => Loc::Code {
-                        line,
-                        column: column + 1,
-                    },
-                    Loc::External => Loc::External,
-                };
-                input.reset(&checkpoint);
-                res
-            }
-        };
-        let out = parser.parse_next(input)?;
-        Ok((out, loc))
-    }
-}
-#[allow(dead_code)]
-fn with_span<'a, O, E>(
-    mut parser: impl Parser<Input<'a>, O, E>,
-) -> impl Parser<Input<'a>, (O, core::ops::Range<usize>), E>
-where
-    E: ParserError<Input<'a>>,
-{
-    move |input: &mut Input<'a>| -> core::result::Result<(O, core::ops::Range<usize>), E> {
-        let last = input.last().cloned();
-        let start = peek(any).parse_next(input)?.span.start;
-        let out = parser.parse_next(input)?;
-        let end = peek::<_, &Token, E, _>(any)
-            .parse_next(input)
-            .unwrap_or(&last.unwrap()) // if input now empty, use that last token.
-            .span
-            .end;
-        Ok((out, start..end))
-    }
-}
-*/
 
 fn name(input: &mut Input) -> Result<Name> {
     t(TokenKind::Identifier)

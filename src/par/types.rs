@@ -8,7 +8,7 @@ use std::{
 
 use super::{
     language::Program,
-    process, //process::{process::Captures, process::Command, process::Expression, process::Process},
+    process,
 };
 use crate::location::{Span, Spanning};
 use crate::par::language::{Declaration, Definition, TypeDef};
@@ -46,16 +46,16 @@ pub enum TypeError<Name> {
 
 #[derive(Clone, Debug)]
 pub enum Operation<Name> {
-    Send(Span),
-    Receive(Span),
-    Choose(Span, Name),
-    Match(Span, #[allow(unused)] Arc<[Name]>),
-    Break(Span),
-    Continue(Span),
-    Begin(Span, Option<Name>),
-    Loop(Span, Option<Name>),
-    SendType(Span),
-    ReceiveType(Span),
+    Send(#[allow(unused)] Span),
+    Receive(#[allow(unused)] Span),
+    Choose(#[allow(unused)] Span, Name),
+    Match(#[allow(unused)] Span, #[allow(unused)] Arc<[Name]>),
+    Break(#[allow(unused)] Span),
+    Continue(#[allow(unused)] Span),
+    Begin(#[allow(unused)] Span, Option<Name>),
+    Loop(#[allow(unused)] Span, Option<Name>),
+    SendType(#[allow(unused)] Span),
+    ReceiveType(#[allow(unused)] Span),
 }
 
 #[derive(Clone, Debug)]

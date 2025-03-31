@@ -16,6 +16,7 @@ type Instances = HashMap<Uri, Instance>;
 
 pub struct LanguageServer<'c> {
     connection: &'c Connection,
+    #[allow(unused)]
     initialize_params: InitializeParams,
     instances: Instances,
     feedback: FeedbackBookKeeper,
