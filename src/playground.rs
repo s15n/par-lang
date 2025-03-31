@@ -10,17 +10,13 @@ use eframe::egui;
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use indexmap::IndexMap;
 
-use crate::{
-    interact::{Event, Handle, Request},
-    par::{
-        language::{CompileError, Internal, Name, Program},
-        parse::{parse_program, SyntaxError},
-        process,
-        runtime::{self, Context, Operation},
-        types::{self, Type, TypeError},
-    },
-    spawn::TokioSpawn,
-};
+use crate::{interact::{Event, Handle, Request}, par::{
+    language::{CompileError, Internal, Name, Program},
+    parse::{parse_program, SyntaxError},
+    process,
+    runtime::{self, Context, Operation},
+    types::{self, Type, TypeError},
+}, playground, spawn::TokioSpawn};
 use miette::{LabeledSpan, SourceOffset, SourceSpan};
 use crate::location::Span;
 use crate::par::language::{Declaration, Definition, TypeDef};
@@ -166,7 +162,7 @@ pub(crate) struct Interact {
 }
 
 impl Playground {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Box<Self> {
+    pub fn new(cc: &eframe::CreationContext<'_>, file_path: Option<PathBuf>) -> Box<Self> {
         cc.egui_ctx.all_styles_mut(|style| {
             style.text_styles.extend([
                 (egui::TextStyle::Monospace, egui::FontId::monospace(16.0)),
@@ -176,16 +172,22 @@ impl Playground {
             style.visuals.code_bg_color = egui::Color32::TRANSPARENT;
             style.wrap_mode = Some(egui::TextWrapMode::Extend);
         });
-        let default_code = DEFAULT_CODE.to_string();
-        Box::new(Self {
+
+        let mut playground = Self {
             file_path: None,
-            code: default_code.clone(),
+            code: "".to_owned(),
             compiled: None,
-            compiled_code: Arc::from(default_code),
+            compiled_code: Arc::from(""),
             interact: None,
             editor_font_size: 16.0,
             show_compiled: false,
-        })
+        };
+
+        if let Some(file_path) = &file_path {
+            playground.open(file_path.clone());
+        }
+
+        Box::new(playground)
     }
 }
 
@@ -275,15 +277,19 @@ impl eframe::App for Playground {
 impl Playground {
     fn open_file(&mut self) {
         if let Some(path) = rfd::FileDialog::new().pick_file() {
-            if let Ok(file_content) = File::open(&path).and_then(|mut file| {
-                use std::io::Read;
-                let mut buf = String::new();
-                file.read_to_string(&mut buf)?;
-                Ok(buf)
-            }) {
-                self.file_path = Some(path);
-                self.code = file_content;
-            }
+            self.open(path);
+        }
+    }
+
+    fn open(&mut self, file_path: PathBuf) {
+        if let Ok(file_content) = File::open(&file_path).and_then(|mut file| {
+            use std::io::Read;
+            let mut buf = String::new();
+            file.read_to_string(&mut buf)?;
+            Ok(buf)
+        }) {
+            self.file_path = Some(file_path);
+            self.code = file_content;
         }
     }
 
