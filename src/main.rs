@@ -1,10 +1,13 @@
 use eframe::egui;
 use playground::Playground;
 
-mod interact;
+pub mod icombs;
 mod par;
 mod playground;
+mod readback;
 mod spawn;
+#[cfg(test)]
+mod tests;
 
 #[tokio::main]
 async fn main() {

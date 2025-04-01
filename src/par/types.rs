@@ -76,8 +76,17 @@ pub enum Type<Loc, Name> {
 
 #[derive(Clone, Debug)]
 pub struct TypeDefs<Loc, Name> {
-    globals: Arc<IndexMap<Name, (Loc, Vec<Name>, Type<Loc, Name>)>>,
-    vars: IndexSet<Name>,
+    pub globals: Arc<IndexMap<Name, (Loc, Vec<Name>, Type<Loc, Name>)>>,
+    pub vars: IndexSet<Name>,
+}
+
+impl<Loc: Clone, Name: Clone + Eq + Hash> Default for TypeDefs<Loc, Name> {
+    fn default() -> Self {
+        Self {
+            globals: Default::default(),
+            vars: Default::default(),
+        }
+    }
 }
 
 impl<Loc: Clone, Name: Clone + Eq + Hash> TypeDefs<Loc, Name> {
@@ -421,6 +430,84 @@ impl<Loc: Clone, Name: Clone + Eq + Hash> Type<Loc, Name> {
                     Self::ReceiveType(loc, name, Box::new(body.substitute(var, typ)?))
                 }
             }
+        })
+    }
+
+    pub fn is_linear(&self, type_defs: &TypeDefs<Loc, Name>) -> Result<bool, TypeError<Loc, Name>> {
+        Ok(!self.is_positive(type_defs)?)
+    }
+
+    pub fn is_positive(
+        &self,
+        type_defs: &TypeDefs<Loc, Name>,
+    ) -> Result<bool, TypeError<Loc, Name>> {
+        Ok(match self {
+            Type::Chan(_, t) => t.is_negative(type_defs)?,
+            Type::Var(_, _) => false,
+            Type::Name(loc, name, args) => {
+                type_defs.get(loc, name, args)?.is_positive(type_defs)?
+            }
+            Type::Send(_, t, u) => t.is_positive(type_defs)? && u.is_positive(type_defs)?,
+            Type::Receive(_, _, _) => false,
+            Type::Either(_, branches) => {
+                for (_, t) in branches {
+                    if !t.is_positive(type_defs)? {
+                        return Ok(false);
+                    }
+                }
+                true
+            }
+            Type::Choice(_, _) => false,
+            Type::Break(_) => true,
+            Type::Continue(_) => false,
+            Type::Recursive(_, _, _, t) => t.is_positive(type_defs)?,
+            Type::Iterative(_, _, _, t) => t.is_positive(type_defs)?,
+            Type::Self_(_, _) => true,
+            Type::SendType(loc, name, t) => t
+                .clone()
+                .substitute(name, &Type::Var(loc.clone(), name.clone()))?
+                .is_positive(type_defs)?,
+            Type::ReceiveType(loc, name, t) => t
+                .clone()
+                .substitute(name, &Type::Var(loc.clone(), name.clone()))?
+                .is_positive(type_defs)?,
+        })
+    }
+
+    pub fn is_negative(
+        &self,
+        type_defs: &TypeDefs<Loc, Name>,
+    ) -> Result<bool, TypeError<Loc, Name>> {
+        Ok(match self {
+            Type::Chan(_, t) => t.is_positive(type_defs)?,
+            Type::Var(_, _) => false,
+            Type::Name(loc, name, args) => {
+                type_defs.get(loc, name, args)?.is_negative(type_defs)?
+            }
+            Type::Send(_, _, _) => false,
+            Type::Receive(_, t, u) => t.is_positive(type_defs)? && u.is_negative(type_defs)?,
+            Type::Either(_, _) => false,
+            Type::Choice(_, branches) => {
+                for (_, t) in branches {
+                    if !t.is_negative(type_defs)? {
+                        return Ok(false);
+                    }
+                }
+                true
+            }
+            Type::Break(_) => false,
+            Type::Continue(_) => true,
+            Type::Recursive(_, _, _, t) => t.is_negative(type_defs)?,
+            Type::Iterative(_, _, _, t) => t.is_negative(type_defs)?,
+            Type::Self_(_, _) => true,
+            Type::SendType(loc, name, t) => t
+                .clone()
+                .substitute(name, &Type::Var(loc.clone(), name.clone()))?
+                .is_negative(type_defs)?,
+            Type::ReceiveType(loc, name, t) => t
+                .clone()
+                .substitute(name, &Type::Var(loc.clone(), name.clone()))?
+                .is_negative(type_defs)?,
         })
     }
 
@@ -1010,8 +1097,8 @@ struct CheckedDef<Loc, Name> {
 
 impl<Loc, Name> Context<Loc, Name>
 where
-    Loc: Clone + Eq + Hash,
-    Name: Clone + Eq + Hash,
+    Loc: std::fmt::Debug + Clone + Eq + Hash,
+    Name: Clone + Eq + Hash + std::fmt::Debug,
 {
     pub fn new_with_type_checking(
         program: &Program<Loc, Name, Arc<Expression<Loc, Name, ()>>>,
@@ -1113,13 +1200,19 @@ where
 
     pub fn get_checked_definitions(
         &self,
-    ) -> Vec<(Loc, Name, Arc<Expression<Loc, Name, Type<Loc, Name>>>)> {
+    ) -> IndexMap<Name, (Loc, Arc<Expression<Loc, Name, Type<Loc, Name>>>)> {
         self.checked_definitions
             .read()
             .unwrap()
             .iter()
-            .map(|(name, checked)| (checked.loc.clone(), name.clone(), checked.def.clone()))
+            .map(|(name, checked)| (name.clone(), (checked.loc.clone(), checked.def.clone())))
             .collect()
+    }
+    pub fn get_declarations(&self) -> IndexMap<Name, (Loc, Type<Loc, Name>)> {
+        (*self.declarations).clone()
+    }
+    pub fn get_type_defs(&self) -> &TypeDefs<Loc, Name> {
+        &self.type_defs
     }
 
     pub fn split(&self) -> Self {
@@ -1151,8 +1244,10 @@ where
         name: Name,
         typ: Type<Loc, Name>,
     ) -> Result<(), TypeError<Loc, Name>> {
-        if let Some(_) = self.variables.get(&name) {
-            return Err(TypeError::ShadowedObligation(loc.clone(), name));
+        if let Some(typ) = self.variables.get(&name) {
+            if typ.is_linear(&self.type_defs)? {
+                return Err(TypeError::ShadowedObligation(loc.clone(), name));
+            }
         }
         self.variables.insert(name, typ);
         Ok(())
@@ -1177,17 +1272,23 @@ where
                     name.clone(),
                 ));
             }
-            let value = match self.get_variable(name) {
-                Some(value) => value,
+            let typ = match self.get_variable(name) {
+                Some(typ) => typ,
                 None => continue,
             };
-            target.put(loc, name.clone(), value)?;
+            if !typ.is_linear(&self.type_defs)? {
+                self.put(loc, name.clone(), typ.clone())?;
+            }
+            target.put(loc, name.clone(), typ)?;
         }
         Ok(())
     }
 
     pub fn obligations(&self) -> impl Iterator<Item = &Name> {
-        self.variables.iter().map(|(name, _)| name)
+        self.variables
+            .iter()
+            .filter(|(_, typ)| typ.is_linear(&self.type_defs).ok().unwrap_or(true))
+            .map(|(name, _)| name)
     }
 
     pub fn check_process(
@@ -1282,7 +1383,7 @@ where
                 );
             }
         }
-        if !matches!(command, Command::Begin(_, _, _) | Command::Loop(_)) {
+        if !matches!(command, Command::Begin(_, _, _, _) | Command::Loop(_, _)) {
             if let Type::Recursive(_, top_asc, top_label, body) = typ {
                 return self.check_command(
                     inference_subject,
@@ -1455,7 +1556,7 @@ where
                 (Command::Continue(process), inferred_types)
             }
 
-            Command::Begin(unfounded, label, process) => {
+            Command::Begin(unfounded, label, captures, process) => {
                 let Type::Recursive(typ_loc, typ_asc, typ_label, typ_body) = typ else {
                     return Err(TypeError::InvalidOperation(
                         loc.clone(),
@@ -1476,7 +1577,12 @@ where
                     (
                         object.clone(),
                         Arc::new({
-                            let mut variables = self.variables.clone();
+                            let mut variables = self
+                                .variables
+                                .iter()
+                                .filter(|&(name, _)| captures.names.contains_key(name))
+                                .map(|(name, typ)| (name.clone(), typ.clone()))
+                                .collect::<IndexMap<_, _>>();
                             variables.insert(
                                 object.clone(),
                                 Type::Recursive(
@@ -1503,12 +1609,12 @@ where
                 });
 
                 (
-                    Command::Begin(*unfounded, label.clone(), process),
+                    Command::Begin(*unfounded, label.clone(), captures.clone(), process),
                     inferred_iterative,
                 )
             }
 
-            Command::Loop(label) => {
+            Command::Loop(label, captures) => {
                 if !matches!(typ, Type::Recursive(_, _, _, _)) {
                     return Err(TypeError::InvalidOperation(
                         loc.clone(),
@@ -1563,7 +1669,7 @@ where
                 self.cannot_have_obligations(loc)?;
 
                 (
-                    Command::Loop(label.clone()),
+                    Command::Loop(label.clone(), captures.clone()),
                     inferred_loop.or(Some(Type::Self_(loc.clone(), label.clone()))),
                 )
             }
@@ -1756,14 +1862,14 @@ where
                 (Command::Continue(process), Type::Break(loc.clone()))
             }
 
-            Command::Begin(unfounded, label, process) => {
+            Command::Begin(unfounded, label, captures, process) => {
                 self.loop_points.insert(
                     label.clone(),
                     (subject.clone(), Arc::new(self.variables.clone())),
                 );
                 let (process, body) = self.infer_process(process, subject)?;
                 (
-                    Command::Begin(*unfounded, label.clone(), process),
+                    Command::Begin(*unfounded, label.clone(), captures.clone(), process),
                     Type::Recursive(
                         loc.clone(),
                         if *unfounded {
@@ -1777,7 +1883,7 @@ where
                 )
             }
 
-            Command::Loop(label) => {
+            Command::Loop(label, captures) => {
                 let Some((driver, variables)) = self.loop_points.get(label).cloned() else {
                     return Err(TypeError::NoSuchLoopPoint(loc.clone(), label.clone()));
                 };
@@ -1811,7 +1917,7 @@ where
                 self.cannot_have_obligations(loc)?;
 
                 (
-                    Command::Loop(label.clone()),
+                    Command::Loop(label.clone(), captures.clone()),
                     Type::Self_(loc.clone(), label.clone()),
                 )
             }
@@ -1850,6 +1956,9 @@ where
                 }
                 let typ = self.get(loc, name)?;
                 typ.check_assignable(loc, target_type, &self.type_defs)?;
+                if !typ.is_linear(&self.type_defs)? {
+                    self.put(loc, name.clone(), typ.clone())?;
+                }
                 Ok(Arc::new(Expression::Reference(
                     loc.clone(),
                     name.clone(),
@@ -1897,6 +2006,9 @@ where
                     ));
                 }
                 let typ = self.get(loc, name)?;
+                if !typ.is_linear(&self.type_defs)? {
+                    self.put(loc, name.clone(), typ.clone())?;
+                }
                 Ok((
                     Arc::new(Expression::Reference(
                         loc.clone(),

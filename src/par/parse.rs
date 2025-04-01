@@ -1,3 +1,10 @@
+use std::{
+    fmt::{Debug, Display},
+    hash::Hash,
+};
+
+use indexmap::IndexMap;
+
 use super::{
     language::{
         Apply, ApplyBranch, ApplyBranches, Command, CommandBranch, CommandBranches, Construct,
@@ -6,8 +13,7 @@ use super::{
     lexer::{lex, Input, Token, TokenKind},
     types::Type,
 };
-use core::{fmt::Display, str::FromStr};
-use indexmap::IndexMap;
+use core::str::FromStr;
 use miette::{SourceOffset, SourceSpan};
 use winnow::{
     combinator::{
@@ -39,6 +45,28 @@ impl Display for Loc {
         match self {
             Self::Code { line, column } => write!(f, "{}:{}", line, column),
             Self::External => write!(f, "#:#"),
+        }
+    }
+}
+
+impl Loc {
+    pub(crate) fn display(&self, code: &str) -> String {
+        match self {
+            Loc::External => format!("<UI>"),
+            Loc::Code { line, column } => {
+                let line_of_code = match code.lines().nth(line - 1) {
+                    Some(loc) => loc,
+                    None => return format!("<invalid location {}:{}>", line, column),
+                };
+                let line_number = format!("{}| ", line);
+                format!(
+                    "{}{}\n{}{}^",
+                    line_number,
+                    line_of_code,
+                    " ".repeat(line_number.len()),
+                    " ".repeat(column - 1),
+                )
+            }
         }
     }
 }
@@ -425,7 +453,7 @@ pub struct SyntaxError {
 }
 impl core::fmt::Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        "Syntax error.".fmt(f)
+        write!(f, "Syntax error")
     }
 }
 impl core::error::Error for SyntaxError {}
