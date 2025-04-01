@@ -91,6 +91,28 @@ impl Debug for Handle {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Polarity {
+    Positive,
+    Negative,
+}
+
+impl Event {
+    fn polarity(&self) -> Polarity {
+        match self {
+            Self::Send(_) => Polarity::Positive,
+            Self::Receive(_) => Polarity::Negative,
+            Self::SendType(_) => Polarity::Positive,
+            Self::ReceiveType(_) => Polarity::Negative,
+            Self::Break => Polarity::Positive,
+            Self::Continue => Polarity::Negative,
+            Self::Either(_) => Polarity::Positive,
+            Self::Choose(_) => Polarity::Negative,
+            Self::Named(_) => Polarity::Positive,
+        }
+    }
+}
+
 pub struct ReadbackState {
     pub root: Arc<Mutex<Handle>>,
     pub inner: ReadbackStateInner,
@@ -147,6 +169,80 @@ impl ReadbackState {
 // first, we render as deep as we can. Button clicks replace nodes by a Halt node
 // then, we read back, replacing Halt nodes with other nodes. This is the async part
 impl ReadbackStateInner {
+    fn show_history_line<'h>(
+        &mut self,
+        ui: &mut egui::Ui,
+        prog: Arc<CheckedProgram>,
+        events: &'h [Event],
+    ) -> &'h [Event] {
+        let mut polarity = None::<Polarity>;
+        let mut events = events;
+
+        ui.horizontal(|ui| {
+            while let Some(event) = events.get(0) {
+                if polarity.map_or(false, |p| p != event.polarity()) {
+                    return events;
+                }
+
+                if polarity == None {
+                    match event.polarity() {
+                        Polarity::Positive => {
+                            ui.label(RichText::from("+").code());
+                        }
+                        Polarity::Negative => {
+                            ui.label(RichText::from("-").code());
+                        }
+                    }
+                }
+
+                polarity = Some(event.polarity());
+                events = &events[1..];
+
+                let prog = Arc::clone(&prog);
+
+                match event {
+                    Event::Send(handle) | Event::Receive(handle) => {
+                        self.show_handle(ui, handle.clone(), prog);
+                        return events;
+                    }
+                    Event::SendType(name) | Event::ReceiveType(name) => {
+                        ui.label(format!("type {}", name));
+                    }
+                    Event::Either(name) | Event::Choose(name) => {
+                        ui.label(RichText::from(name.to_string()).strong());
+                    }
+                    Event::Named(tree) => {
+                        let ty = &tree.ty;
+                        if let Type::Name(_, name, _) = ty {
+                            ui.label(format!("name {}", name));
+                        }
+                    }
+                    Event::Break | Event::Continue => {
+                        ui.label(RichText::from("!").strong().code());
+                    }
+                }
+            }
+
+            &[]
+        })
+        .inner
+    }
+
+    fn show_history<'h>(
+        &mut self,
+        ui: &mut egui::Ui,
+        prog: Arc<CheckedProgram>,
+        events: &'h [Event],
+    ) {
+        let mut events = events;
+
+        ui.vertical(|ui| {
+            while !events.is_empty() {
+                events = self.show_history_line(ui, Arc::clone(&prog), events);
+            }
+        });
+    }
+
     pub fn show_handle(
         &mut self,
         ui: &mut egui::Ui,
@@ -159,65 +255,7 @@ impl ReadbackStateInner {
             .outer_margin(egui::Margin::same(2))
             .show(ui, |ui| {
                 ui.vertical(|ui| {
-                    for event in handle.lock().unwrap().history.iter_mut() {
-                        let prog = prog.clone();
-                        match event {
-                            Event::Send(handle) => {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::from("+").code());
-                                    self.show_handle(ui, handle.clone(), prog);
-                                });
-                            }
-                            Event::Receive(handle) => {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::from("-").code());
-                                    self.show_handle(ui, handle.clone(), prog);
-                                });
-                            }
-                            Event::SendType(name) => {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::from("+").code());
-                                    ui.label(format!("type {}", name));
-                                });
-                            }
-                            Event::ReceiveType(name) => {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::from("-").code());
-                                    ui.label(format!("type {}", name));
-                                });
-                            }
-                            Event::Either(name) => {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::from("+").code());
-                                    ui.label(RichText::from(name.to_string()).strong());
-                                });
-                            }
-                            Event::Choose(name) => {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::from("-").code());
-                                    ui.label(RichText::from(name.to_string()).strong());
-                                });
-                            }
-                            Event::Named(tree) => {
-                                let ty = &tree.ty;
-                                if let Type::Name(_, name, _) = ty {
-                                    ui.label(format!("name {}", name));
-                                }
-                            }
-                            Event::Break => {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::from("+").code());
-                                    ui.label(RichText::from("!").strong().code());
-                                });
-                            }
-                            Event::Continue => {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::from("-").code());
-                                    ui.label(RichText::from("!").strong().code());
-                                });
-                            }
-                        }
-                    }
+                    self.show_history(ui, Arc::clone(&prog), &handle.lock().unwrap().history);
 
                     let mut lock = handle.lock().unwrap();
                     if let Some(end) = lock.end.as_mut() {

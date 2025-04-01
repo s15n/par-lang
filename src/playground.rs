@@ -305,7 +305,7 @@ impl Playground {
 
     fn get_theme(&self, ui: &egui::Ui) -> ColorTheme {
         if ui.visuals().dark_mode {
-            fix_dark_theme(ColorTheme::GITHUB_DARK)
+            fix_dark_theme(ColorTheme::GRUVBOX_DARK)
         } else {
             fix_light_theme(ColorTheme::GITHUB_LIGHT)
         }
