@@ -11,9 +11,9 @@ dec two: Nat
 def two = .succ .succ .zero !
 
 dec Nat_add: [Nat] [Nat] Nat
-def Nat_add = [n] [m] n {
+def Nat_add = [n] [m] n begin {
   .zero! => m,
-  .succ n => .succ Nat_add(n)(m)
+  .succ n => .succ n loop
 }
 
 def three = Nat_add(one)(two)
@@ -345,7 +345,47 @@ def SemigroupQueue_peek = [type T] [instEra] [instDup] [instSemigroup] [(l)r]
         let r = SemigroupStack_reverse(type T)(instEra3)(instDup2)(instSemigroup2)(l) in
         let l = SemigroupStack_new(type T) in
         // Repeat now that the left stack is empty and the right is not.
-        SemigroupQueue_peek(type T)(instEra)(instDup)(instSemigroup)((l) r),
+{
+do {
+    instEra.new[instEra2].new[instEra3]
+    instDup.new[instDup2].new[instDup3]
+    instSemigroup.new[instSemigroup2].new[instSemigroup3]
+  } in
+  let (tl)l = SemigroupStack_peek(type T)(instEra2)(instDup2)(instSemigroup2)(l) in
+  let (tr)r = SemigroupStack_peek(type T)(instEra3)(instDup3)(instSemigroup3)(r) in
+
+  // Use larger of the two measures if both stacks have elements.
+  // If only 1 stack make sure it is the right stack, and use that measure.
+  tl {
+    .none! => tr {
+      .none! => do {
+        instEra.end?
+        instSemigroup.end?
+        instDup.end?
+      } in (.none!) (l) r,
+      .some(tr)trm => do {
+        instEra.end?
+        instSemigroup.end?
+        instDup.end?
+      } in (.some (tr) trm) (l) r
+    }
+    .some (tl)tlm => tr {
+      //unreachable
+      .none! => do {
+          instEra.era(tl).era(tlm).end?
+          instDup.end?
+          instSemigroup.end?
+        } in
+        // Repeat now that the left stack is empty and the right is not.
+        (.none!) (l) r,
+      .some (tr)trm => do {
+        instSemigroup.mul(tlm)(trm)[tm].end?
+        instEra.era(tl).end?
+        instDup.end?
+      } in (.some (tr) tm) (l) r
+    }
+  }
+},
       .some (tr)trm => do {
         instSemigroup.mul(tlm)(trm)[tm].end?
         instEra.era(tl).end?
