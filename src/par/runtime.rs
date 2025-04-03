@@ -1,11 +1,11 @@
+use super::process::{Captures, Command, Expression, Process};
+use crate::location::Span;
 use futures::{
     channel::oneshot,
     task::{Spawn, SpawnExt},
 };
 use indexmap::IndexMap;
 use std::{hash::Hash, sync::Arc};
-use crate::location::Span;
-use super::process::{Captures, Command, Expression, Process};
 
 #[derive(Clone, Debug)]
 pub enum Error<Name> {
@@ -141,12 +141,7 @@ where
         }
     }
 
-    pub fn put(
-        &mut self,
-        loc: &Span,
-        name: Name,
-        value: Value<Name>,
-    ) -> Result<(), Error<Name>> {
+    pub fn put(&mut self, loc: &Span, name: Name, value: Value<Name>) -> Result<(), Error<Name>> {
         if let Some(value) = self.variables.shift_remove(&name) {
             return self.throw([value], Error::ShadowedObligation(loc.clone(), name));
         }
@@ -154,11 +149,7 @@ where
         Ok(())
     }
 
-    pub fn capture(
-        &mut self,
-        cap: &Captures<Name>,
-        target: &mut Self,
-    ) -> Result<(), Error<Name>> {
+    pub fn capture(&mut self, cap: &Captures<Name>, target: &mut Self) -> Result<(), Error<Name>> {
         for (name, loc) in &cap.names {
             let value = match self.get_variable(name) {
                 Some(value) => value,
@@ -180,7 +171,13 @@ where
         match expression {
             Expression::Reference(loc, name, _) => self.get(loc, name),
 
-            Expression::Fork { span, captures: cap, chan_name: channel, process, .. } => {
+            Expression::Fork {
+                span,
+                captures: cap,
+                chan_name: channel,
+                process,
+                ..
+            } => {
                 let mut context = self.split();
                 self.capture(cap, &mut context)?;
 
@@ -199,20 +196,29 @@ where
         }
     }
 
-    pub async fn run(
-        &mut self,
-        process: Arc<Process<Name, Typ>>,
-    ) -> Result<(), Error<Name>> {
+    pub async fn run(&mut self, process: Arc<Process<Name, Typ>>) -> Result<(), Error<Name>> {
         let mut current_process = process;
         loop {
             match current_process.as_ref() {
-                Process::Let { span: loc, name, annotation: _, typ: _, value: expression, then: process } => {
+                Process::Let {
+                    span: loc,
+                    name,
+                    annotation: _,
+                    typ: _,
+                    value: expression,
+                    then: process,
+                } => {
                     let value = self.evaluate(expression)?;
                     self.put(loc, name.clone(), value)?;
                     current_process = Arc::clone(process);
                 }
 
-                Process::Do { span: loc, name: object_name, typ: _, command } => {
+                Process::Do {
+                    span: loc,
+                    name: object_name,
+                    typ: _,
+                    command,
+                } => {
                     let object = self.get(loc, object_name)?;
 
                     match command {
@@ -277,7 +283,11 @@ where
                             current_process = Arc::clone(process);
                         }
 
-                        Command::Begin { unfounded: _, label: point, body: process } => {
+                        Command::Begin {
+                            unfounded: _,
+                            label: point,
+                            body: process,
+                        } => {
                             self.loop_points
                                 .insert(point.clone(), (object_name.clone(), Arc::clone(process)));
                             self.put(loc, object_name.clone(), object)?;
@@ -424,11 +434,7 @@ where
         }
     }
 
-    pub async fn break_to(
-        &mut self,
-        loc: Span,
-        object: Value<Name>,
-    ) -> Result<(), Error<Name>> {
+    pub async fn break_to(&mut self, loc: Span, object: Value<Name>) -> Result<(), Error<Name>> {
         let [object] = self.cannot_have_obligations(&loc, [object]).await?;
         let tx = match object {
             Value::Receiver(rx) => self.expect_swap(Request::Continue(loc.clone()), rx).await?,

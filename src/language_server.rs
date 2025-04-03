@@ -1,7 +1,7 @@
-pub mod language_server_main;
-mod server;
+mod data;
 mod feedback;
 mod instance;
 mod io;
-mod data;
+pub mod language_server_main;
 mod playground_run;
+mod server;

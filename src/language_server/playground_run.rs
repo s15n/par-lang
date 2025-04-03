@@ -14,7 +14,7 @@ fn run_def(
     ui: &mut egui::Ui,
     program: &Program<NameT, ExprT>,
     compiled_code: Arc<str>,
-    definition: &Definition<NameT, ExprT>
+    definition: &Definition<NameT, ExprT>,
 ) {
     let name = definition.name.to_string();
     if ui.button(&name).clicked() {
@@ -34,7 +34,13 @@ fn run_def(
                         program
                             .definitions
                             .iter()
-                            .map(|Definition { name, expression, .. }| (name.clone(), expression.clone()))
+                            .map(
+                                |Definition {
+                                     name, expression, ..
+                                 }| {
+                                    (name.clone(), expression.clone())
+                                },
+                            )
                             .collect(),
                     ),
                 ),
@@ -47,7 +53,7 @@ fn run_def(
 async fn run_def_playground_async(
     program: Program<NameT, ExprT>,
     compiled_code: Arc<str>,
-    definition: Definition<NameT, ExprT>
+    definition: Definition<NameT, ExprT>,
 ) {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1000.0, 700.0]),
@@ -60,24 +66,17 @@ async fn run_def_playground_async(
         options,
         move |ctx, _frame| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                run_def(
-                    &mut None,
-                    ui,
-                    &program,
-                    compiled_code.clone(),
-                    &definition,
-                );
+                run_def(&mut None, ui, &program, compiled_code.clone(), &definition);
             });
-        }
-        // 417, 339, 508
+        }, // 417, 339, 508
     )
-        .expect("egui crashed");
+    .expect("egui crashed");
 }
 
 pub fn run_def_playground(
     program: Program<NameT, ExprT>,
     compiled_code: Arc<str>,
-    definition: Definition<NameT, ExprT>
+    definition: Definition<NameT, ExprT>,
 ) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {

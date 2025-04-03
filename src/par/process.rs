@@ -1,16 +1,28 @@
+use super::types::Type;
+use crate::location::Span;
 use indexmap::IndexMap;
 use std::{
     fmt::{self, Display, Write},
     hash::Hash,
     sync::Arc,
 };
-use crate::location::Span;
-use super::types::Type;
 
 #[derive(Clone, Debug)]
 pub enum Process<Name, Typ> {
-    Let { span: Span, name: Name, annotation: Option<Type<Name>>, typ: Typ, value: Arc<Expression<Name, Typ>>, then: Arc<Self> },
-    Do { span: Span, name: Name, typ: Typ, command: Command<Name, Typ> },
+    Let {
+        span: Span,
+        name: Name,
+        annotation: Option<Type<Name>>,
+        typ: Typ,
+        value: Arc<Expression<Name, Typ>>,
+        then: Arc<Self>,
+    },
+    Do {
+        span: Span,
+        name: Name,
+        typ: Typ,
+        command: Command<Name, Typ>,
+    },
     Telltypes(Span, Arc<Self>),
 }
 
@@ -23,7 +35,11 @@ pub enum Command<Name, Typ> {
     Match(Arc<[Name]>, Box<[Arc<Process<Name, Typ>>]>),
     Break,
     Continue(Arc<Process<Name, Typ>>),
-    Begin { unfounded: bool, label: Option<Name>, body: Arc<Process<Name, Typ>> },
+    Begin {
+        unfounded: bool,
+        label: Option<Name>,
+        body: Arc<Process<Name, Typ>>,
+    },
     Loop(Option<Name>),
     SendType(Type<Name>, Arc<Process<Name, Typ>>),
     ReceiveType(Name, Arc<Process<Name, Typ>>),
@@ -40,7 +56,7 @@ pub enum Expression<Name, Typ> {
         chan_type: Typ,
         expr_type: Typ,
         process: Arc<Process<Name, Typ>>,
-    }
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -90,7 +106,14 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
         loop_points: &IndexMap<Option<Name>, Captures<Name>>,
     ) -> (Arc<Self>, Captures<Name>) {
         match self {
-            Self::Let { span: loc, name, annotation, typ, value: expression, then: process } => {
+            Self::Let {
+                span: loc,
+                name,
+                annotation,
+                typ,
+                value: expression,
+                then: process,
+            } => {
                 let (process, mut caps) = process.fix_captures(loop_points);
                 caps.remove(name);
                 let (expression, caps1) = expression.fix_captures(loop_points);
@@ -102,12 +125,17 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
                         annotation: annotation.clone(),
                         typ: typ.clone(),
                         value: expression,
-                        then: process
+                        then: process,
                     }),
                     caps,
                 )
             }
-            Self::Do { span: loc, name, typ, command } => {
+            Self::Do {
+                span: loc,
+                name,
+                typ,
+                command,
+            } => {
                 let (command, mut caps) = command.fix_captures(loop_points);
                 caps.add(name.clone(), loc.clone());
                 (
@@ -115,7 +143,7 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
                         span: loc.clone(),
                         name: name.clone(),
                         typ: typ.clone(),
-                        command
+                        command,
                     }),
                     caps,
                 )
@@ -129,15 +157,27 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
 
     pub fn optimize(&self) -> Arc<Self> {
         match self {
-            Self::Let { span: loc, name, annotation, typ, value: expression, then: process } => Arc::new(Self::Let {
+            Self::Let {
+                span: loc,
+                name,
+                annotation,
+                typ,
+                value: expression,
+                then: process,
+            } => Arc::new(Self::Let {
                 span: loc.clone(),
                 name: name.clone(),
                 annotation: annotation.clone(),
                 typ: typ.clone(),
                 value: expression.optimize(),
-                then: process.optimize()
+                then: process.optimize(),
             }),
-            Self::Do { span: loc, name, typ, command } => Arc::new(Self::Do {
+            Self::Do {
+                span: loc,
+                name,
+                typ,
+                command,
+            } => Arc::new(Self::Do {
                 span: loc.clone(),
                 name: name.clone(),
                 typ: typ.clone(),
@@ -145,9 +185,11 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
                     Command::Link(expression) => {
                         let expression = expression.optimize();
                         match expression.optimize().as_ref() {
-                            Expression::Fork { chan_name: channel, process, .. } if name == channel => {
-                                return Arc::clone(&process)
-                            }
+                            Expression::Fork {
+                                chan_name: channel,
+                                process,
+                                ..
+                            } if name == channel => return Arc::clone(&process),
                             _ => Command::Link(expression),
                         }
                     }
@@ -166,13 +208,15 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
                     }
                     Command::Break => Command::Break,
                     Command::Continue(process) => Command::Continue(process.optimize()),
-                    Command::Begin { unfounded, label, body: process } => {
-                        Command::Begin {
-                            unfounded: unfounded.clone(),
-                            label: label.clone(),
-                            body: process.optimize()
-                        }
-                    }
+                    Command::Begin {
+                        unfounded,
+                        label,
+                        body: process,
+                    } => Command::Begin {
+                        unfounded: unfounded.clone(),
+                        label: label.clone(),
+                        body: process.optimize(),
+                    },
                     Command::Loop(label) => Command::Loop(label.clone()),
                     Command::SendType(argument, process) => {
                         Command::SendType(argument.clone(), process.optimize())
@@ -180,7 +224,7 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
                     Command::ReceiveType(parameter, process) => {
                         Command::ReceiveType(parameter.clone(), process.optimize())
                     }
-                }
+                },
             }),
             Self::Telltypes(loc, process) => {
                 Arc::new(Self::Telltypes(loc.clone(), process.optimize()))
@@ -235,16 +279,23 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Command<Name, Typ> {
                 let (process, caps) = process.fix_captures(loop_points);
                 (Self::Continue(process), caps)
             }
-            Self::Begin { unfounded, label, body: process } => {
+            Self::Begin {
+                unfounded,
+                label,
+                body: process,
+            } => {
                 let (_, caps) = process.fix_captures(loop_points);
                 let mut loop_points = loop_points.clone();
                 loop_points.insert(label.clone(), caps);
                 let (process, caps) = process.fix_captures(&loop_points);
-                (Self::Begin {
-                    unfounded: unfounded.clone(),
-                    label: label.clone(),
-                    body: process
-                }, caps)
+                (
+                    Self::Begin {
+                        unfounded: unfounded.clone(),
+                        label: label.clone(),
+                        body: process,
+                    },
+                    caps,
+                )
             }
             Self::Loop(label) => (
                 Self::Loop(label.clone()),
@@ -272,7 +323,15 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Expression<Name, Typ> {
                 Arc::new(Self::Reference(loc.clone(), name.clone(), typ.clone())),
                 Captures::single(name.clone(), loc.clone()),
             ),
-            Self::Fork { span, chan_name: channel, chan_annotation: annotation, chan_type, expr_type, process, .. } => {
+            Self::Fork {
+                span,
+                chan_name: channel,
+                chan_annotation: annotation,
+                chan_type,
+                expr_type,
+                process,
+                ..
+            } => {
                 let (process, mut caps) = process.fix_captures(loop_points);
                 caps.remove(channel);
                 (
@@ -296,7 +355,15 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Expression<Name, Typ> {
             Self::Reference(loc, name, typ) => {
                 Arc::new(Self::Reference(loc.clone(), name.clone(), typ.clone()))
             }
-            Self::Fork { span, captures, chan_name, chan_annotation, chan_type, expr_type, process } => Arc::new(Self::Fork {
+            Self::Fork {
+                span,
+                captures,
+                chan_name,
+                chan_annotation,
+                chan_type,
+                expr_type,
+                process,
+            } => Arc::new(Self::Fork {
                 span: span.clone(),
                 captures: captures.clone(),
                 chan_name: chan_name.clone(),
@@ -309,11 +376,11 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Expression<Name, Typ> {
     }
 }
 
-impl <Name, Typ: Clone> Expression<Name, Typ> {
+impl<Name, Typ: Clone> Expression<Name, Typ> {
     pub fn get_type(&self) -> Typ {
         match self {
             Self::Reference(_, _, typ) => typ.clone(),
-            Self::Fork { expr_type, ..} => expr_type.clone(),
+            Self::Fork { expr_type, .. } => expr_type.clone(),
         }
     }
 }
@@ -321,14 +388,26 @@ impl <Name, Typ: Clone> Expression<Name, Typ> {
 impl<Name: Display, Typ> Process<Name, Typ> {
     pub fn pretty(&self, f: &mut impl Write, indent: usize) -> fmt::Result {
         match self {
-            Self::Let { span: _, name, annotation: _, typ: _, value: expression, then: process } => {
+            Self::Let {
+                span: _,
+                name,
+                annotation: _,
+                typ: _,
+                value: expression,
+                then: process,
+            } => {
                 indentation(f, indent)?;
                 write!(f, "let {} = ", name)?;
                 expression.pretty(f, indent)?;
                 process.pretty(f, indent)
             }
 
-            Self::Do { span: _, name: subject, typ: _, command } => {
+            Self::Do {
+                span: _,
+                name: subject,
+                typ: _,
+                command,
+            } => {
                 indentation(f, indent)?;
                 write!(f, "{}", subject)?;
 
@@ -377,7 +456,11 @@ impl<Name: Display, Typ> Process<Name, Typ> {
                         process.pretty(f, indent)
                     }
 
-                    Command::Begin { unfounded, label, body: process } => {
+                    Command::Begin {
+                        unfounded,
+                        label,
+                        body: process,
+                    } => {
                         if *unfounded {
                             write!(f, " unfounded")?;
                         }
@@ -426,7 +509,12 @@ impl<Name: Display, Typ> Expression<Name, Typ> {
                 write!(f, "{}", name)
             }
 
-            Self::Fork { captures, chan_name: channel, process, .. } => {
+            Self::Fork {
+                captures,
+                chan_name: channel,
+                process,
+                ..
+            } => {
                 write!(f, "chan {} |", channel)?;
                 for (i, cap) in captures.names.keys().enumerate() {
                     if i > 0 {

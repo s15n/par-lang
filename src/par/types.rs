@@ -8,12 +8,11 @@ use std::{
 
 use super::{
     language::Program,
-    process
-    //process::{process::Captures, process::Command, process::Expression, process::Process},
+    process, //process::{process::Captures, process::Command, process::Expression, process::Process},
 };
-use miette::LabeledSpan;
 use crate::location::{Span, Spanning};
 use crate::par::language::{Declaration, Definition, TypeDef, TypeNode};
+use miette::LabeledSpan;
 
 #[derive(Clone, Debug)]
 pub enum TypeError<Name> {
@@ -68,11 +67,15 @@ pub struct TypeDefs<Name> {
 }
 
 impl<Name: Clone + Eq + Hash> TypeDefs<Name> {
-    pub fn new_with_validation(
-        globals: &[TypeDef<Name>],
-    ) -> Result<Self, TypeError<Name>> {
+    pub fn new_with_validation(globals: &[TypeDef<Name>]) -> Result<Self, TypeError<Name>> {
         let mut globals_map = IndexMap::new();
-        for TypeDef { span, name, params, typ } in globals {
+        for TypeDef {
+            span,
+            name,
+            params,
+            typ,
+        } in globals
+        {
             if let Some((span1, _, _)) =
                 globals_map.insert(name.clone(), (span.clone(), params.clone(), typ.clone()))
             {
@@ -221,7 +224,7 @@ impl<Name: Clone + Eq + Hash> TypeDefs<Name> {
                 }
             }
             Type::Break(_) | Type::Continue(_) => (),
-            Type::Recursive { label, body, ..} | Type::Iterative { label, body, .. } => {
+            Type::Recursive { label, body, .. } | Type::Iterative { label, body, .. } => {
                 let (mut self_pos, mut self_neg) = (self_pos.clone(), self_neg.clone());
                 self_pos.insert(label.clone());
                 self_neg.shift_remove(label);
@@ -242,9 +245,7 @@ impl<Name: Clone + Eq + Hash> TypeDefs<Name> {
                 }
             }
 
-            | Type::SendType(_, name, body)
-            | Type::ReceiveType(_, name, body)
-            => {
+            Type::SendType(_, name, body) | Type::ReceiveType(_, name, body) => {
                 let mut with_var = self.clone();
                 with_var.vars.insert(name.clone());
                 with_var.validate_type(body, deps, self_pos, self_neg)?;
@@ -256,7 +257,7 @@ impl<Name: Clone + Eq + Hash> TypeDefs<Name> {
 impl<Name> Spanning for Type<Name> {
     fn span(&self) -> Span {
         match self {
-            | Self::Chan(span, _)
+            Self::Chan(span, _)
             | Self::Var(span, _)
             | Self::Name(span, _, _)
             | Self::Send(span, _, _)
@@ -269,8 +270,7 @@ impl<Name> Spanning for Type<Name> {
             | Self::Iterative { span, .. }
             | Self::Self_(span, _)
             | Self::SendType(span, _, _)
-            | Self::ReceiveType(span, _, _)
-            => span.clone(),
+            | Self::ReceiveType(span, _, _) => span.clone(),
         }
     }
 }
@@ -357,13 +357,23 @@ impl<Name: Eq + Hash> Type<Name> {
             ),
             Self::Break(span) => Type::Break(span),
             Self::Continue(span) => Type::Continue(span),
-            Self::Recursive { span, asc, label, body } => Type::Recursive {
+            Self::Recursive {
+                span,
+                asc,
+                label,
+                body,
+            } => Type::Recursive {
                 span,
                 asc: asc.into_iter().map(|label| map_label(label, f)).collect(),
                 label: map_label(label, f),
                 body: Box::new(body.map_names(f)),
             },
-            Self::Iterative { span, asc, label, body } => Type::Iterative {
+            Self::Iterative {
+                span,
+                asc,
+                label,
+                body,
+            } => Type::Iterative {
                 span,
                 asc: asc.into_iter().map(|label| map_label(label, f)).collect(),
                 label: map_label(label, f),
@@ -440,12 +450,28 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
             Self::Break(span) => Self::Break(span),
             Self::Continue(span) => Self::Continue(span),
 
-            Self::Recursive { span, asc, label, body } => {
-                Self::Recursive { span, asc, label, body: Box::new(body.substitute(var, typ)?) }
-            }
-            Self::Iterative { span, asc, label, body } => {
-                Self::Iterative { span, asc, label, body: Box::new(body.substitute(var, typ)?) }
-            }
+            Self::Recursive {
+                span,
+                asc,
+                label,
+                body,
+            } => Self::Recursive {
+                span,
+                asc,
+                label,
+                body: Box::new(body.substitute(var, typ)?),
+            },
+            Self::Iterative {
+                span,
+                asc,
+                label,
+                body,
+            } => Self::Iterative {
+                span,
+                asc,
+                label,
+                body: Box::new(body.substitute(var, typ)?),
+            },
             Self::Self_(span, label) => Self::Self_(span, label),
 
             Self::SendType(loc, name, body) => {
@@ -551,7 +577,20 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
             (Self::Break(_), Self::Break(_)) => true,
             (Self::Continue(_), Self::Continue(_)) => true,
 
-            (Self::Recursive { asc: asc1, label: label1, body: body1, .. }, Self::Recursive { asc: asc2, label: label2, body: body2, .. }) => {
+            (
+                Self::Recursive {
+                    asc: asc1,
+                    label: label1,
+                    body: body1,
+                    ..
+                },
+                Self::Recursive {
+                    asc: asc2,
+                    label: label2,
+                    body: body2,
+                    ..
+                },
+            ) => {
                 if !asc2.iter().all(|label| asc1.contains(label)) {
                     return Ok(false);
                 }
@@ -559,12 +598,30 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
                 ind.insert((label1.clone(), label2.clone()));
                 body1.is_assignable_to(body2, type_defs, &ind)?
             }
-            (typ, Self::Recursive { asc, label, body, .. }) => typ.is_assignable_to(
+            (
+                typ,
+                Self::Recursive {
+                    asc, label, body, ..
+                },
+            ) => typ.is_assignable_to(
                 &Self::expand_recursive(asc, label, body, type_defs)?,
                 type_defs,
                 ind,
             )?,
-            (Self::Iterative { asc: asc1, label: label1, body: body1, .. }, Self::Iterative { asc: asc2, label: label2, body: body2, .. }) => {
+            (
+                Self::Iterative {
+                    asc: asc1,
+                    label: label1,
+                    body: body1,
+                    ..
+                },
+                Self::Iterative {
+                    asc: asc2,
+                    label: label2,
+                    body: body2,
+                    ..
+                },
+            ) => {
                 if !asc2.iter().all(|label| asc1.contains(label)) {
                     return Ok(false);
                 }
@@ -572,18 +629,20 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
                 ind.insert((label1.clone(), label2.clone()));
                 body1.is_assignable_to(body2, type_defs, &ind)?
             }
-            (Self::Iterative { asc, label, body, .. }, typ) => {
-                Self::expand_iterative(asc, label, body, type_defs)?
-                    .is_assignable_to(typ, type_defs, ind)?
-            }
+            (
+                Self::Iterative {
+                    asc, label, body, ..
+                },
+                typ,
+            ) => Self::expand_iterative(asc, label, body, type_defs)?
+                .is_assignable_to(typ, type_defs, ind)?,
 
             (Self::Self_(_, label1), Self::Self_(_, label2)) => {
                 ind.contains(&(label1.clone(), label2.clone()))
             }
 
-            | (Self::SendType(loc, name1, body1), Self::SendType(_, name2, body2))
-            | (Self::ReceiveType(loc, name1, body1), Self::ReceiveType(_, name2, body2))
-            => {
+            (Self::SendType(loc, name1, body1), Self::SendType(_, name2, body2))
+            | (Self::ReceiveType(loc, name1, body1), Self::ReceiveType(_, name2, body2)) => {
                 let body2 = body2
                     .clone()
                     .substitute(name2, &Type::Var(loc.clone(), name1.clone()))?;
@@ -600,9 +659,10 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
         Ok(match self {
             Self::Chan(_, t) => *t.clone(),
 
-            Self::Var(span, name) => {
-                Self::Chan(span.clone(), Box::new(Self::Var(span.clone(), name.clone())))
-            }
+            Self::Var(span, name) => Self::Chan(
+                span.clone(),
+                Box::new(Self::Var(span.clone(), name.clone())),
+            ),
             Self::Name(span, name, args) => match type_defs.get_dual(span, name, args) {
                 Ok(dual) => dual,
                 Err(_) => Self::Chan(
@@ -634,13 +694,23 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
             Self::Break(span) => Self::Continue(span.clone()),
             Self::Continue(span) => Self::Break(span.clone()),
 
-            Self::Recursive { span, asc, label, body: t } => Self::Iterative {
+            Self::Recursive {
+                span,
+                asc,
+                label,
+                body: t,
+            } => Self::Iterative {
                 span: span.clone(),
                 asc: asc.clone(),
                 label: label.clone(),
                 body: Box::new(t.dual(type_defs)?.chan_self(label)),
             },
-            Self::Iterative { span, asc, label, body: t } => Self::Recursive {
+            Self::Iterative {
+                span,
+                asc,
+                label,
+                body: t,
+            } => Self::Recursive {
                 span: span.clone(),
                 asc: asc.clone(),
                 label: label.clone(),
@@ -701,18 +771,48 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
             Self::Break(span) => Self::Break(span.clone()),
             Self::Continue(span) => Self::Continue(span.clone()),
 
-            Self::Recursive { span, asc, label: label1, body: t } => {
+            Self::Recursive {
+                span,
+                asc,
+                label: label1,
+                body: t,
+            } => {
                 if &label1 == label {
-                    Self::Recursive { span, asc, label: label1, body: t }
+                    Self::Recursive {
+                        span,
+                        asc,
+                        label: label1,
+                        body: t,
+                    }
                 } else {
-                    Self::Recursive { span, asc, label: label1, body: Box::new(t.chan_self(label)) }
+                    Self::Recursive {
+                        span,
+                        asc,
+                        label: label1,
+                        body: Box::new(t.chan_self(label)),
+                    }
                 }
             }
-            Self::Iterative { span, asc, label: label1, body: t } => {
+            Self::Iterative {
+                span,
+                asc,
+                label: label1,
+                body: t,
+            } => {
                 if &label1 == label {
-                    Self::Iterative { span, asc, label: label1, body: t }
+                    Self::Iterative {
+                        span,
+                        asc,
+                        label: label1,
+                        body: t,
+                    }
                 } else {
-                    Self::Iterative { span, asc, label: label1, body: Box::new(t.chan_self(label)) }
+                    Self::Iterative {
+                        span,
+                        asc,
+                        label: label1,
+                        body: Box::new(t.chan_self(label)),
+                    }
                 }
             }
             Self::Self_(span, label1) => {
@@ -751,7 +851,7 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
     ) -> Result<Self, TypeError<Name>> {
         Ok(match self {
             Self::Chan(span, t) => match *t {
-                Self::Self_(span, label) if &label == top_label => Self::Iterative{
+                Self::Self_(span, label) if &label == top_label => Self::Iterative {
                     span,
                     asc: top_asc.clone(),
                     label: label.clone(),
@@ -811,9 +911,19 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
             Self::Break(span) => Self::Break(span),
             Self::Continue(span) => Self::Continue(span),
 
-            Self::Recursive { span, asc, label, body: t } => {
+            Self::Recursive {
+                span,
+                asc,
+                label,
+                body: t,
+            } => {
                 if &label == top_label {
-                    Self::Recursive { span, asc, label, body: t }
+                    Self::Recursive {
+                        span,
+                        asc,
+                        label,
+                        body: t,
+                    }
                 } else {
                     Self::Recursive {
                         span,
@@ -825,7 +935,12 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
                     }
                 }
             }
-            Self::Iterative { span, asc, label, body: t } => Self::Iterative {
+            Self::Iterative {
+                span,
+                asc,
+                label,
+                body: t,
+            } => Self::Iterative {
                 span,
                 asc,
                 label,
@@ -833,7 +948,12 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
             },
             Self::Self_(span, label) => {
                 if &label == top_label {
-                    Self::Recursive { span, asc: top_asc.clone(), label, body: Box::new(top_body.clone()) }
+                    Self::Recursive {
+                        span,
+                        asc: top_asc.clone(),
+                        label,
+                        body: Box::new(top_body.clone()),
+                    }
                 } else {
                     Self::Self_(span, label)
                 }
@@ -931,19 +1051,29 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
             Self::Break(span) => Self::Break(span),
             Self::Continue(span) => Self::Continue(span),
 
-            Self::Recursive { span, asc, label, body: t } => Self::Recursive {
+            Self::Recursive {
                 span,
                 asc,
                 label,
-                body: Box::new(t.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?)
+                body: t,
+            } => Self::Recursive {
+                span,
+                asc,
+                label,
+                body: Box::new(t.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?),
             },
-            Self::Iterative { span, asc, label, body: t } => {
+            Self::Iterative {
+                span,
+                asc,
+                label,
+                body: t,
+            } => {
                 if &label == top_label {
                     Self::Iterative {
                         span,
                         asc,
                         label,
-                        body: t
+                        body: t,
                     }
                 } else {
                     Self::Iterative {
@@ -952,7 +1082,7 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
                         label,
                         body: Box::new(
                             t.expand_iterative_helper(top_asc, top_label, top_body, type_defs)?,
-                        )
+                        ),
                     }
                 }
             }
@@ -962,7 +1092,7 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
                         span,
                         asc: top_asc.clone(),
                         label,
-                        body: Box::new(top_body.clone())
+                        body: Box::new(top_body.clone()),
                     }
                 } else {
                     Self::Self_(span, label)
@@ -1011,11 +1141,21 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
             Self::Break(_) => {}
             Self::Continue(_) => {}
 
-            Self::Recursive { span: _, asc, label: _, body: t } => {
+            Self::Recursive {
+                span: _,
+                asc,
+                label: _,
+                body: t,
+            } => {
                 asc.shift_remove(label);
                 t.invalidate_ascendent(label);
             }
-            Self::Iterative { span: _, asc, label: _, body: t } => {
+            Self::Iterative {
+                span: _,
+                asc,
+                label: _,
+                body: t,
+            } => {
                 asc.shift_remove(label);
                 t.invalidate_ascendent(label);
             }
@@ -1063,7 +1203,12 @@ where
         let type_defs = TypeDefs::new_with_validation(&program.type_defs)?;
 
         let mut unchecked_definitions = IndexMap::new();
-        for Definition { span, name, expression } in &program.definitions {
+        for Definition {
+            span,
+            name,
+            expression,
+        } in &program.definitions
+        {
             if let Some((span1, _)) =
                 unchecked_definitions.insert(name.clone(), (span.clone(), expression.clone()))
             {
@@ -1080,7 +1225,8 @@ where
             if !unchecked_definitions.contains_key(name) {
                 return Err(TypeError::DeclaredButNotDefined(span.clone(), name.clone()));
             }
-            if let Some((span1, _)) = declarations.insert(name.clone(), (span.clone(), typ.clone())) {
+            if let Some((span1, _)) = declarations.insert(name.clone(), (span.clone(), typ.clone()))
+            {
                 return Err(TypeError::NameAlreadyDeclared(
                     span.clone(),
                     span1,
@@ -1165,7 +1311,7 @@ where
             .map(|(name, checked)| Definition {
                 span: checked.span.clone(),
                 name: name.clone(),
-                expression: checked.def.clone()
+                expression: checked.def.clone(),
             })
             .collect()
     }
@@ -1193,12 +1339,7 @@ where
         }
     }
 
-    pub fn put(
-        &mut self,
-        span: &Span,
-        name: Name,
-        typ: Type<Name>,
-    ) -> Result<(), TypeError<Name>> {
+    pub fn put(&mut self, span: &Span, name: Name, typ: Type<Name>) -> Result<(), TypeError<Name>> {
         if let Some(_) = self.variables.get(&name) {
             return Err(TypeError::ShadowedObligation(span.clone(), name));
         }
@@ -1243,7 +1384,14 @@ where
         process: &process::Process<Name, ()>,
     ) -> Result<Arc<process::Process<Name, Type<Name>>>, TypeError<Name>> {
         match process {
-            process::Process::Let { span, name, annotation, typ: (), value: expression, then: process } => {
+            process::Process::Let {
+                span,
+                name,
+                annotation,
+                typ: (),
+                value: expression,
+                then: process,
+            } => {
                 let (expression, typ) = match annotation {
                     Some(annotated_type) => (
                         self.check_expression(None, expression, annotated_type)?,
@@ -1259,11 +1407,16 @@ where
                     annotation: annotation.clone(),
                     typ: typ,
                     value: expression,
-                    then: process
+                    then: process,
                 }))
             }
 
-            process::Process::Do { span, name: object, typ: (), command } => {
+            process::Process::Do {
+                span,
+                name: object,
+                typ: (),
+                command,
+            } => {
                 let typ = self.get(span, object)?;
 
                 let (command, _) = self.check_command(
@@ -1279,7 +1432,7 @@ where
                     span: span.clone(),
                     name: object.clone(),
                     typ: typ,
-                    command: command
+                    command: command,
                 }))
             }
 
@@ -1300,14 +1453,10 @@ where
             &mut Self,
             &process::Process<Name, ()>,
         ) -> Result<
-            (
-                Arc<process::Process<Name, Type<Name>>>,
-                Option<Type<Name>>,
-            ),
+            (Arc<process::Process<Name, Type<Name>>>, Option<Type<Name>>),
             TypeError<Name>,
         >,
-    ) -> Result<(process::Command<Name, Type<Name>>, Option<Type<Name>>), TypeError<Name>>
-    {
+    ) -> Result<(process::Command<Name, Type<Name>>, Option<Type<Name>>), TypeError<Name>> {
         if let Type::Name(_, name, args) = typ {
             return self.check_command(
                 inference_subject,
@@ -1319,7 +1468,13 @@ where
             );
         }
         if !matches!(command, process::Command::Link(_)) {
-            if let Type::Iterative { asc: top_asc, label: top_label, body, .. } = typ {
+            if let Type::Iterative {
+                asc: top_asc,
+                label: top_label,
+                body,
+                ..
+            } = typ
+            {
                 return self.check_command(
                     inference_subject,
                     span,
@@ -1330,8 +1485,17 @@ where
                 );
             }
         }
-        if !matches!(command, process::Command::Begin { .. } | process::Command::Loop(_)) {
-            if let Type::Recursive { asc: top_asc, label: top_label, body, .. } = typ {
+        if !matches!(
+            command,
+            process::Command::Begin { .. } | process::Command::Loop(_)
+        ) {
+            if let Type::Recursive {
+                asc: top_asc,
+                label: top_label,
+                body,
+                ..
+            } = typ
+            {
                 return self.check_command(
                     inference_subject,
                     span,
@@ -1417,7 +1581,10 @@ where
                 };
                 self.put(span, object.clone(), branch_type.clone())?;
                 let (process, inferred_types) = analyze_process(self, process)?;
-                (process::Command::Choose(chosen.clone(), process), inferred_types)
+                (
+                    process::Command::Choose(chosen.clone(), process),
+                    inferred_types,
+                )
             }
 
             process::Command::Match(branches, processes) => {
@@ -1503,8 +1670,18 @@ where
                 (process::Command::Continue(process), inferred_types)
             }
 
-            process::Command::Begin { unfounded, label, body: process } => {
-                let Type::Recursive { span: typ_span, asc: typ_asc, label: typ_label, body: typ_body } = typ else {
+            process::Command::Begin {
+                unfounded,
+                label,
+                body: process,
+            } => {
+                let Type::Recursive {
+                    span: typ_span,
+                    asc: typ_asc,
+                    label: typ_label,
+                    body: typ_body,
+                } = typ
+                else {
                     return Err(TypeError::InvalidOperation(
                         span.clone(),
                         Operation::Begin(span.clone(), label.clone()),
@@ -1531,7 +1708,7 @@ where
                                     span: typ_span.clone(),
                                     asc: typ_asc.clone(),
                                     label: typ_label.clone(),
-                                    body: typ_body.clone()
+                                    body: typ_body.clone(),
                                 },
                             );
                             variables
@@ -1546,20 +1723,18 @@ where
                 )?;
                 let (process, inferred_type) = analyze_process(self, process)?;
 
-                let inferred_iterative = inferred_type.map(|body| {
-                    Type::Iterative {
-                        span: span.clone(),
-                        asc: typ_asc,
-                        label: label.clone(),
-                        body: Box::new(body)
-                    }
+                let inferred_iterative = inferred_type.map(|body| Type::Iterative {
+                    span: span.clone(),
+                    asc: typ_asc,
+                    label: label.clone(),
+                    body: Box::new(body),
                 });
 
                 (
                     process::Command::Begin {
                         unfounded: *unfounded,
                         label: label.clone(),
-                        body: process
+                        body: process,
                     },
                     inferred_iterative,
                 )
@@ -1578,8 +1753,10 @@ where
                 };
                 self.put(span, driver.clone(), typ.clone())?;
 
-                if let (Type::Recursive { asc: asc1, .. }, Some(Type::Recursive { asc: asc2, .. })) =
-                    (typ, variables.get(&driver))
+                if let (
+                    Type::Recursive { asc: asc1, .. },
+                    Some(Type::Recursive { asc: asc2, .. }),
+                ) = (typ, variables.get(&driver))
                 {
                     for label in asc2 {
                         if !asc1.contains(label) {
@@ -1636,7 +1813,10 @@ where
                 let then_type = then_type.clone().substitute(type_name, argument)?;
                 self.put(span, object.clone(), then_type)?;
                 let (process, inferred_types) = analyze_process(self, process)?;
-                (process::Command::SendType(argument.clone(), process), inferred_types)
+                (
+                    process::Command::SendType(argument.clone(), process),
+                    inferred_types,
+                )
             }
 
             process::Command::ReceiveType(parameter, process) => {
@@ -1665,10 +1845,16 @@ where
         &mut self,
         process: &process::Process<Name, ()>,
         subject: &Name,
-    ) -> Result<(Arc<process::Process<Name, Type<Name>>>, Type<Name>), TypeError<Name>>
-    {
+    ) -> Result<(Arc<process::Process<Name, Type<Name>>>, Type<Name>), TypeError<Name>> {
         match process {
-            process::Process::Let { span, name, annotation, typ: (), value: expression, then: process } => {
+            process::Process::Let {
+                span,
+                name,
+                annotation,
+                typ: (),
+                value: expression,
+                then: process,
+            } => {
                 let (expression, typ) = match annotation {
                     Some(annotated_type) => (
                         self.check_expression(Some(subject), expression, annotated_type)?,
@@ -1685,13 +1871,18 @@ where
                         annotation: annotation.clone(),
                         typ,
                         value: expression,
-                        then: process
+                        then: process,
                     }),
                     subject_type,
                 ))
             }
 
-            process::Process::Do { span, name: object, typ: (), command } => {
+            process::Process::Do {
+                span,
+                name: object,
+                typ: (),
+                command,
+            } => {
                 if object == subject {
                     let (command, typ) = self.infer_command(span, subject, command)?;
                     return Ok((
@@ -1699,7 +1890,7 @@ where
                             span: span.clone(),
                             name: object.clone(),
                             typ: typ.clone(),
-                            command
+                            command,
                         }),
                         typ,
                     ));
@@ -1730,7 +1921,7 @@ where
                         span: span.clone(),
                         name: object.clone(),
                         typ,
-                        command
+                        command,
                     }),
                     inferred_type,
                 ))
@@ -1751,7 +1942,10 @@ where
         Ok(match command {
             process::Command::Link(expression) => {
                 let (expression, typ) = self.infer_expression(Some(subject), expression)?;
-                (process::Command::Link(expression), typ.dual(&self.type_defs)?)
+                (
+                    process::Command::Link(expression),
+                    typ.dual(&self.type_defs)?,
+                )
             }
 
             process::Command::Send(argument, process) => {
@@ -1815,10 +2009,17 @@ where
 
             process::Command::Continue(process) => {
                 let process = self.check_process(process)?;
-                (process::Command::Continue(process), Type::Break(span.clone()))
+                (
+                    process::Command::Continue(process),
+                    Type::Break(span.clone()),
+                )
             }
 
-            process::Command::Begin { unfounded, label, body: process } => {
+            process::Command::Begin {
+                unfounded,
+                label,
+                body: process,
+            } => {
                 self.loop_points.insert(
                     label.clone(),
                     (subject.clone(), Arc::new(self.variables.clone())),
@@ -1828,7 +2029,7 @@ where
                     process::Command::Begin {
                         unfounded: *unfounded,
                         label: label.clone(),
-                        body: process
+                        body: process,
                     },
                     Type::Recursive {
                         span: span.clone(),
@@ -1838,7 +2039,7 @@ where
                             IndexSet::from([label.clone()])
                         },
                         label: label.clone(),
-                        body: Box::new(body)
+                        body: Box::new(body),
                     },
                 )
             }
@@ -1923,7 +2124,14 @@ where
                 )))
             }
 
-            process::Expression::Fork { span, captures, chan_name: channel, chan_annotation: annotation, process, .. } => {
+            process::Expression::Fork {
+                span,
+                captures,
+                chan_name: channel,
+                chan_annotation: annotation,
+                process,
+                ..
+            } => {
                 let target_dual = target_type.dual(&self.type_defs)?;
                 let (chan_type, expr_type) = match annotation {
                     Some(annotated_type) => {
@@ -1953,8 +2161,7 @@ where
         &mut self,
         inference_subject: Option<&Name>,
         expression: &process::Expression<Name, ()>,
-    ) -> Result<(Arc<process::Expression<Name, Type<Name>>>, Type<Name>), TypeError<Name>>
-    {
+    ) -> Result<(Arc<process::Expression<Name, Type<Name>>>, Type<Name>), TypeError<Name>> {
         match expression {
             process::Expression::Reference(span, name, ()) => {
                 if Some(name) == inference_subject {
@@ -1974,7 +2181,14 @@ where
                 ))
             }
 
-            process::Expression::Fork { span, captures, chan_name: channel, chan_annotation: annotation, process, .. } => {
+            process::Expression::Fork {
+                span,
+                captures,
+                chan_name: channel,
+                chan_annotation: annotation,
+                process,
+                ..
+            } => {
                 let mut context = self.split();
                 self.capture(inference_subject, captures, &mut context)?;
                 let (process, typ) = match annotation {
@@ -2075,7 +2289,9 @@ impl<Name: Display> Type<Name> {
             Self::Break(_) => write!(f, "!"),
             Self::Continue(_) => write!(f, "?"),
 
-            Self::Recursive { asc, label, body, .. } => {
+            Self::Recursive {
+                asc, label, body, ..
+            } => {
                 write!(f, "recursive ")?;
                 if let Some(label) = label {
                     write!(f, ":{} ", label)?;
@@ -2096,7 +2312,9 @@ impl<Name: Display> Type<Name> {
                 body.pretty(f, indent)
             }
 
-            Self::Iterative { asc, label, body, .. } => {
+            Self::Iterative {
+                asc, label, body, ..
+            } => {
                 write!(f, "iterative ")?;
                 if let Some(label) = label {
                     write!(f, ":{} ", label)?;
@@ -2403,12 +2621,11 @@ impl<Name: Display> TypeError<Name> {
 impl<Name> TypeError<Name> {
     pub fn spans(&self) -> (Span, Option<Span>) {
         match self {
-            | Self::TypeNameAlreadyDefined(span1, span2, _)
+            Self::TypeNameAlreadyDefined(span1, span2, _)
             | Self::NameAlreadyDeclared(span1, span2, _)
-            | Self::NameAlreadyDefined(span1, span2, _)
-            => (span1.clone(), Some(span2.clone())),
+            | Self::NameAlreadyDefined(span1, span2, _) => (span1.clone(), Some(span2.clone())),
 
-            | Self::DeclaredButNotDefined(span, _)
+            Self::DeclaredButNotDefined(span, _)
             | Self::NoMatchingRecursiveOrIterative(span, _)
             | Self::SelfUsedInNegativePosition(span, _)
             | Self::TypeNameNotDefined(span, _)
@@ -2428,12 +2645,9 @@ impl<Name> TypeError<Name> {
             | Self::DoesNotDescendSubjectOfBegin(span, _)
             | Self::LoopVariableNotPreserved(span, _)
             | Self::LoopVariableChangedType(span, _, _, _)
-            | Self::Telltypes(span, _)
-            => (span.clone(), None),
+            | Self::Telltypes(span, _) => (span.clone(), None),
 
-            Self::TypesCannotBeUnified(typ1, typ2)
-            => (typ1.span(), Some(typ2.span())),
-
+            Self::TypesCannotBeUnified(typ1, typ2) => (typ1.span(), Some(typ2.span())),
         }
     }
 }

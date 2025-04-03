@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-use lsp_types::{self as lsp, Uri};
+use super::io::IO;
 use crate::language_server::data::{semantic_token_modifiers, semantic_token_types};
-use crate::par::language::{Declaration, Definition, Internal, Name, TypeDef};
 use crate::location::Span;
+use crate::par::language::{Declaration, Definition, Internal, Name, TypeDef};
 use crate::par::types::TypeError;
 use crate::playground::{Checked, Compiled};
-use super::io::IO;
+use lsp_types::{self as lsp, Uri};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub enum CompileError {
@@ -27,7 +27,7 @@ impl Instance {
             uri,
             dirty: true,
             compiled: None,
-            io
+            io,
         }
     }
 
@@ -66,7 +66,12 @@ impl Instance {
                 }
 
                 if !inside_item {
-                    for Definition { span, name, expression } in &compiled.program.definitions {
+                    for Definition {
+                        span,
+                        name,
+                        expression,
+                    } in &compiled.program.definitions
+                    {
                         if !is_inside(pos, span) {
                             continue;
                         }
@@ -84,15 +89,13 @@ impl Instance {
                 } else {
                     return None;
                 }
-            },
+            }
             Some(Err(e)) => format!("Compiled error: {:?}", e),
             None => "Not compiled".to_string(),
         };
 
         let hover = lsp::Hover {
-            contents: lsp::HoverContents::Scalar(
-                lsp::MarkedString::String(payload)
-            ),
+            contents: lsp::HoverContents::Scalar(lsp::MarkedString::String(payload)),
             range: None,
         };
         Some(hover)
@@ -103,7 +106,10 @@ impl Instance {
     look at Rust language servers, what "kind" they use for type aliases & traits
      */
     #[allow(deprecated)] // some types only allow construction using deprecated fields
-    pub fn provide_document_symbols(&self, params: &lsp::DocumentSymbolParams) -> Option<lsp::DocumentSymbolResponse> {
+    pub fn provide_document_symbols(
+        &self,
+        params: &lsp::DocumentSymbolParams,
+    ) -> Option<lsp::DocumentSymbolResponse> {
         tracing::debug!("Handling symbols request with params: {:?}", params);
 
         let Some(Ok(compiled)) = &self.compiled else {
@@ -127,38 +133,54 @@ impl Instance {
          */
 
         for TypeDef { span, name, .. } in &compiled.program.type_defs {
-            symbols.insert(name, lsp::DocumentSymbol {
-                name: name.to_string(),
-                detail: None,
-                kind: lsp::SymbolKind::TYPE_PARAMETER, // fits best?
-                tags: None,
-                deprecated: None, // must be specified
-                range: span.into(),
-                selection_range: name.span().unwrap().into(),
-                children: None,
-            });
+            symbols.insert(
+                name,
+                lsp::DocumentSymbol {
+                    name: name.to_string(),
+                    detail: None,
+                    kind: lsp::SymbolKind::TYPE_PARAMETER, // fits best?
+                    tags: None,
+                    deprecated: None, // must be specified
+                    range: span.into(),
+                    selection_range: name.span().unwrap().into(),
+                    children: None,
+                },
+            );
         }
 
         for Declaration { span, name, typ } in &compiled.program.declarations {
             let mut detail = String::new();
             typ.pretty(&mut detail, 0).unwrap();
 
-            symbols.insert(name, lsp::DocumentSymbol {
-                name: name.to_string(),
-                detail: Some(detail),
-                kind: if typ.is_receive() { lsp::SymbolKind::FUNCTION } else { lsp::SymbolKind::CONSTANT },
-                tags: None,
-                deprecated: None, // must be specified
-                range: span.into(),
-                selection_range: name.span().unwrap().into(),
-                children: None,
-            });
+            symbols.insert(
+                name,
+                lsp::DocumentSymbol {
+                    name: name.to_string(),
+                    detail: Some(detail),
+                    kind: if typ.is_receive() {
+                        lsp::SymbolKind::FUNCTION
+                    } else {
+                        lsp::SymbolKind::CONSTANT
+                    },
+                    tags: None,
+                    deprecated: None, // must be specified
+                    range: span.into(),
+                    selection_range: name.span().unwrap().into(),
+                    children: None,
+                },
+            );
         }
 
-        for Definition { span, name, expression } in &compiled.program.definitions {
+        for Definition {
+            span,
+            name,
+            expression,
+        } in &compiled.program.definitions
+        {
             let range = span.into();
             let selection_range = name.span().unwrap().into();
-            symbols.entry(name)
+            symbols
+                .entry(name)
                 .and_modify(|symbol| {
                     symbol.range = range;
                     symbol.selection_range = selection_range;
@@ -171,7 +193,11 @@ impl Instance {
                     lsp::DocumentSymbol {
                         name: name.to_string(),
                         detail: Some(detail),
-                        kind: if typ.is_receive() { lsp::SymbolKind::FUNCTION } else { lsp::SymbolKind::CONSTANT },
+                        kind: if typ.is_receive() {
+                            lsp::SymbolKind::FUNCTION
+                        } else {
+                            lsp::SymbolKind::CONSTANT
+                        },
                         tags: None,
                         deprecated: None, // must be specified
                         range,
@@ -191,19 +217,28 @@ impl Instance {
                 && range.end.character >= selection_range.end.character
                 && range.end.line >= selection_range.end.line;
             if !inside {
-                tracing::error!("Symbol selection range is not inside the range: {:?}", symbol);
+                tracing::error!(
+                    "Symbol selection range is not inside the range: {:?}",
+                    symbol
+                );
             }
         }
 
         Some(lsp::DocumentSymbolResponse::Nested(
-            symbols.into_iter().map(|(_, v)| v).collect()
+            symbols.into_iter().map(|(_, v)| v).collect(),
         ))
     }
 
-    pub fn handle_goto_declaration(&self, params: &lsp::GotoDefinitionParams) -> Option<lsp::GotoDefinitionResponse> {
+    pub fn handle_goto_declaration(
+        &self,
+        params: &lsp::GotoDefinitionParams,
+    ) -> Option<lsp::GotoDefinitionResponse> {
         // todo: locals
 
-        tracing::debug!("Handling goto declaration request with params: {:?}", params);
+        tracing::debug!(
+            "Handling goto declaration request with params: {:?}",
+            params
+        );
         let Some(Ok(compiled)) = &self.compiled else {
             return None;
         };
@@ -214,9 +249,12 @@ impl Instance {
 
         for definition in &compiled.program.definitions {
             if is_inside(pos, &definition.name.span().unwrap()) {
-                let Some(declaration) = compiled.program.declarations.iter().find(|dec| {
-                    dec.name == definition.name
-                }) else {
+                let Some(declaration) = compiled
+                    .program
+                    .declarations
+                    .iter()
+                    .find(|dec| dec.name == definition.name)
+                else {
                     return None;
                 };
 
@@ -234,15 +272,16 @@ impl Instance {
 
         let declaration = original?;
 
-        Some(lsp::GotoDefinitionResponse::Scalar(
-            lsp::Location {
-                uri: self.uri.clone(),
-                range: declaration.name.span().unwrap().into()
-            }
-        ))
+        Some(lsp::GotoDefinitionResponse::Scalar(lsp::Location {
+            uri: self.uri.clone(),
+            range: declaration.name.span().unwrap().into(),
+        }))
     }
 
-    pub fn handle_goto_definition(&self, params: &lsp::GotoDefinitionParams) -> Option<lsp::GotoDefinitionResponse> {
+    pub fn handle_goto_definition(
+        &self,
+        params: &lsp::GotoDefinitionParams,
+    ) -> Option<lsp::GotoDefinitionResponse> {
         // todo: locals
 
         tracing::debug!("Handling goto definition request with params: {:?}", params);
@@ -256,9 +295,12 @@ impl Instance {
 
         for declaration in &compiled.program.declarations {
             if is_inside(pos, &declaration.name.span().unwrap()) {
-                let Some(definition) = compiled.program.definitions.iter().find(|definition| {
-                    definition.name == declaration.name
-                }) else {
+                let Some(definition) = compiled
+                    .program
+                    .definitions
+                    .iter()
+                    .find(|definition| definition.name == declaration.name)
+                else {
                     return None;
                 };
 
@@ -276,16 +318,17 @@ impl Instance {
 
         let definition = original?;
 
-        Some(lsp::GotoDefinitionResponse::Scalar(
-            lsp::Location {
-                uri: self.uri.clone(),
-                range: definition.name.span().unwrap().into()
-            }
-        ))
+        Some(lsp::GotoDefinitionResponse::Scalar(lsp::Location {
+            uri: self.uri.clone(),
+            range: definition.name.span().unwrap().into(),
+        }))
     }
 
     // todo: caching
-    pub fn provide_semantic_tokens(&self, params: &lsp::SemanticTokensParams) -> Option<lsp::SemanticTokensResult> {
+    pub fn provide_semantic_tokens(
+        &self,
+        params: &lsp::SemanticTokensParams,
+    ) -> Option<lsp::SemanticTokensResult> {
         tracing::info!("Handling semantic tokens request with params: {:?}", params);
         let Some(Ok(compiled)) = &self.compiled else {
             return None;
@@ -300,7 +343,7 @@ impl Instance {
                 delta_start: name_span.start.column as u32,
                 length: name_span.len() as u32,
                 token_type: semantic_token_types::TYPE,
-                token_modifiers_bitset: 0u32
+                token_modifiers_bitset: 0u32,
             });
         }
 
@@ -310,19 +353,32 @@ impl Instance {
                 delta_line: name_span.start.row as u32,
                 delta_start: name_span.start.column as u32,
                 length: name_span.len() as u32,
-                token_type: if typ.is_receive() { semantic_token_types::FUNCTION } else { semantic_token_types::VARIABLE },
-                token_modifiers_bitset: semantic_token_modifiers::DECLARATION | semantic_token_modifiers::READONLY,
+                token_type: if typ.is_receive() {
+                    semantic_token_types::FUNCTION
+                } else {
+                    semantic_token_types::VARIABLE
+                },
+                token_modifiers_bitset: semantic_token_modifiers::DECLARATION
+                    | semantic_token_modifiers::READONLY,
             });
         }
 
-        for Definition { name, expression, .. } in &compiled.program.definitions {
+        for Definition {
+            name, expression, ..
+        } in &compiled.program.definitions
+        {
             let name_span = name.span().unwrap();
             semantic_tokens.push(lsp::SemanticToken {
                 delta_line: name_span.start.row as u32,
                 delta_start: name_span.start.column as u32,
                 length: name_span.len() as u32,
-                token_type: if expression.get_type().is_receive() { semantic_token_types::FUNCTION } else { semantic_token_types::VARIABLE },
-                token_modifiers_bitset: semantic_token_modifiers::DEFINITION | semantic_token_modifiers::READONLY,
+                token_type: if expression.get_type().is_receive() {
+                    semantic_token_types::FUNCTION
+                } else {
+                    semantic_token_types::VARIABLE
+                },
+                token_modifiers_bitset: semantic_token_modifiers::DEFINITION
+                    | semantic_token_modifiers::READONLY,
             });
         }
 
@@ -355,50 +411,68 @@ impl Instance {
         };
 
         // todo: display run button over declaration if it is exactly one line above definition
-        Some(compiled.program.definitions.iter().map(|definition| {
-            lsp::CodeLens {
-                range: definition.name.span().unwrap().into(),
-                command: Some(lsp::Command {
-                    title: "$(play) Run".to_owned(),
-                    command: "run".to_owned(),
-                    arguments: Some(vec![
-                        self.uri.to_string().into(),
-                        definition.name.to_string().into(),
-                    ]),
-                }),
-                data: None,
-            }
-        }).collect())
+        Some(
+            compiled
+                .program
+                .definitions
+                .iter()
+                .map(|definition| lsp::CodeLens {
+                    range: definition.name.span().unwrap().into(),
+                    command: Some(lsp::Command {
+                        title: "$(play) Run".to_owned(),
+                        command: "run".to_owned(),
+                        arguments: Some(vec![
+                            self.uri.to_string().into(),
+                            definition.name.to_string().into(),
+                        ]),
+                    }),
+                    data: None,
+                })
+                .collect(),
+        )
     }
 
-    pub fn provide_inlay_hints(&self, params: &lsp::InlayHintParams) -> Option<Vec<lsp::InlayHint>> {
+    pub fn provide_inlay_hints(
+        &self,
+        params: &lsp::InlayHintParams,
+    ) -> Option<Vec<lsp::InlayHint>> {
         tracing::debug!("Handling inlay hints request with params: {:?}", params);
         let Some(Ok(compiled)) = &self.compiled else {
             return None;
         };
 
-        Some(compiled.program.definitions.iter()
-            .filter(|definition| {
-                !compiled.program.declarations.iter().any(|declaration| {
-                    definition.name == declaration.name
+        Some(
+            compiled
+                .program
+                .definitions
+                .iter()
+                .filter(|definition| {
+                    !compiled
+                        .program
+                        .declarations
+                        .iter()
+                        .any(|declaration| definition.name == declaration.name)
                 })
-            })
-            .map(|Definition { name, expression, .. }| {
-                let mut label = ": ".to_owned();
-                expression.get_type().pretty(&mut label, 0).unwrap();
+                .map(
+                    |Definition {
+                         name, expression, ..
+                     }| {
+                        let mut label = ": ".to_owned();
+                        expression.get_type().pretty(&mut label, 0).unwrap();
 
-                lsp::InlayHint {
-                    position: name.span().unwrap().end.into(),
-                    label: lsp::InlayHintLabel::String(label),
-                    kind: Some(lsp::InlayHintKind::TYPE),
-                    text_edits: None,
-                    tooltip: None,
-                    padding_left: None,
-                    padding_right: None,
-                    data: None,
-                }
-            })
-            .collect()
+                        lsp::InlayHint {
+                            position: name.span().unwrap().end.into(),
+                            label: lsp::InlayHintLabel::String(label),
+                            kind: Some(lsp::InlayHintKind::TYPE),
+                            text_edits: None,
+                            tooltip: None,
+                            padding_left: None,
+                            padding_right: None,
+                            data: None,
+                        }
+                    },
+                )
+                .collect(),
         )
     }
 
@@ -408,9 +482,12 @@ impl Instance {
             return None;
         };
 
-        let Some(_definition) = compiled.program.definitions.iter().find(|definition| {
-            definition.name.to_string().as_str() == def_name
-        }) else {
+        let Some(_definition) = compiled
+            .program
+            .definitions
+            .iter()
+            .find(|definition| definition.name.to_string().as_str() == def_name)
+        else {
             return None;
         };
 
@@ -431,11 +508,9 @@ impl Instance {
         let code = self.io.read(&self.uri);
 
         // todo: progress reporting
-        let compiled = stacker::grow(32 * 1024 * 1024, || {
-            Compiled::from_string(&code.unwrap())
-        }).map_err(|err| CompileError::Compile(err)).and_then(
-            |compiled| compiled.checked.map_err(|err| CompileError::Types(err))
-        );
+        let compiled = stacker::grow(32 * 1024 * 1024, || Compiled::from_string(&code.unwrap()))
+            .map_err(|err| CompileError::Compile(err))
+            .and_then(|compiled| compiled.checked.map_err(|err| CompileError::Types(err)));
 
         let result = match &compiled {
             Ok(_) => {

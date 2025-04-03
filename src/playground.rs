@@ -12,13 +12,17 @@ use indexmap::IndexMap;
 
 use crate::location::Span;
 use crate::par::language::{Declaration, Definition, TypeDef};
-use crate::{interact::{Event, Handle, Request}, par::{
-    language::{CompileError, Internal, Name, Program},
-    parse::{parse_program, SyntaxError},
-    process,
-    runtime::{self, Context, Operation},
-    types::{self, Type, TypeError},
-}, spawn::TokioSpawn};
+use crate::{
+    interact::{Event, Handle, Request},
+    par::{
+        language::{CompileError, Internal, Name, Program},
+        parse::{parse_program, SyntaxError},
+        process,
+        runtime::{self, Context, Operation},
+        types::{self, Type, TypeError},
+    },
+    spawn::TokioSpawn,
+};
 use miette::{LabeledSpan, SourceOffset, SourceSpan};
 
 pub struct Playground {
@@ -46,38 +50,47 @@ impl Compiled {
                 let type_defs = program
                     .type_defs
                     .into_iter()
-                    .map(|TypeDef { span, name, params, typ }| {
-                        TypeDef {
-                            span,
-                            name: Internal::Original(name),
-                            params: params.into_iter().map(Internal::Original).collect(),
-                            typ: typ.map_names(&mut Internal::Original),
-                        }
-                    })
+                    .map(
+                        |TypeDef {
+                             span,
+                             name,
+                             params,
+                             typ,
+                         }| {
+                            TypeDef {
+                                span,
+                                name: Internal::Original(name),
+                                params: params.into_iter().map(Internal::Original).collect(),
+                                typ: typ.map_names(&mut Internal::Original),
+                            }
+                        },
+                    )
                     .collect();
                 let declarations = program
                     .declarations
                     .into_iter()
-                    .map(|Declaration { span, name, typ }| {
-                        Declaration {
-                            span,
-                            name: Internal::Original(name),
-                            typ: typ.map_names(&mut Internal::Original),
-                        }
+                    .map(|Declaration { span, name, typ }| Declaration {
+                        span,
+                        name: Internal::Original(name),
+                        typ: typ.map_names(&mut Internal::Original),
                     })
                     .collect();
                 let compile_result = program
                     .definitions
                     .into_iter()
-                    .map(|Definition { span, name, expression }| {
-                        expression.compile().map(|compiled| {
-                            Definition {
+                    .map(
+                        |Definition {
+                             span,
+                             name,
+                             expression,
+                         }| {
+                            expression.compile().map(|compiled| Definition {
                                 span,
                                 name: Internal::Original(name.clone()),
                                 expression: compiled.optimize().fix_captures(&IndexMap::new()).0,
-                            }
-                        })
-                    })
+                            })
+                        },
+                    )
                     .collect::<Result<_, CompileError>>();
                 match compile_result {
                     Ok(compiled) => Ok(Compiled::from_program(Program {
@@ -96,13 +109,19 @@ impl Compiled {
         let pretty = program
             .definitions
             .iter()
-            .map(|Definition { name, expression: def, .. }| {
-                let mut buf = String::new();
-                write!(&mut buf, "define {} = ", name).expect("write failed");
-                def.pretty(&mut buf, 0).expect("write failed");
-                write!(&mut buf, "\n\n").expect("write failed");
-                buf
-            })
+            .map(
+                |Definition {
+                     name,
+                     expression: def,
+                     ..
+                 }| {
+                    let mut buf = String::new();
+                    write!(&mut buf, "define {} = ", name).expect("write failed");
+                    def.pretty(&mut buf, 0).expect("write failed");
+                    write!(&mut buf, "\n\n").expect("write failed");
+                    buf
+                },
+            )
             .collect();
 
         // attempt to type check
@@ -129,7 +148,8 @@ impl Compiled {
     }
 }
 
-type CheckedProgram = Program<Internal<Name>, Arc<process::Expression<Internal<Name>, Type<Internal<Name>>>>>;
+type CheckedProgram =
+    Program<Internal<Name>, Arc<process::Expression<Internal<Name>, Type<Internal<Name>>>>>;
 
 #[derive(Clone)]
 pub(crate) struct Checked {
@@ -141,9 +161,7 @@ impl Checked {
         // not used for anything, so there's no reason to store it ATM.
         program: CheckedProgram,
     ) -> Self {
-        Self {
-            program
-        }
+        Self { program }
     }
 }
 
@@ -579,11 +597,14 @@ impl Playground {
 pub fn labels_from_span(_code: &str, span: &Span) -> Vec<LabeledSpan> {
     vec![LabeledSpan::new_with_span(
         None,
-        SourceSpan::new(SourceOffset::from(span.start.offset), span.len())
+        SourceSpan::new(SourceOffset::from(span.start.offset), span.len()),
     )]
 }
 pub fn span_to_source_span(_code: &str, span: &Span) -> Option<SourceSpan> {
-    Some(SourceSpan::new(SourceOffset::from(span.start.offset), span.len()))
+    Some(SourceSpan::new(
+        SourceOffset::from(span.start.offset),
+        span.len(),
+    ))
 }
 
 #[derive(Debug, miette::Diagnostic)]
@@ -638,10 +659,7 @@ impl Error {
         }
     }
 
-    fn display_runtime_error(
-        code: &str,
-        error: &runtime::Error<Internal<Name>>,
-    ) -> RuntimeError {
+    fn display_runtime_error(code: &str, error: &runtime::Error<Internal<Name>>) -> RuntimeError {
         use runtime::Error::*;
         match error {
             NameNotDefined(loc, name) => RuntimeError {

@@ -1,5 +1,4 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub struct Point {
     // 0-based
     pub offset: usize,
@@ -9,8 +8,7 @@ pub struct Point {
     pub column: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub struct Span {
     pub start: Point,
     pub end: Point,
