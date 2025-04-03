@@ -111,11 +111,25 @@ impl Instance {
 
         let mut symbols = HashMap::new();
 
+        /* kinds (maybe like this):
+        CLASS: choice type
+        METHOD: receiving choice branch, trait function
+        PROPERTY: general choice branch, trait constant
+        ENUM: either type
+        INTERFACE: trait
+        FUNCTION: value of receiving type
+        CONSTANT: value of other type
+        OBJECT: value of choice type
+        ENUM_MEMBER: either variant
+        STRUCT: record
+        TYPE_PARAMETER: type alias
+         */
+
         for TypeDef { span, name, .. } in &compiled.program.type_defs {
             symbols.insert(name, lsp::DocumentSymbol {
                 name: name.to_string(),
                 detail: None,
-                kind: lsp::SymbolKind::INTERFACE, // fits best?
+                kind: lsp::SymbolKind::TYPE_PARAMETER, // fits best?
                 tags: None,
                 deprecated: None, // must be specified
                 range: span.into(),
@@ -127,10 +141,11 @@ impl Instance {
         for Declaration { span, name, typ } in &compiled.program.declarations {
             let mut detail = String::new();
             typ.pretty(&mut detail, 0).unwrap();
+
             symbols.insert(name, lsp::DocumentSymbol {
                 name: name.to_string(),
                 detail: Some(detail),
-                kind: lsp::SymbolKind::FUNCTION, // something else for non-functions?
+                kind: if typ.is_receive() { lsp::SymbolKind::FUNCTION } else { lsp::SymbolKind::CONSTANT },
                 tags: None,
                 deprecated: None, // must be specified
                 range: span.into(),
@@ -139,7 +154,7 @@ impl Instance {
             });
         }
 
-        for Definition { span, name, .. } in &compiled.program.definitions {
+        for Definition { span, name, expression } in &compiled.program.definitions {
             let range = span.into();
             let selection_range = name.span().unwrap().into();
             symbols.entry(name)
@@ -147,16 +162,36 @@ impl Instance {
                     symbol.range = range;
                     symbol.selection_range = selection_range;
                 })
-                .or_insert(lsp::DocumentSymbol {
-                    name: name.to_string(),
-                    detail: None,
-                    kind: lsp::SymbolKind::FUNCTION, // something else for non-functions?
-                    tags: None,
-                    deprecated: None, // must be specified
-                    range,
-                    selection_range,
-                    children: None,
+                .or_insert({
+                    let typ = expression.get_type();
+                    let mut detail = String::new();
+                    typ.pretty(&mut detail, 0).unwrap();
+
+                    lsp::DocumentSymbol {
+                        name: name.to_string(),
+                        detail: Some(detail),
+                        kind: if typ.is_receive() { lsp::SymbolKind::FUNCTION } else { lsp::SymbolKind::CONSTANT },
+                        tags: None,
+                        deprecated: None, // must be specified
+                        range,
+                        selection_range,
+                        children: None,
+                    }
                 });
+        }
+
+        // todo: fix the bug that causes this
+        // the same bug also causes run labels to appear on usages of the name
+        for symbol in symbols.values() {
+            let range = symbol.range;
+            let selection_range = symbol.selection_range;
+            let inside = range.start.character <= selection_range.start.character
+                && range.start.line <= selection_range.start.line
+                && range.end.character >= selection_range.end.character
+                && range.end.line >= selection_range.end.line;
+            if !inside {
+                tracing::error!("Symbol selection range is not inside the range: {:?}", symbol);
+            }
         }
 
         Some(lsp::DocumentSymbolResponse::Nested(
@@ -268,25 +303,25 @@ impl Instance {
             });
         }
 
-        for Declaration { name, .. } in &compiled.program.declarations {
+        for Declaration { name, typ, .. } in &compiled.program.declarations {
             let name_span = name.span().unwrap();
             semantic_tokens.push(lsp::SemanticToken {
                 delta_line: name_span.start.row as u32,
                 delta_start: name_span.start.column as u32,
                 length: name_span.len() as u32,
-                token_type: semantic_token_types::FUNCTION, // maybe also something else
-                token_modifiers_bitset: semantic_token_modifiers::DECLARATION,
+                token_type: if typ.is_receive() { semantic_token_types::FUNCTION } else { semantic_token_types::VARIABLE },
+                token_modifiers_bitset: semantic_token_modifiers::DECLARATION | semantic_token_modifiers::READONLY,
             });
         }
 
-        for Definition { name, .. } in &compiled.program.definitions {
+        for Definition { name, expression, .. } in &compiled.program.definitions {
             let name_span = name.span().unwrap();
             semantic_tokens.push(lsp::SemanticToken {
                 delta_line: name_span.start.row as u32,
                 delta_start: name_span.start.column as u32,
                 length: name_span.len() as u32,
-                token_type: semantic_token_types::FUNCTION, // maybe also something else
-                token_modifiers_bitset: semantic_token_modifiers::DEFINITION,
+                token_type: if expression.get_type().is_receive() { semantic_token_types::FUNCTION } else { semantic_token_types::VARIABLE },
+                token_modifiers_bitset: semantic_token_modifiers::DEFINITION | semantic_token_modifiers::READONLY,
             });
         }
 

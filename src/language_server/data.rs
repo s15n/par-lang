@@ -54,6 +54,29 @@ macro_rules! running_constants {
     };
 }
 
+/* types:
+
+NAMESPACE: namespaces
+TYPE: types
+CLASS: choice types?
+ENUM: either types?
+INTERFACE: traits
+STRUCT: records?
+TYPE_PARAMETER: receive type name
+PARAMETER: receive value name
+VARIABLE: (let)-declared, non-receive value
+PROPERTY: choice branch (not receive)?
+ENUM_MEMBER: either variant
+FUNCTION: receive type
+METHOD: choice branch (receive)?
+KEYWORD (not here)
+MODIFIER (not here)
+COMMENT (not here)
+STRING (not here)
+NUMBER (not here)
+OPERATOR (not here)
+ */
+
 macro_rules! semantic_token_types {
     ($($x:ident),*) => {
         pub const SEMANTIC_TOKEN_TYPES: [
@@ -68,6 +91,18 @@ macro_rules! semantic_token_types {
         }
     };
 }
+
+/* modifiers:
+
+DECLARATION: "dec"
+DEFINITION: "def"
+READONLY: not reassigned
+DEPRECATED: (future)
+ABSTRACT: trait member without default
+MODIFICATION: reassigned
+DOCUMENTATION: (future)
+DEFAULT_LIBRARY: ?
+ */
 
 macro_rules! semantic_token_modifiers {
     ($($x:ident),*) => {
@@ -84,5 +119,5 @@ macro_rules! semantic_token_modifiers {
     };
 }
 
-semantic_token_types!(TYPE, FUNCTION);
-semantic_token_modifiers!(DECLARATION, DEFINITION);
+semantic_token_types!(TYPE, FUNCTION, VARIABLE);
+semantic_token_modifiers!(DECLARATION, DEFINITION, READONLY, MODIFICATION);

@@ -62,8 +62,9 @@ pub enum Operation<Name> {
 #[derive(Clone, Debug)]
 pub enum Type<Name> {
     Chan(Span, Box<Self>),
-    // todo: difference?
+    /// type variable
     Var(Span, Name),
+    /// named type
     Name(Span, Name, Vec<Type<Name>>),
     Send(Span, Vec<Self>, Box<Self>),
     Receive(Span, Vec<Self>, Box<Self>),
@@ -297,6 +298,56 @@ impl<Name> Spanning for Type<Name> {
             | Self::SendTypes(span, _, _)
             | Self::ReceiveTypes(span, _, _)
             => span.clone(),
+        }
+    }
+}
+
+impl<Name> Type<Name> {
+    pub fn is_receive(&self) -> bool {
+        match self {
+            | Self::Var(_, _) // without requirements
+            | Self::Name(_, _, _) // should not be called on this
+            | Self::Send(_, _, _)
+            | Self::Either(_, _)
+            | Self::Choice(_, _)
+            | Self::Break(_)
+            | Self::Continue(_)
+            | Self::Self_(_, _) // generally
+            => false,
+
+            Self::Receive(_, _, _) => true,
+
+            Self::Chan(_, t) => t.is_send(),
+
+            | Self::Recursive { body, .. }
+            | Self::Iterative { body, .. }
+            | Self::SendTypes(_, _, body)
+            | Self::ReceiveTypes(_, _, body)
+            => body.is_receive(),
+        }
+    }
+
+    pub fn is_send(&self) -> bool {
+        match self {
+            | Self::Var(_, _) // without requirements
+            | Self::Name(_, _, _) // should not be called on this
+            | Self::Receive(_, _, _)
+            | Self::Either(_, _)
+            | Self::Choice(_, _)
+            | Self::Break(_)
+            | Self::Continue(_)
+            | Self::Self_(_, _) // generally
+            => false,
+
+            Self::Send(_, _, _) => true,
+
+            Self::Chan(_, t) => t.is_receive(),
+
+            | Self::Recursive { body, .. }
+            | Self::Iterative { body, .. }
+            | Self::SendTypes(_, _, body)
+            | Self::ReceiveTypes(_, _, body)
+            => body.is_send(),
         }
     }
 }

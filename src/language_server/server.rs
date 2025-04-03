@@ -253,7 +253,7 @@ fn initialize_lsp(connection: &Connection) -> InitializeParams {
         document_symbol_provider: Some(lsp::OneOf::Left(true)),
         declaration_provider: Some(lsp::DeclarationCapability::Simple(true)),
         definition_provider: Some(lsp::OneOf::Left(true)),
-        // must be enabled in vs code (depends on color theme)
+        // must be enabled in vs code (depends on color theme. Works with "Dark Modern" for example)
         semantic_tokens_provider: Some(lsp::SemanticTokensServerCapabilities::SemanticTokensOptions(
             lsp::SemanticTokensOptions {
                 work_done_progress_options: Default::default(),
