@@ -1,6 +1,6 @@
 use super::io::IO;
 use crate::language_server::data::{
-    semantic_token_modifiers, semantic_token_types,
+    semantic_token_modifiers, semantic_token_types, SEMANTIC_TOKEN_MODIFIERS, SEMANTIC_TOKEN_TYPES,
 };
 use crate::location::Span;
 use crate::par::language::{Declaration, Definition, Internal, Name, TypeDef};
@@ -419,7 +419,7 @@ impl Instance {
             return None;
         };
 
-        let Some(_definition) = compiled
+        let Some(definition) = compiled
             .program
             .definitions
             .iter()
