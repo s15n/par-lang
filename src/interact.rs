@@ -9,44 +9,44 @@ use std::{
 };
 use crate::location::Span;
 
-pub struct Handle<Loc, Name, Typ> {
+pub struct Handle<Name, Typ> {
     refresh: Arc<dyn Fn() + Send + Sync>,
-    events: Vec<Event<Loc, Name, Typ>>,
-    interaction: Option<Result<Interaction<Loc, Name, Typ>, runtime::Error<Loc, Name>>>,
+    events: Vec<Event<Name, Typ>>,
+    interaction: Option<Result<Interaction<Name, Typ>, runtime::Error<Name>>>,
     cancelled: bool,
 }
 
-pub enum Event<Loc, Name, Typ> {
-    Send(Loc, Arc<Mutex<Handle<Loc, Name, Typ>>>),
-    Receive(Loc, Arc<Mutex<Handle<Loc, Name, Typ>>>),
-    Choose(Loc, Name),
-    Either(Loc, Name),
-    Break(Loc),
-    Continue(Loc),
+pub enum Event<Name, Typ> {
+    Send(Span, Arc<Mutex<Handle<Name, Typ>>>),
+    Receive(Span, Arc<Mutex<Handle<Name, Typ>>>),
+    Choose(Span, Name),
+    Either(Span, Name),
+    Break(Span),
+    Continue(Span),
 }
 
-struct Interaction<Loc, Name, Typ> {
-    context: Context<Loc, Name, Typ>,
-    value: Value<Loc, Name>,
-    request: Request<Loc, Name>,
+struct Interaction<Name, Typ> {
+    context: Context<Name, Typ>,
+    value: Value<Name>,
+    request: Request<Name>,
 }
 
 #[derive(Clone, Debug)]
-pub enum Request<Loc, Name> {
-    Dynamic(Loc),
-    Either(Loc, Arc<[Name]>),
+pub enum Request<Name> {
+    Dynamic(Span),
+    Either(Span, Arc<[Name]>),
 }
 
-impl<Name, Typ> Handle<Span, Name, Typ>
+impl<Name, Typ> Handle<Name, Typ>
 where
     Name: Clone + Eq + Hash + Send + Sync + 'static,
     Typ: Send + Sync + 'static,
 {
-    pub fn events(&self) -> &[Event<Span, Name, Typ>] {
+    pub fn events(&self) -> &[Event<Name, Typ>] {
         &self.events
     }
 
-    pub fn interaction(&self) -> Option<Result<Request<Span, Name>, runtime::Error<Span, Name>>> {
+    pub fn interaction(&self) -> Option<Result<Request<Name>, runtime::Error<Name>>> {
         match &self.interaction {
             Some(Ok(int)) => Some(Ok(int.request.clone())),
             Some(Err(error)) => Some(Err(error.clone())),
@@ -87,7 +87,7 @@ where
 
     pub fn start_expression(
         refresh: Arc<dyn Fn() + Send + Sync>,
-        context: Context<Span, Name, Typ>,
+        context: Context<Name, Typ>,
         expression: &Expression<Name, Typ>,
     ) -> Arc<Mutex<Self>> {
         let mut context = context;
@@ -104,8 +104,8 @@ where
 
     pub fn start(
         refresh: Arc<dyn Fn() + Send + Sync>,
-        context: Context<Span, Name, Typ>,
-        value: Value<Span, Name>,
+        context: Context<Name, Typ>,
+        value: Value<Name>,
     ) -> Arc<Mutex<Self>> {
         let handle = Arc::new(Mutex::new(Self {
             refresh,
@@ -124,8 +124,8 @@ where
 
     async fn run(
         handle: Arc<Mutex<Self>>,
-        mut context: Context<Span, Name, Typ>,
-        mut value: Value<Span, Name>,
+        mut context: Context<Name, Typ>,
+        mut value: Value<Name>,
     ) {
         let mut consecutive_dynamic: usize = 0;
 
@@ -222,16 +222,16 @@ where
         }
     }
 
-    fn add_event(&mut self, event: Event<Span, Name, Typ>) {
+    fn add_event(&mut self, event: Event<Name, Typ>) {
         self.events.push(event);
         (self.refresh)();
     }
 
     fn request_interaction(
         &mut self,
-        mut context: Context<Span, Name, Typ>,
-        value: Value<Span, Name>,
-        request: Request<Span, Name>,
+        mut context: Context<Name, Typ>,
+        value: Value<Name>,
+        request: Request<Name>,
     ) {
         if self.cancelled {
             context

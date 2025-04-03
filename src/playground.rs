@@ -152,13 +152,13 @@ pub(crate) enum Error {
     Parse(SyntaxError),
     Compile(CompileError),
     Type(TypeError<Internal<Name>>),
-    Runtime(runtime::Error<Span, Internal<Name>>),
+    Runtime(runtime::Error<Internal<Name>>),
 }
 
 #[derive(Clone)]
 pub(crate) struct Interact {
     pub(crate) code: Arc<str>,
-    pub(crate) handle: Arc<Mutex<Handle<Span, Internal<Name>, ()>>>,
+    pub(crate) handle: Arc<Mutex<Handle<Internal<Name>, ()>>>,
 }
 
 impl Playground {
@@ -640,7 +640,7 @@ impl Error {
 
     fn display_runtime_error(
         code: &str,
-        error: &runtime::Error<Span, Internal<Name>>,
+        error: &runtime::Error<Internal<Name>>,
     ) -> RuntimeError {
         use runtime::Error::*;
         match error {
@@ -703,7 +703,7 @@ impl Error {
         }
     }
 
-    fn display_operation(code: &str, op: &Operation<Span, Internal<Name>>) -> Vec<LabeledSpan> {
+    fn display_operation(code: &str, op: &Operation<Internal<Name>>) -> Vec<LabeledSpan> {
         match op {
             Operation::Unknown(loc) => labels_from_span(code, loc)
                 .into_iter()
