@@ -56,7 +56,7 @@ impl FeedbackBookKeeper {
 pub fn diagnostic_for_error(err: &CompileError) -> lsp::Diagnostic {
     use crate::playground::Error;
 
-    let (span, message, help, related_span) = match err {
+    let (span, message, help, _related_span) = match err {
         CompileError::Compile(Error::Parse(err))
         => (
             err.span(),

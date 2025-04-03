@@ -8,38 +8,38 @@ use crate::location::Span;
 use super::process::{Captures, Command, Expression, Process};
 
 #[derive(Clone, Debug)]
-pub enum Error<Loc, Name> {
-    NameNotDefined(Loc, Name),
-    ShadowedObligation(Loc, Name),
-    UnfulfilledObligations(Loc, Vec<Name>),
-    IncompatibleOperations(Operation<Loc, Name>, Operation<Loc, Name>),
-    NoSuchLoopPoint(Loc, Option<Name>),
+pub enum Error<Name> {
+    NameNotDefined(Span, Name),
+    ShadowedObligation(Span, Name),
+    UnfulfilledObligations(Span, Vec<Name>),
+    IncompatibleOperations(Operation<Name>, Operation<Name>),
+    NoSuchLoopPoint(Span, Option<Name>),
     Multiple(Box<Self>, Box<Self>),
 }
 
 #[derive(Clone, Debug)]
-pub enum Operation<Loc, Name> {
-    Unknown(Loc),
-    Send(Loc),
-    Receive(Loc),
-    Choose(Loc, Name),
-    Match(Loc, Arc<[Name]>),
-    Break(Loc),
-    Continue(Loc),
+pub enum Operation<Name> {
+    Unknown(Span),
+    Send(Span),
+    Receive(Span),
+    Choose(Span, Name),
+    Match(Span, Arc<[Name]>),
+    Break(Span),
+    Continue(Span),
 }
 
-pub enum Message<Loc, Name> {
-    Swap(Request<Loc, Name>, oneshot::Sender<Self>),
-    Send(Loc, Value<Loc, Name>, oneshot::Receiver<Self>),
-    Choose(Loc, Name, oneshot::Receiver<Self>),
-    Break(Loc),
-    Error(Error<Loc, Name>),
+pub enum Message<Name> {
+    Swap(Request<Name>, oneshot::Sender<Self>),
+    Send(Span, Value<Name>, oneshot::Receiver<Self>),
+    Choose(Span, Name, oneshot::Receiver<Self>),
+    Break(Span),
+    Error(Error<Name>),
 }
 
-impl<Loc, Name> Message<Loc, Name> {
+impl<Name> Message<Name> {
     pub fn into_operation_and_values(
         self,
-    ) -> Result<(Operation<Loc, Name>, Vec<Value<Loc, Name>>), Error<Loc, Name>> {
+    ) -> Result<(Operation<Name>, Vec<Value<Name>>), Error<Name>> {
         match self {
             Message::Swap(request, tx) => Ok((request.into_operation(), vec![Value::Sender(tx)])),
             Message::Send(loc, value, rx) => {
@@ -55,15 +55,15 @@ impl<Loc, Name> Message<Loc, Name> {
 }
 
 #[derive(Clone, Debug)]
-pub enum Request<Loc, Name> {
-    Receive(Loc),
-    Match(Loc, Arc<[Name]>),
-    Continue(Loc),
-    Dynamic(Loc),
+pub enum Request<Name> {
+    Receive(Span),
+    Match(Span, Arc<[Name]>),
+    Continue(Span),
+    Dynamic(Span),
 }
 
-impl<Loc, Name> Request<Loc, Name> {
-    pub fn into_operation(self) -> Operation<Loc, Name> {
+impl<Name> Request<Name> {
+    pub fn into_operation(self) -> Operation<Name> {
         match self {
             Request::Receive(loc) => Operation::Receive(loc),
             Request::Match(loc, choices) => Operation::Match(loc, choices),
@@ -73,7 +73,7 @@ impl<Loc, Name> Request<Loc, Name> {
     }
 }
 
-impl<Loc, Name> Request<Loc, Name> {
+impl<Name> Request<Name> {
     pub fn matches(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Dynamic(_), _) | (_, Self::Dynamic(_)) => true,
@@ -85,19 +85,19 @@ impl<Loc, Name> Request<Loc, Name> {
     }
 }
 
-pub enum Value<Loc, Name> {
-    Receiver(oneshot::Receiver<Message<Loc, Name>>),
-    Sender(oneshot::Sender<Message<Loc, Name>>),
+pub enum Value<Name> {
+    Receiver(oneshot::Receiver<Message<Name>>),
+    Sender(oneshot::Sender<Message<Name>>),
 }
 
-pub struct Context<Loc, Name, Typ> {
+pub struct Context<Name, Typ> {
     spawner: Arc<dyn Spawn + Send + Sync>,
     globals: Arc<IndexMap<Name, Arc<Expression<Name, Typ>>>>,
-    variables: IndexMap<Name, Value<Loc, Name>>,
-    loop_points: IndexMap<Option<Name>, (Name, Arc<Process<Loc, Name, Typ>>)>,
+    variables: IndexMap<Name, Value<Name>>,
+    loop_points: IndexMap<Option<Name>, (Name, Arc<Process<Name, Typ>>)>,
 }
 
-impl<Name, Typ> Context<Span, Name, Typ>
+impl<Name, Typ> Context<Name, Typ>
 where
     Name: Clone + Eq + Hash + Send + Sync + 'static,
     Typ: Send + Sync + 'static,
@@ -127,11 +127,11 @@ where
         }
     }
 
-    pub fn get_variable(&mut self, name: &Name) -> Option<Value<Span, Name>> {
+    pub fn get_variable(&mut self, name: &Name) -> Option<Value<Name>> {
         self.variables.shift_remove(name)
     }
 
-    pub fn get(&mut self, loc: &Span, name: &Name) -> Result<Value<Span, Name>, Error<Span, Name>> {
+    pub fn get(&mut self, loc: &Span, name: &Name) -> Result<Value<Name>, Error<Name>> {
         match self.get_variable(name) {
             Some(value) => Ok(value),
             None => match self.globals.get(name) {
@@ -145,8 +145,8 @@ where
         &mut self,
         loc: &Span,
         name: Name,
-        value: Value<Span, Name>,
-    ) -> Result<(), Error<Span, Name>> {
+        value: Value<Name>,
+    ) -> Result<(), Error<Name>> {
         if let Some(value) = self.variables.shift_remove(&name) {
             return self.throw([value], Error::ShadowedObligation(loc.clone(), name));
         }
@@ -156,9 +156,9 @@ where
 
     pub fn capture(
         &mut self,
-        cap: &Captures<Span, Name>,
+        cap: &Captures<Name>,
         target: &mut Self,
-    ) -> Result<(), Error<Span, Name>> {
+    ) -> Result<(), Error<Name>> {
         for (name, loc) in &cap.names {
             let value = match self.get_variable(name) {
                 Some(value) => value,
@@ -176,7 +176,7 @@ where
     pub fn evaluate(
         &mut self,
         expression: &Expression<Name, Typ>,
-    ) -> Result<Value<Span, Name>, Error<Span, Name>> {
+    ) -> Result<Value<Name>, Error<Name>> {
         match expression {
             Expression::Reference(loc, name, _) => self.get(loc, name),
 
@@ -201,18 +201,18 @@ where
 
     pub async fn run(
         &mut self,
-        process: Arc<Process<Span, Name, Typ>>,
-    ) -> Result<(), Error<Span, Name>> {
+        process: Arc<Process<Name, Typ>>,
+    ) -> Result<(), Error<Name>> {
         let mut current_process = process;
         loop {
             match current_process.as_ref() {
-                Process::Let(loc, name, _, _, expression, process) => {
+                Process::Let { span: loc, name, annotation: _, typ: _, value: expression, then: process } => {
                     let value = self.evaluate(expression)?;
                     self.put(loc, name.clone(), value)?;
                     current_process = Arc::clone(process);
                 }
 
-                Process::Do(loc, object_name, _, command) => {
+                Process::Do { span: loc, name: object_name, typ: _, command } => {
                     let object = self.get(loc, object_name)?;
 
                     match command {
@@ -277,7 +277,7 @@ where
                             current_process = Arc::clone(process);
                         }
 
-                        Command::Begin(_, point, process) => {
+                        Command::Begin { unfounded: _, label: point, body: process } => {
                             self.loop_points
                                 .insert(point.clone(), (object_name.clone(), Arc::clone(process)));
                             self.put(loc, object_name.clone(), object)?;
@@ -314,9 +314,9 @@ where
     pub async fn link(
         &mut self,
         loc: Span,
-        left: Value<Span, Name>,
-        right: Value<Span, Name>,
-    ) -> Result<(), Error<Span, Name>> {
+        left: Value<Name>,
+        right: Value<Name>,
+    ) -> Result<(), Error<Name>> {
         let [left, right] = self.cannot_have_obligations(&loc, [left, right]).await?;
         match (left, right) {
             (Value::Receiver(rx1), Value::Receiver(rx2)) => {
@@ -349,9 +349,9 @@ where
     pub async fn send_to(
         &mut self,
         loc: Span,
-        object: Value<Span, Name>,
-        argument: Value<Span, Name>,
-    ) -> Result<Value<Span, Name>, Error<Span, Name>> {
+        object: Value<Name>,
+        argument: Value<Name>,
+    ) -> Result<Value<Name>, Error<Name>> {
         let tx = match object {
             Value::Receiver(rx) => self.expect_swap(Request::Receive(loc.clone()), rx).await?,
             Value::Sender(tx) => tx,
@@ -366,8 +366,8 @@ where
     pub async fn receive_from(
         &mut self,
         loc: Span,
-        object: Value<Span, Name>,
-    ) -> Result<(Value<Span, Name>, Value<Span, Name>), Error<Span, Name>> {
+        object: Value<Name>,
+    ) -> Result<(Value<Name>, Value<Name>), Error<Name>> {
         let mut rx = match object {
             Value::Receiver(rx) => rx,
             Value::Sender(tx) => self.swap(Request::Receive(loc.clone()), tx),
@@ -387,9 +387,9 @@ where
     pub async fn choose_in(
         &mut self,
         loc: Span,
-        object: Value<Span, Name>,
+        object: Value<Name>,
         chosen: Name,
-    ) -> Result<Value<Span, Name>, Error<Span, Name>> {
+    ) -> Result<Value<Name>, Error<Name>> {
         let tx = match object {
             Value::Receiver(rx) => self.expect_swap_choose(loc.clone(), &chosen, rx).await?,
             Value::Sender(tx) => tx,
@@ -404,9 +404,9 @@ where
     pub async fn either_of(
         &mut self,
         loc: Span,
-        object: Value<Span, Name>,
+        object: Value<Name>,
         choices: Arc<[Name]>,
-    ) -> Result<(Span, Name, Value<Span, Name>), Error<Span, Name>> {
+    ) -> Result<(Span, Name, Value<Name>), Error<Name>> {
         let request = Request::Match(loc.clone(), Arc::clone(&choices));
         let mut rx = match object {
             Value::Receiver(rx) => rx,
@@ -427,8 +427,8 @@ where
     pub async fn break_to(
         &mut self,
         loc: Span,
-        object: Value<Span, Name>,
-    ) -> Result<(), Error<Span, Name>> {
+        object: Value<Name>,
+    ) -> Result<(), Error<Name>> {
         let [object] = self.cannot_have_obligations(&loc, [object]).await?;
         let tx = match object {
             Value::Receiver(rx) => self.expect_swap(Request::Continue(loc.clone()), rx).await?,
@@ -441,8 +441,8 @@ where
     pub async fn continue_from(
         &mut self,
         loc: Span,
-        object: Value<Span, Name>,
-    ) -> Result<(), Error<Span, Name>> {
+        object: Value<Name>,
+    ) -> Result<(), Error<Name>> {
         let mut rx = match object {
             Value::Receiver(rx) => rx,
             Value::Sender(tx) => self.swap(Request::Continue(loc.clone()), tx),
@@ -461,11 +461,11 @@ where
         }
     }
 
-    async fn cannot_have_obligations<V: IntoIterator<Item = Value<Span, Name>>>(
+    async fn cannot_have_obligations<V: IntoIterator<Item = Value<Name>>>(
         &mut self,
         loc: &Span,
         values: V,
-    ) -> Result<V, Error<Span, Name>> {
+    ) -> Result<V, Error<Name>> {
         if self.obligations().any(|_| true) {
             return self.throw(
                 values,
@@ -477,9 +477,9 @@ where
 
     pub fn swap(
         &mut self,
-        request: Request<Span, Name>,
-        tx: oneshot::Sender<Message<Span, Name>>,
-    ) -> oneshot::Receiver<Message<Span, Name>> {
+        request: Request<Name>,
+        tx: oneshot::Sender<Message<Name>>,
+    ) -> oneshot::Receiver<Message<Name>> {
         let (tx1, rx1) = oneshot::channel();
         tx.send(Message::Swap(request, tx1))
             .ok()
@@ -489,9 +489,9 @@ where
 
     async fn expect_swap(
         &mut self,
-        expected_request: Request<Span, Name>,
-        rx: oneshot::Receiver<Message<Span, Name>>,
-    ) -> Result<oneshot::Sender<Message<Span, Name>>, Error<Span, Name>> {
+        expected_request: Request<Name>,
+        rx: oneshot::Receiver<Message<Name>>,
+    ) -> Result<oneshot::Sender<Message<Name>>, Error<Name>> {
         match rx.await.ok().expect("sender dropped") {
             Message::Swap(request, tx) if request.matches(&expected_request) => Ok(tx),
             message => self.invalid_message_and_request(message, expected_request),
@@ -502,8 +502,8 @@ where
         &mut self,
         loc: Span,
         chosen: &Name,
-        rx: oneshot::Receiver<Message<Span, Name>>,
-    ) -> Result<oneshot::Sender<Message<Span, Name>>, Error<Span, Name>> {
+        rx: oneshot::Receiver<Message<Name>>,
+    ) -> Result<oneshot::Sender<Message<Name>>, Error<Name>> {
         match rx.await.ok().expect("sender dropped") {
             Message::Swap(Request::Dynamic(_), tx) => Ok(tx),
             Message::Swap(Request::Match(_, choices), tx)
@@ -520,9 +520,9 @@ where
 
     fn invalid_message_and_request<T>(
         &mut self,
-        message: Message<Span, Name>,
-        request: Request<Span, Name>,
-    ) -> Result<T, Error<Span, Name>> {
+        message: Message<Name>,
+        request: Request<Name>,
+    ) -> Result<T, Error<Name>> {
         match (
             message.into_operation_and_values(),
             request.into_operation(),
@@ -534,9 +534,9 @@ where
 
     fn invalid_message_and_message<T>(
         &mut self,
-        message1: Message<Span, Name>,
-        message2: Message<Span, Name>,
-    ) -> Result<T, Error<Span, Name>> {
+        message1: Message<Name>,
+        message2: Message<Name>,
+    ) -> Result<T, Error<Name>> {
         match (
             message1.into_operation_and_values(),
             message2.into_operation_and_values(),
@@ -556,9 +556,9 @@ where
 
     fn throw<T>(
         &mut self,
-        values: impl IntoIterator<Item = Value<Span, Name>>,
-        error: Error<Span, Name>,
-    ) -> Result<T, Error<Span, Name>> {
+        values: impl IntoIterator<Item = Value<Name>>,
+        error: Error<Name>,
+    ) -> Result<T, Error<Name>> {
         let mut pending = self
             .variables
             .drain(..)

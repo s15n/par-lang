@@ -11,9 +11,9 @@ dec two: Nat
 def two = .succ .succ .zero !
 
 dec Nat_add: [Nat] [Nat] Nat
-def Nat_add = [n] [m] n {
+def Nat_add = [n] [m] n begin {
   .zero! => m,
-  .succ n => .succ Nat_add(n)(m)
+  .succ n => .succ n loop
 }
 
 def three = Nat_add(one)(two)
