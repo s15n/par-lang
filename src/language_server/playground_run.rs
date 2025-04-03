@@ -1,11 +1,10 @@
-use std::sync::Arc;
-use eframe::egui;
 use crate::interact::Handle;
-use crate::location::Span;
 use crate::par::language::{Definition, Internal, Name, Program};
 use crate::par::process;
 use crate::par::runtime::Context;
 use crate::spawn::TokioSpawn;
+use eframe::egui;
+use std::sync::Arc;
 
 type NameT = Internal<Name>;
 type ExprT = Arc<process::Expression<NameT, ()>>;

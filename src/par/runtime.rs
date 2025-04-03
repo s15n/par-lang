@@ -206,13 +206,13 @@ where
         let mut current_process = process;
         loop {
             match current_process.as_ref() {
-                Process::Let { span: loc, name: name, annotation: _, typ: _, value: expression, then: process } => {
+                Process::Let { span: loc, name, annotation: _, typ: _, value: expression, then: process } => {
                     let value = self.evaluate(expression)?;
                     self.put(loc, name.clone(), value)?;
                     current_process = Arc::clone(process);
                 }
 
-                Process::Do { span: loc, name: object_name, typ: _, command: command } => {
+                Process::Do { span: loc, name: object_name, typ: _, command } => {
                     let object = self.get(loc, object_name)?;
 
                     match command {

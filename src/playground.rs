@@ -10,16 +10,16 @@ use eframe::egui;
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use indexmap::IndexMap;
 
+use crate::location::Span;
+use crate::par::language::{Declaration, Definition, TypeDef};
 use crate::{interact::{Event, Handle, Request}, par::{
     language::{CompileError, Internal, Name, Program},
     parse::{parse_program, SyntaxError},
     process,
     runtime::{self, Context, Operation},
     types::{self, Type, TypeError},
-}, playground, spawn::TokioSpawn};
+}, spawn::TokioSpawn};
 use miette::{LabeledSpan, SourceOffset, SourceSpan};
-use crate::location::Span;
-use crate::par::language::{Declaration, Definition, TypeDef};
 
 pub struct Playground {
     file_path: Option<PathBuf>,
@@ -576,13 +576,13 @@ impl Playground {
 }
 
 /// Create a `LabeledSpan` without a label at `span`
-pub fn labels_from_span(code: &str, span: &Span) -> Vec<LabeledSpan> {
+pub fn labels_from_span(_code: &str, span: &Span) -> Vec<LabeledSpan> {
     vec![LabeledSpan::new_with_span(
         None,
         SourceSpan::new(SourceOffset::from(span.start.offset), span.len())
     )]
 }
-pub fn span_to_source_span(code: &str, span: &Span) -> Option<SourceSpan> {
+pub fn span_to_source_span(_code: &str, span: &Span) -> Option<SourceSpan> {
     Some(SourceSpan::new(SourceOffset::from(span.start.offset), span.len()))
 }
 
@@ -824,5 +824,3 @@ fn green() -> egui::Color32 {
 fn blue() -> egui::Color32 {
     egui::Color32::from_hex("#118ab2").unwrap()
 }
-
-static DEFAULT_CODE: &str = include_str!("../examples/sample.par");

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use lsp_types::{self as lsp, Uri};
-use crate::language_server::data::{semantic_token_modifiers, semantic_token_types, SEMANTIC_TOKEN_MODIFIERS, SEMANTIC_TOKEN_TYPES};
+use crate::language_server::data::{semantic_token_modifiers, semantic_token_types};
 use crate::par::language::{Declaration, Definition, Internal, Name, TypeDef};
 use crate::location::Span;
 use crate::par::types::TypeError;
@@ -70,7 +70,7 @@ impl Instance {
                         if !is_inside(pos, span) {
                             continue;
                         }
-                        inside_item = true;
+                        //inside_item = true;
                         let mut msg = format!("Definition: {}: ", name.to_string());
                         let indent = msg.len();
                         expression.get_type().pretty(&mut msg, indent + 1).unwrap();
@@ -102,6 +102,7 @@ impl Instance {
     look at C language servers, how they handle split declaration/definition
     look at Rust language servers, what "kind" they use for type aliases & traits
      */
+    #[allow(deprecated)] // some types only allow construction using deprecated fields
     pub fn provide_document_symbols(&self, params: &lsp::DocumentSymbolParams) -> Option<lsp::DocumentSymbolResponse> {
         tracing::debug!("Handling symbols request with params: {:?}", params);
 
@@ -407,7 +408,7 @@ impl Instance {
             return None;
         };
 
-        let Some(definition) = compiled.program.definitions.iter().find(|definition| {
+        let Some(_definition) = compiled.program.definitions.iter().find(|definition| {
             definition.name.to_string().as_str() == def_name
         }) else {
             return None;

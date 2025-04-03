@@ -1,4 +1,4 @@
-use tracing::Level;
+//use tracing::Level;
 use super::server::LanguageServer;
 
 pub fn main() {

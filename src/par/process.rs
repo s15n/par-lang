@@ -90,7 +90,7 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
         loop_points: &IndexMap<Option<Name>, Captures<Name>>,
     ) -> (Arc<Self>, Captures<Name>) {
         match self {
-            Self::Let { span: loc, name: name, annotation: annotation, typ: typ, value: expression, then: process } => {
+            Self::Let { span: loc, name, annotation, typ, value: expression, then: process } => {
                 let (process, mut caps) = process.fix_captures(loop_points);
                 caps.remove(name);
                 let (expression, caps1) = expression.fix_captures(loop_points);
@@ -107,7 +107,7 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
                     caps,
                 )
             }
-            Self::Do { span: loc, name: name, typ: typ, command: command } => {
+            Self::Do { span: loc, name, typ, command } => {
                 let (command, mut caps) = command.fix_captures(loop_points);
                 caps.add(name.clone(), loc.clone());
                 (
@@ -115,7 +115,7 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
                         span: loc.clone(),
                         name: name.clone(),
                         typ: typ.clone(),
-                        command: command
+                        command
                     }),
                     caps,
                 )
@@ -129,7 +129,7 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
 
     pub fn optimize(&self) -> Arc<Self> {
         match self {
-            Self::Let { span: loc, name: name, annotation: annotation, typ: typ, value: expression, then: process } => Arc::new(Self::Let {
+            Self::Let { span: loc, name, annotation, typ, value: expression, then: process } => Arc::new(Self::Let {
                 span: loc.clone(),
                 name: name.clone(),
                 annotation: annotation.clone(),
@@ -137,7 +137,7 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
                 value: expression.optimize(),
                 then: process.optimize()
             }),
-            Self::Do { span: loc, name: name, typ: typ, command: command } => Arc::new(Self::Do {
+            Self::Do { span: loc, name, typ, command } => Arc::new(Self::Do {
                 span: loc.clone(),
                 name: name.clone(),
                 typ: typ.clone(),
@@ -166,7 +166,7 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
                     }
                     Command::Break => Command::Break,
                     Command::Continue(process) => Command::Continue(process.optimize()),
-                    Command::Begin { unfounded: unfounded, label: label, body: process } => {
+                    Command::Begin { unfounded, label, body: process } => {
                         Command::Begin {
                             unfounded: unfounded.clone(),
                             label: label.clone(),
@@ -235,7 +235,7 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Command<Name, Typ> {
                 let (process, caps) = process.fix_captures(loop_points);
                 (Self::Continue(process), caps)
             }
-            Self::Begin { unfounded: unfounded, label: label, body: process } => {
+            Self::Begin { unfounded, label, body: process } => {
                 let (_, caps) = process.fix_captures(loop_points);
                 let mut loop_points = loop_points.clone();
                 loop_points.insert(label.clone(), caps);
@@ -321,14 +321,14 @@ impl <Name, Typ: Clone> Expression<Name, Typ> {
 impl<Name: Display, Typ> Process<Name, Typ> {
     pub fn pretty(&self, f: &mut impl Write, indent: usize) -> fmt::Result {
         match self {
-            Self::Let { span: _, name: name, annotation: _, typ: _, value: expression, then: process } => {
+            Self::Let { span: _, name, annotation: _, typ: _, value: expression, then: process } => {
                 indentation(f, indent)?;
                 write!(f, "let {} = ", name)?;
                 expression.pretty(f, indent)?;
                 process.pretty(f, indent)
             }
 
-            Self::Do { span: _, name: subject, typ: _, command: command } => {
+            Self::Do { span: _, name: subject, typ: _, command } => {
                 indentation(f, indent)?;
                 write!(f, "{}", subject)?;
 
@@ -377,7 +377,7 @@ impl<Name: Display, Typ> Process<Name, Typ> {
                         process.pretty(f, indent)
                     }
 
-                    Command::Begin { unfounded: unfounded, label: label, body: process } => {
+                    Command::Begin { unfounded, label, body: process } => {
                         if *unfounded {
                             write!(f, " unfounded")?;
                         }

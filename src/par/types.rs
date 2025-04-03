@@ -1243,7 +1243,7 @@ where
         process: &process::Process<Name, ()>,
     ) -> Result<Arc<process::Process<Name, Type<Name>>>, TypeError<Name>> {
         match process {
-            process::Process::Let { span: span, name: name, annotation: annotation, typ: (), value: expression, then: process } => {
+            process::Process::Let { span, name, annotation, typ: (), value: expression, then: process } => {
                 let (expression, typ) = match annotation {
                     Some(annotated_type) => (
                         self.check_expression(None, expression, annotated_type)?,
@@ -1263,7 +1263,7 @@ where
                 }))
             }
 
-            process::Process::Do { span: span, name: object, typ: (), command: command } => {
+            process::Process::Do { span, name: object, typ: (), command } => {
                 let typ = self.get(span, object)?;
 
                 let (command, _) = self.check_command(
@@ -1503,7 +1503,7 @@ where
                 (process::Command::Continue(process), inferred_types)
             }
 
-            process::Command::Begin { unfounded: unfounded, label: label, body: process } => {
+            process::Command::Begin { unfounded, label, body: process } => {
                 let Type::Recursive { span: typ_span, asc: typ_asc, label: typ_label, body: typ_body } = typ else {
                     return Err(TypeError::InvalidOperation(
                         span.clone(),
