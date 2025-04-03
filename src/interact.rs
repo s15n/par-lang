@@ -1,4 +1,3 @@
-use crate::location::Span;
 use crate::{
     par::process::Expression,
     par::runtime::{self, Context, Message, Value},
@@ -8,6 +7,7 @@ use std::{
     hash::Hash,
     sync::{Arc, Mutex},
 };
+use crate::location::Span;
 
 pub struct Handle<Loc, Name, Typ> {
     refresh: Arc<dyn Fn() + Send + Sync>,

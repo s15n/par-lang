@@ -2,12 +2,12 @@
 
 use std::{fmt::Display, hash::Hash, sync::Arc};
 
+use indexmap::IndexMap;
+use crate::location::{Point, Span, Spanning};
 use super::{
     process::{self, Captures},
     types::Type,
 };
-use crate::location::{Point, Span, Spanning};
-use indexmap::IndexMap;
 
 #[derive(Clone, Debug)]
 pub struct Name {
@@ -89,12 +89,7 @@ pub enum Construct<Name> {
     Either(Span, ConstructBranches<Name>),
     /// ! (unit)
     Break(Span),
-    Begin {
-        span: Span,
-        unfounded: bool,
-        label: Option<Name>,
-        then: Box<Self>,
-    },
+    Begin { span: Span, unfounded: bool, label: Option<Name>, then: Box<Self> },
     Loop(Span, Option<Name>),
     SendTypes(Span, Vec<Type<Name>>, Box<Self>),
     ReceiveTypes(Span, Vec<Name>, Box<Self>),
@@ -116,12 +111,7 @@ pub enum Apply<Name> {
     Send(Span, Vec<Expression<Name>>, Box<Self>),
     Choose(Span, Name, Box<Self>),
     Either(Span, ApplyBranches<Name>),
-    Begin {
-        span: Span,
-        unfounded: bool,
-        label: Option<Name>,
-        then: Box<Self>,
-    },
+    Begin { span: Span, unfounded: bool, label: Option<Name>, then: Box<Self> },
     Loop(Span, Option<Name>),
     SendTypes(Span, Vec<Type<Name>>, Box<Self>),
 }
@@ -140,12 +130,7 @@ pub enum ApplyBranch<Name> {
 // span doesn't include the "then" process
 #[derive(Clone, Debug)]
 pub enum Process<Name> {
-    Let {
-        span: Span,
-        pattern: Pattern<Name>,
-        value: Box<Expression<Name>>,
-        then: Box<Self>,
-    },
+    Let { span: Span, pattern: Pattern<Name>, value: Box<Expression<Name>>, then: Box<Self> },
     Command(Name, Command<Name>),
     Telltypes(Span, Box<Self>),
     Noop(Point),
@@ -158,15 +143,14 @@ pub enum Command<Name> {
     Send(Span, Vec<Expression<Name>>, Box<Self>),
     Receive(Span, Vec<Pattern<Name>>, Box<Self>),
     Choose(Span, Name, Box<Self>),
-    Either(Span, CommandBranches<Name>, Option<Box<Process<Name>>>),
+    Either(
+        Span,
+        CommandBranches<Name>,
+        Option<Box<Process<Name>>>,
+    ),
     Break(Span),
     Continue(Span, Box<Process<Name>>),
-    Begin {
-        span: Span,
-        unfounded: bool,
-        label: Option<Name>,
-        then: Box<Self>,
-    },
+    Begin { span: Span, unfounded: bool, label: Option<Name>, then: Box<Self> },
     Loop(Span, Option<Name>),
     SendTypes(Span, Vec<Type<Name>>, Box<Self>),
     ReceiveTypes(Span, Vec<Name>, Box<Self>),
@@ -214,9 +198,10 @@ impl Display for Name {
 impl Internal<Name> {
     pub fn span(&self) -> Option<Span> {
         match self {
-            Self::Original(name) | Self::Result(Some(name)) | Self::Object(Some(name)) => {
-                Some(name.span.clone())
-            }
+            | Self::Original(name)
+            | Self::Result(Some(name))
+            | Self::Object(Some(name))
+            => Some(name.span.clone()),
 
             _ => None,
         }
@@ -361,12 +346,13 @@ impl<Name: Clone + Hash + Eq> Pattern<Name> {
             )),
 
             Self::Receive(loc, patterns, rest) => {
-                patterns
-                    .into_iter()
-                    .rfold(rest.compile_helper(level, process), |rest, pattern| {
+                patterns.into_iter().rfold(
+                    rest.compile_helper(level, process),
+                    |rest, pattern| {
                         pattern.compile_receive(level + 1, loc, &Internal::Match(level), rest)
-                    })
-            }
+                    },
+                )
+            },
 
             Self::Continue(loc) => Arc::new(process::Process::Do(
                 loc.clone(),
@@ -376,20 +362,19 @@ impl<Name: Clone + Hash + Eq> Pattern<Name> {
             )),
 
             Self::ReceiveTypes(loc, params, rest) => {
-                params
-                    .into_iter()
-                    .rfold(rest.compile_helper(level, process), |process, param| {
-                        Arc::new(process::Process::Do(
-                            loc.clone(),
-                            Internal::Match(level),
-                            (),
-                            process::Command::ReceiveType(
-                                Internal::Original(param.clone()),
-                                rest.compile_helper(level, process),
-                            ),
-                        ))
-                    })
-            }
+                params.into_iter().rfold(
+                    rest.compile_helper(level, process),
+                    |process, param| Arc::new(process::Process::Do(
+                        loc.clone(),
+                        Internal::Match(level),
+                        (),
+                        process::Command::ReceiveType(
+                            Internal::Original(param.clone()),
+                            rest.compile_helper(level, process),
+                        ),
+                    ))
+                )
+            },
         }
     }
 
@@ -397,8 +382,7 @@ impl<Name: Clone + Hash + Eq> Pattern<Name> {
         match self {
             Self::Name(_, _, annotation) => original(annotation),
             Self::Receive(loc, patterns, rest) => {
-                let send = patterns
-                    .into_iter()
+                let send = patterns.into_iter()
                     .map(|pattern| pattern.annotation())
                     .collect::<Option<Vec<_>>>()?;
                 let rest = rest.annotation()?;
@@ -409,11 +393,7 @@ impl<Name: Clone + Hash + Eq> Pattern<Name> {
                 let rest = rest.annotation()?;
                 Some(Type::SendTypes(
                     loc.clone(),
-                    params
-                        .into_iter()
-                        .map(Name::clone)
-                        .map(Internal::Original)
-                        .collect(),
+                    params.into_iter().map(Name::clone).map(Internal::Original).collect(),
                     Box::new(rest),
                 ))
             }
@@ -424,16 +404,19 @@ impl<Name: Clone + Hash + Eq> Pattern<Name> {
 impl<Name> Spanning for Pattern<Name> {
     fn span(&self) -> Span {
         match self {
-            Self::Name(span, _, _)
+            | Self::Name(span, _, _)
             | Self::Continue(span)
             | Self::Receive(span, _, _)
-            | Self::ReceiveTypes(span, _, _) => span.clone(),
+            | Self::ReceiveTypes(span, _, _)
+            => span.clone(),
         }
     }
 }
 
 impl<Name: Clone + Hash + Eq> Expression<Name> {
-    pub fn compile(&self) -> Result<Arc<process::Expression<Internal<Name>, ()>>, CompileError> {
+    pub fn compile(
+        &self,
+    ) -> Result<Arc<process::Expression<Internal<Name>, ()>>, CompileError> {
         Ok(match self {
             Self::Reference(loc, name) => Arc::new(process::Expression::Reference(
                 loc.clone(),
@@ -443,12 +426,7 @@ impl<Name: Clone + Hash + Eq> Expression<Name> {
 
             Self::Grouped(_, expression) => expression.compile()?,
 
-            Self::Let {
-                span,
-                pattern,
-                expression,
-                then: body,
-            } => {
+            Self::Let { span, pattern, expression, then: body} => {
                 let expression = expression.compile()?;
                 let body = body.compile()?;
                 Arc::new(process::Expression::Fork {
@@ -471,11 +449,7 @@ impl<Name: Clone + Hash + Eq> Expression<Name> {
                 })
             }
 
-            Self::Do {
-                span,
-                process,
-                then: expression,
-            } => {
+            Self::Do { span, process, then: expression } => {
                 let expression = expression.compile()?;
                 let body = process.compile(Some(Arc::new(process::Process::Do(
                     span.clone(),
@@ -494,12 +468,7 @@ impl<Name: Clone + Hash + Eq> Expression<Name> {
                 })
             }
 
-            Self::Fork {
-                span,
-                channel,
-                annotation,
-                process,
-            } => Arc::new(process::Expression::Fork {
+            Self::Fork { span, channel, annotation, process} => Arc::new(process::Expression::Fork {
                 span: span.clone(),
                 captures: Captures::new(),
                 chan_name: Internal::Original(channel.clone()),
@@ -551,12 +520,13 @@ impl<Name: Clone + Hash + Eq> Expression<Name> {
 impl<Name> Spanning for Expression<Name> {
     fn span(&self) -> Span {
         match self {
-            Self::Reference(span, _)
+            | Self::Reference(span, _)
             | Self::Grouped(span, _)
             | Self::Let { span, .. }
             | Self::Do { span, .. }
             | Self::Fork { span, .. }
-            | Self::Application(span, _, _) => span.clone(),
+            | Self::Application(span, _, _)
+            => span.clone(),
 
             Self::Construction(construction) => construction.span(),
         }
@@ -564,7 +534,9 @@ impl<Name> Spanning for Expression<Name> {
 }
 
 impl<Name: Clone + Hash + Eq> Construct<Name> {
-    pub fn compile(&self) -> Result<Arc<process::Process<Span, Internal<Name>, ()>>, CompileError> {
+    pub fn compile(
+        &self,
+    ) -> Result<Arc<process::Process<Span, Internal<Name>, ()>>, CompileError> {
         Ok(match self {
             Self::Then(expression) => {
                 let span = expression.span().clone();
@@ -592,11 +564,12 @@ impl<Name: Clone + Hash + Eq> Construct<Name> {
             }
 
             Self::Receive(span, patterns, construct) => {
-                patterns
-                    .into_iter()
-                    .rfold(construct.compile()?, |process, pattern| {
+                patterns.into_iter().rfold(
+                    construct.compile()?,
+                    |process, pattern| {
                         pattern.compile_receive(0, span, &Internal::Result(None), process)
-                    })
+                    }
+                )
             }
 
             Self::Choose(span, chosen, construct) => {
@@ -633,12 +606,7 @@ impl<Name: Clone + Hash + Eq> Construct<Name> {
                 process::Command::Break,
             )),
 
-            Self::Begin {
-                span,
-                unfounded,
-                label,
-                then: construct,
-            } => {
+            Self::Begin { span, unfounded, label, then: construct } => {
                 let process = construct.compile()?;
                 Arc::new(process::Process::Do(
                     span.clone(),
@@ -660,34 +628,30 @@ impl<Name: Clone + Hash + Eq> Construct<Name> {
             )),
 
             Self::SendTypes(span, args, construct) => {
-                args.into_iter()
-                    .rfold(construct.compile()?, |process, arg| {
-                        Arc::new(process::Process::Do(
-                            span.clone(),
-                            Internal::Result(None),
-                            (),
-                            process::Command::SendType(
-                                arg.clone().map_names(&mut Internal::Original),
-                                process,
-                            ),
-                        ))
-                    })
+                args.into_iter().rfold(
+                    construct.compile()?,
+                    |process, arg| Arc::new(process::Process::Do(
+                        span.clone(),
+                        Internal::Result(None),
+                        (),
+                        process::Command::SendType(
+                            arg.clone().map_names(&mut Internal::Original),
+                            process
+                        ),
+                    ))
+                )
             }
 
             Self::ReceiveTypes(span, params, construct) => {
-                params
-                    .into_iter()
-                    .rfold(construct.compile()?, |process, param| {
-                        Arc::new(process::Process::Do(
-                            span.clone(),
-                            Internal::Result(None),
-                            (),
-                            process::Command::ReceiveType(
-                                Internal::Original(param.clone()),
-                                process,
-                            ),
-                        ))
-                    })
+                params.into_iter().rfold(
+                    construct.compile()?,
+                    |process, param| Arc::new(process::Process::Do(
+                        span.clone(),
+                        Internal::Result(None),
+                        (),
+                        process::Command::ReceiveType(Internal::Original(param.clone()), process),
+                    ))
+                )
             }
         })
     }
@@ -696,7 +660,7 @@ impl<Name: Clone + Hash + Eq> Construct<Name> {
 impl<Name> Spanning for Construct<Name> {
     fn span(&self) -> Span {
         match self {
-            Self::Send(span, _, _)
+            | Self::Send(span, _, _)
             | Self::Receive(span, _, _)
             | Self::Choose(span, _, _)
             | Self::Either(span, _)
@@ -704,7 +668,8 @@ impl<Name> Spanning for Construct<Name> {
             | Self::Begin { span, .. }
             | Self::Loop(span, _)
             | Self::SendTypes(span, _, _)
-            | Self::ReceiveTypes(span, _, _) => span.clone(),
+            | Self::ReceiveTypes(span, _, _)
+            => span.clone(),
 
             Self::Then(expression) => expression.span(),
         }
@@ -712,7 +677,9 @@ impl<Name> Spanning for Construct<Name> {
 }
 
 impl<Name: Clone + Hash + Eq> ConstructBranch<Name> {
-    pub fn compile(&self) -> Result<Arc<process::Process<Span, Internal<Name>, ()>>, CompileError> {
+    pub fn compile(
+        &self,
+    ) -> Result<Arc<process::Process<Span, Internal<Name>, ()>>, CompileError> {
         Ok(match self {
             Self::Then(loc, expression) => {
                 let expression = expression.compile()?;
@@ -725,27 +692,24 @@ impl<Name: Clone + Hash + Eq> ConstructBranch<Name> {
             }
 
             Self::Receive(loc, patterns, branch) => {
-                patterns
-                    .into_iter()
-                    .rfold(branch.compile()?, |process, pattern| {
+                patterns.into_iter().rfold(
+                    branch.compile()?,
+                    |process, pattern| {
                         pattern.compile_receive(0, loc, &Internal::Result(None), process)
-                    })
+                    }
+                )
             }
 
             Self::ReceiveTypes(loc, params, branch) => {
-                params
-                    .into_iter()
-                    .rfold(branch.compile()?, |process, param| {
-                        Arc::new(process::Process::Do(
-                            loc.clone(),
-                            Internal::Result(None),
-                            (),
-                            process::Command::ReceiveType(
-                                Internal::Original(param.clone()),
-                                process,
-                            ),
-                        ))
-                    })
+                params.into_iter().rfold(
+                    branch.compile()?,
+                    |process, param| Arc::new(process::Process::Do(
+                        loc.clone(),
+                        Internal::Result(None),
+                        (),
+                        process::Command::ReceiveType(Internal::Original(param.clone()), process),
+                    ))
+                )
             }
         })
     }
@@ -754,15 +718,18 @@ impl<Name: Clone + Hash + Eq> ConstructBranch<Name> {
 impl<Name> Spanning for ConstructBranch<Name> {
     fn span(&self) -> Span {
         match self {
-            Self::Then(span, _) | Self::Receive(span, _, _) | Self::ReceiveTypes(span, _, _) => {
-                span.clone()
-            }
+            | Self::Then(span, _)
+            | Self::Receive(span, _, _)
+            | Self::ReceiveTypes(span, _, _)
+            => span.clone(),
         }
     }
 }
 
 impl<Name: Clone + Hash + Eq> Apply<Name> {
-    pub fn compile(&self) -> Result<Arc<process::Process<Span, Internal<Name>, ()>>, CompileError> {
+    pub fn compile(
+        &self,
+    ) -> Result<Arc<process::Process<Span, Internal<Name>, ()>>, CompileError> {
         Ok(match self {
             Self::Noop(point) => {
                 let span = point.point_span();
@@ -776,7 +743,7 @@ impl<Name: Clone + Hash + Eq> Apply<Name> {
                         (),
                     ))),
                 ))
-            }
+            },
 
             Self::Send(span, expressions, apply) => {
                 let mut process = apply.compile()?;
@@ -819,12 +786,7 @@ impl<Name: Clone + Hash + Eq> Apply<Name> {
                 ))
             }
 
-            Self::Begin {
-                span,
-                unfounded,
-                label,
-                then: apply,
-            } => {
+            Self::Begin { span, unfounded, label, then: apply } => {
                 let process = apply.compile()?;
                 Arc::new(process::Process::Do(
                     span.clone(),
@@ -846,17 +808,18 @@ impl<Name: Clone + Hash + Eq> Apply<Name> {
             )),
 
             Self::SendTypes(span, args, apply) => {
-                args.into_iter().rfold(apply.compile()?, |process, arg| {
-                    Arc::new(process::Process::Do(
+                args.into_iter().rfold(
+                    apply.compile()?,
+                    |process, arg| Arc::new(process::Process::Do(
                         span.clone(),
                         Internal::Object(None),
                         (),
                         process::Command::SendType(
                             arg.clone().map_names(&mut Internal::Original),
-                            process,
+                            process
                         ),
                     ))
-                })
+                )
             }
         })
     }
@@ -865,12 +828,13 @@ impl<Name: Clone + Hash + Eq> Apply<Name> {
 impl Spanning for Apply<Name> {
     fn span(&self) -> Span {
         match self {
-            Self::Send(span, _, _)
+            | Self::Send(span, _, _)
             | Self::Choose(span, _, _)
             | Self::Either(span, _)
             | Self::Begin { span, .. }
             | Self::Loop(span, _)
-            | Self::SendTypes(span, _, _) => span.clone(),
+            | Self::SendTypes(span, _, _)
+            => span.clone(),
 
             Self::Noop(point) => point.point_span(),
         }
@@ -878,7 +842,9 @@ impl Spanning for Apply<Name> {
 }
 
 impl<Name: Clone + Hash + Eq> ApplyBranch<Name> {
-    pub fn compile(&self) -> Result<Arc<process::Process<Span, Internal<Name>, ()>>, CompileError> {
+    pub fn compile(
+        &self,
+    ) -> Result<Arc<process::Process<Span, Internal<Name>, ()>>, CompileError> {
         Ok(match self {
             Self::Then(span, name, expression) => {
                 let expression = expression.compile()?;
@@ -902,11 +868,12 @@ impl<Name: Clone + Hash + Eq> ApplyBranch<Name> {
             }
 
             Self::Receive(span, patterns, branch) => {
-                patterns
-                    .into_iter()
-                    .rfold(branch.compile()?, |process, pattern| {
+                patterns.into_iter().rfold(
+                    branch.compile()?,
+                    |process, pattern| {
                         pattern.compile_receive(0, span, &Internal::Object(None), process)
-                    })
+                    }
+                )
             }
 
             Self::Continue(span, expression) => {
@@ -925,19 +892,15 @@ impl<Name: Clone + Hash + Eq> ApplyBranch<Name> {
             }
 
             Self::ReceiveTypes(span, params, branch) => {
-                params
-                    .into_iter()
-                    .rfold(branch.compile()?, |process, param| {
-                        Arc::new(process::Process::Do(
-                            span.clone(),
-                            Internal::Object(None),
-                            (),
-                            process::Command::ReceiveType(
-                                Internal::Original(param.clone()),
-                                process,
-                            ),
-                        ))
-                    })
+                params.into_iter().rfold(
+                    branch.compile()?,
+                    |process, param| Arc::new(process::Process::Do(
+                        span.clone(),
+                        Internal::Object(None),
+                        (),
+                        process::Command::ReceiveType(Internal::Original(param.clone()), process),
+                    ))
+                )
             }
         })
     }
@@ -946,10 +909,11 @@ impl<Name: Clone + Hash + Eq> ApplyBranch<Name> {
 impl<Name> Spanning for ApplyBranch<Name> {
     fn span(&self) -> Span {
         match self {
-            Self::Then(span, _, _)
+            | Self::Then(span, _, _)
             | Self::Receive(span, _, _)
             | Self::Continue(span, _)
-            | Self::ReceiveTypes(span, _, _) => span.clone(),
+            | Self::ReceiveTypes(span, _, _)
+            => span.clone(),
         }
     }
 }
@@ -960,12 +924,9 @@ impl<Name: Clone + Hash + Eq> Process<Name> {
         pass: Pass<Name>,
     ) -> Result<Arc<process::Process<Span, Internal<Name>, ()>>, CompileError> {
         Ok(match self {
-            Self::Let {
-                span,
-                pattern,
-                value,
-                then,
-            } => pattern.compile_let(span, value.compile()?, then.compile(pass)?),
+            Self::Let { span, pattern, value, then } => {
+                pattern.compile_let(span, value.compile()?, then.compile(pass)?)
+            }
 
             Self::Command(name, command) => command.compile(name, pass)?,
 
@@ -985,7 +946,9 @@ impl<Name: Clone + Hash + Eq> Process<Name> {
 impl<Name> Spanning for Process<Name> {
     fn span(&self) -> Span {
         match self {
-            Self::Let { span, .. } | Self::Telltypes(span, _) => span.clone(),
+            | Self::Let { span, .. }
+            | Self::Telltypes(span, _)
+            => span.clone(),
 
             Self::Command(_, command) => command.span(),
             Self::Noop(point) => point.point_span(),
@@ -1028,11 +991,14 @@ impl<Name: Clone + Hash + Eq> Command<Name> {
                 process
             }
 
-            Self::Receive(span, patterns, command) => patterns
-                .into_iter()
-                .rfold(command.compile(object_name, pass)?, |process, pattern| {
-                    pattern.compile_receive(0, span, &object_internal, process)
-                }),
+            Self::Receive(span, patterns, command) => {
+                patterns.into_iter().rfold(
+                    command.compile(object_name, pass)?,
+                    |process, pattern| {
+                        pattern.compile_receive(0, span, &object_internal, process)
+                    }
+                )
+            }
 
             Self::Choose(span, chosen, command) => {
                 let process = command.compile(object_name, pass)?;
@@ -1083,12 +1049,7 @@ impl<Name: Clone + Hash + Eq> Command<Name> {
                 ))
             }
 
-            Self::Begin {
-                span,
-                unfounded,
-                label,
-                then: command,
-            } => {
+            Self::Begin { span, unfounded, label, then: command} => {
                 let process = command.compile(object_name, pass)?;
                 Arc::new(process::Process::Do(
                     span.clone(),
@@ -1110,34 +1071,30 @@ impl<Name: Clone + Hash + Eq> Command<Name> {
             )),
 
             Self::SendTypes(span, args, command) => {
-                args.into_iter()
-                    .rfold(command.compile(object_name, pass)?, |process, arg| {
-                        Arc::new(process::Process::Do(
-                            span.clone(),
-                            object_internal.clone(),
-                            (),
-                            process::Command::SendType(
-                                arg.clone().map_names(&mut Internal::Original),
-                                process,
-                            ),
-                        ))
-                    })
+                args.into_iter().rfold(
+                    command.compile(object_name, pass)?,
+                    |process, arg| Arc::new(process::Process::Do(
+                        span.clone(),
+                        object_internal.clone(),
+                        (),
+                        process::Command::SendType(
+                            arg.clone().map_names(&mut Internal::Original),
+                            process,
+                        ),
+                    ))
+                )
             }
 
             Self::ReceiveTypes(span, params, command) => {
-                params
-                    .into_iter()
-                    .rfold(command.compile(object_name, pass)?, |process, param| {
-                        Arc::new(process::Process::Do(
-                            span.clone(),
-                            object_internal.clone(),
-                            (),
-                            process::Command::ReceiveType(
-                                Internal::Original(param.clone()),
-                                process,
-                            ),
-                        ))
-                    })
+                params.into_iter().rfold(
+                    command.compile(object_name, pass)?,
+                    |process, param| Arc::new(process::Process::Do(
+                        span.clone(),
+                        object_internal.clone(),
+                        (),
+                        process::Command::ReceiveType(Internal::Original(param.clone()), process),
+                    ))
+                )
             }
         })
     }
@@ -1146,7 +1103,7 @@ impl<Name: Clone + Hash + Eq> Command<Name> {
 impl<Name> Spanning for Command<Name> {
     fn span(&self) -> Span {
         match self {
-            Self::Link(span, _)
+            | Self::Link(span, _)
             | Self::Send(span, _, _)
             | Self::Receive(span, _, _)
             | Self::Choose(span, _, _)
@@ -1156,7 +1113,8 @@ impl<Name> Spanning for Command<Name> {
             | Self::Begin { span, .. }
             | Self::Loop(span, _)
             | Self::SendTypes(span, _, _)
-            | Self::ReceiveTypes(span, _, _) => span.clone(),
+            | Self::ReceiveTypes(span, _, _)
+            => span.clone(),
 
             Self::Then(process) => process.span(),
         }
@@ -1174,11 +1132,14 @@ impl<Name: Clone + Hash + Eq> CommandBranch<Name> {
         Ok(match self {
             Self::Then(_, process) => process.compile(pass)?,
 
-            Self::Receive(span, patterns, branch) => patterns
-                .into_iter()
-                .rfold(branch.compile(object_name, pass)?, |process, pattern| {
-                    pattern.compile_receive(0, span, &object_internal, process)
-                }),
+            Self::Receive(span, patterns, branch) => {
+                patterns.into_iter().rfold(
+                    branch.compile(object_name, pass)?,
+                    |process, pattern| {
+                        pattern.compile_receive(0, span, &object_internal, process)
+                    }
+                )
+            }
 
             Self::Continue(span, process) => {
                 let process = process.compile(pass)?;
@@ -1191,19 +1152,15 @@ impl<Name: Clone + Hash + Eq> CommandBranch<Name> {
             }
 
             Self::ReceiveTypes(span, params, branch) => {
-                params
-                    .into_iter()
-                    .rfold(branch.compile(object_name, pass)?, |process, param| {
-                        Arc::new(process::Process::Do(
-                            span.clone(),
-                            object_internal.clone(),
-                            (),
-                            process::Command::ReceiveType(
-                                Internal::Original(param.clone()),
-                                process,
-                            ),
-                        ))
-                    })
+                params.into_iter().rfold(
+                    branch.compile(object_name, pass)?,
+                    |process, param| Arc::new(process::Process::Do(
+                        span.clone(),
+                        object_internal.clone(),
+                        (),
+                        process::Command::ReceiveType(Internal::Original(param.clone()), process),
+                    ))
+                )
             }
         })
     }
@@ -1212,10 +1169,11 @@ impl<Name: Clone + Hash + Eq> CommandBranch<Name> {
 impl<Name> Spanning for CommandBranch<Name> {
     fn span(&self) -> Span {
         match self {
-            Self::Then(span, _)
+            | Self::Then(span, _)
             | Self::Receive(span, _, _)
             | Self::Continue(span, _)
-            | Self::ReceiveTypes(span, _, _) => span.clone(),
+            | Self::ReceiveTypes(span, _, _)
+            => span.clone(),
         }
     }
 }

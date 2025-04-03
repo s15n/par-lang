@@ -1,5 +1,5 @@
-use crate::location::{Point, Span};
 use lsp_types::{self as lsp};
+use crate::location::{Point, Span};
 
 impl Into<lsp::Range> for Span {
     fn into(self) -> lsp::Range {

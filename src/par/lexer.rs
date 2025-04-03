@@ -161,8 +161,8 @@ pub fn lex<'s>(input: &'s str) -> Vec<Token<'s>> {
                         0..,
                         |c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_'),
                     )
-                    .take()
-                    .parse_next(input)?;
+                        .take()
+                        .parse_next(input)?;
                     let kind = match raw {
                         "begin" => TokenKind::Begin,
                         "chan" => TokenKind::Chan,
