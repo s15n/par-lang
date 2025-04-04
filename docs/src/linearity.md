@@ -30,6 +30,13 @@ type If<A, B> = iterative {
   .drop => !
 }
 ```
+Note that for now:
+- `copy` and `drop` are for exact and cheap duplicates (Data)
+- `clone` and `delete` are for copies that behave exactly the same
+- `fork` and `close` are for copies that allow parallelization, but using one forked element might influence the other
+
+This distinction will get more useful with [traits](./future.md#traits).
+
 The same pattern can be used to make functions "data":
 ```par
 // the function type
