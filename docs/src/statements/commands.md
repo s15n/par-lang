@@ -322,7 +322,7 @@ def negate_choice = chan return: ChanBoolChoice<Bool, Bool> {
 ## Recursive Commands
 
 > **<sup>Syntax</sup>**\
-> _SendCommand_ :\
+> _RecursiveCommand_ :\
 > &nbsp;&nbsp; &nbsp;&nbsp; _Receiver_ `unfounded`<sup>?</sup> `begin` _LoopLabel_<sup>?</sup>
 >
 > _LoopCommand_ :\
@@ -470,7 +470,7 @@ def alt_true_false: Stream<Bool> = do {
 ## Send Type Commands
 
 > **<sup>Syntax</sup>**\
-> _SendTypeCommand_ : _Receiver_ `(` `type` [_ID_List_] `)`
+> _SendTypeCommand_ : _Receiver_ `(` `type` [_TypeList_] `)`
 
 *<sup>
 [Dual](#receive-type-commands)
