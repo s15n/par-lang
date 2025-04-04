@@ -5,6 +5,7 @@
 - [Lexical Structure](./lexical.md)
 - [Source Files](./source-files.md)
 - [Items](./items.md)
+- [Linearity](./linearity.md)
 - [Types](./types.md)
 - [Expressions](./expressions.md)
   - [Constructions](./expressions/construction.md)

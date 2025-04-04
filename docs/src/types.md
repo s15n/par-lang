@@ -75,7 +75,7 @@ def extract: [type T] [[!] T] T = [type T] [f] f(!)
 ```
 
 For some types there is a function `[A] !`. 
-Those can be destroyed without any transformation.
+Those can be destroyed.
 ```par
 // Types constructed only from ! are droppable
 def drop_bool: [Bool] ! = [b] b {
@@ -86,10 +86,10 @@ def drop_bool: [Bool] ! = [b] b {
 // Functions are not droppable in general
 def drop_impossible: [[Bool] Bool] ! = todo
 ```
-<!--// Replicables are droppable
-def drop_repl: [type T] [&T] ! = !-->
 
-Mathematically, `!` is \\(\mathbf{1}\\), the unit for \\(\otimes\\).
+`!` is [data](./linearity.md#data).
+
+In linear logic, `!` is \\(\mathbf{1}\\), the unit for \\(\otimes\\).
 
 ## Pair Types
 
@@ -136,6 +136,7 @@ type Pair<T, T> = (T, T)!
 let bool_pair: Pair<Bool> =
   (.true!, .false!)!
 ```
+In general, `(A, B)!` should be prefered.
 
 Values are created using [pair expressions](./expressions/construction.md#pair-expressions):
 ```par
@@ -162,7 +163,9 @@ do {
 } in ...
 ```
 
-Mathematically, `(A) B` is \\(A \otimes B\\). For session types, it means "send `A` and continue as `B`".
+If `A` and `B` are data, `(A) B` is [data](./linearity.md#data) as well.
+
+In linear logic, `(A) B` is \\(A \otimes B\\). For session types, it means "send `A` and continue as `B`".
 
 ## Function Types
 
@@ -194,7 +197,7 @@ let one: Nat = .succ.zero!
 let two = add1(one)
 ```
 
-Mathematically, `[A] B` is a [linear](./linearity.md) function \\(A \multimap B\\). For session types, it means "receive `A` and continue as `B`".
+In linear logic, `[A] B` is a [linear](./linearity.md) function \\(A \multimap B\\). For session types, it means "receive `A` and continue as `B`".
 
 ## Either Types
 
@@ -233,7 +236,15 @@ let no_bool: TwoOrNone<Bool> = .none!
 let both_bools: TwoOrNone<Bool> = .two(.true!, .false!)!
 ```
 
-Mathematically, `either { .a A, .b B }` is \\(A \oplus B\\). For session types, it means "select from `A` or `B`".
+If `A` and `B` are data, `either { .a A, .b B}` is [data](./linearity.md#data) as well. For example, `Bool` is data:
+```par
+def and: [Bool, Bool] Bool = [b1, b2] b1 {
+  .true! => b2,
+  .false! => .false! // b2 gets dropped implicitly here
+}
+```
+
+In linear logic, `either { .a A, .b B }` is \\(A \oplus B\\). For session types, it means "select from `A` or `B`".
 An empty either type `either {}` is therefore \\(\mathbf{0}\\), the empty type.
 In Haskell, it's called `void` and in Rust it's `!` (not to be confused with the `!` in Par). 
 There is a function from it to every type:
@@ -267,7 +278,7 @@ It consists of several labels that can be used as signals to destruct the receiv
 
 ```par
 // choice of two
-type BoolChoice<A, B> = {
+type If<A, B> = {
   .true => A
   .false => B
 }
@@ -279,7 +290,7 @@ def negate(b: Bool): Bool = b {
 }
 
 // construct a choice
-def negate_choice: BoolChoice<Bool, Bool> = {
+def negate_choice: If<Bool, Bool> = {
   .true => .false!
   .false => .true!
 }
@@ -321,7 +332,7 @@ def main = do {
 ```
 For an explanation of `iterative`-`self` and `begin`-`loop`, see [iterative types](#iterative-types)
 
-Mathematically, `{ .a => A, .b => B }` is \\(A \mathbin{\\&} B\\). For session types, it means "offer a choice of `A` or `B`".
+In linear logic, `{ .a => A, .b => B }` is \\(A \mathbin{\\&} B\\). For session types, it means "offer a choice of `A` or `B`".
 An empty choice `{}` is therefore \\(\top\\) and has exactly one value, `{}`. There is a function to it from every type:
 ```par
 def immortalize: [type T] [T] {} = [type T] [x] {}
@@ -369,6 +380,15 @@ Values of recursive types always terminate. They have to be constructed finitely
 // a simple List
 let l: List<Bool> = .item(.true!).item(.false!).empty!
 ```
+
+If `D` is data (assuming `self` is data), `recursive D` is [data](./linearity.md#data) as well. For example, `Nat` is data:
+```par
+def descending_nats: [Nat] List<Nat> = [n] n begin {
+  .zero! => .empty!,
+  .succ p1 => .item(.succ p1) p1 loop // p1 gets implicitly copied here
+}
+```
+
 Mathematically, a recursive either type represents an inductive type.
 Constructors without `self` are the base cases while those with `self` represent
 inductive steps.
@@ -465,6 +485,8 @@ type Inf<T> = iterative (T) self
 def infinite_bools: Inf<Bool> = begin (.true!) loop
 ```
 This infinite value can be constructed but there is no way of fully destructing (so: using) it.
+
+If `D` is data (assuming `self` is data), `iterative D` is also [data](./linearity.md#data).
 
 Mathematically, an iterative choice type represents a coinductive type.
 Destructors without `loop` break the iteration and return, while those containing `loop` yield and continue.
@@ -619,7 +641,9 @@ let (type X) x = any
 let y: X = x
 ```
 
-Mathematically, `(type T) A` is \\(\exists\ T: A\\).
+If `D` is data, `(type T) D` is also [data](./linearity.md#data).
+
+In linear logic, `(type T) A` is \\(\exists\ T: A\\).
 
 ## Universal Types
 
@@ -662,7 +686,9 @@ let id_bool_2: ExistEndo = (type Bool) id_bool
 ```
 A more interesting example is [reversing a list](./expressions.md#channel-expressions) of any type.
 
-Mathematically, `[type T] A` is \\(\forall\ T: A\\).
+If `D` is data, `[type T] D` is also [data](./linearity.md#data).
+
+In linear logic, `[type T] A` is \\(\forall\ T: A\\).
 
 ## The Bottom Type
 
@@ -684,7 +710,7 @@ def main: Bool = chan user {
 }
 ```
 
-Mathematically, `?` is \\(\bot\\), the unit for \\(⅋\\). So \\(\bot \mathbin{⅋} A = \mathbf{1} \multimap A \cong A\\) (as seen before for the [unit](#the-unit-type) type).
+In linear logic, `?` is \\(\bot\\), the unit for \\(⅋\\). So \\(\bot \mathbin{⅋} A = \mathbf{1} \multimap A \cong A\\) (as seen before for the [unit](#the-unit-type) type).
 
 ## Channel Types
 
@@ -720,7 +746,7 @@ Note that `b <> c` would have been equally valid.
 
 ## Duality equations
 
-Mathematically, `chan A` is \\(A^\perp\\), i.e. the dual type to `A`. Every type has a dual. These are defined according to this table:
+In linear logic, `chan A` is \\(A^\perp\\), i.e. the dual type to `A`. Every type has a dual. These are defined according to this table:
 
 | Type | Dual |
 | ---- | ---- |
