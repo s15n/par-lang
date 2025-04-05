@@ -243,6 +243,18 @@ impl PartialEq for Name {
 
 impl Eq for Name {}
 
+impl PartialOrd for Name {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.string.partial_cmp(&other.string)
+    }
+}
+
+impl Ord for Name {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.string.cmp(&other.string)
+    }
+}
+
 impl Display for Name {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.string)
@@ -665,6 +677,7 @@ impl<Name: Clone + Hash + Eq> Construct<Name> {
                     command: process::Command::Begin {
                         unfounded: *unfounded,
                         label: Some(Internal::Result(label.clone())),
+                        captures: Captures::new(),
                         body: process,
                     },
                 })
@@ -674,7 +687,7 @@ impl<Name: Clone + Hash + Eq> Construct<Name> {
                 span: span.clone(),
                 name: Internal::Result(None),
                 typ: (),
-                command: process::Command::Loop(Some(Internal::Result(label.clone()))),
+                command: process::Command::Loop(Some(Internal::Result(label.clone())), Captures::new()),
             }),
 
             Self::SendType(loc, argument, construct) => {
@@ -835,6 +848,7 @@ impl<Name: Clone + Hash + Eq> Apply<Name> {
                     command: process::Command::Begin {
                         unfounded: *unfounded,
                         label: Some(Internal::Object(label.clone())),
+                        captures: Captures::new(),
                         body: process,
                     },
                 })
@@ -844,7 +858,7 @@ impl<Name: Clone + Hash + Eq> Apply<Name> {
                 span: span.clone(),
                 name: Internal::Object(None),
                 typ: (),
-                command: process::Command::Loop(Some(Internal::Object(label.clone()))),
+                command: process::Command::Loop(Some(Internal::Object(label.clone())), Captures::new()),
             }),
 
             Self::SendType(loc, argument, apply) => {
@@ -1086,6 +1100,7 @@ impl<Name: Clone + Hash + Eq> Command<Name> {
                     command: process::Command::Begin {
                         unfounded: *unfounded,
                         label: label.clone().map(Internal::Original),
+                        captures: Captures::new(),
                         body: process,
                     },
                 })
@@ -1095,7 +1110,7 @@ impl<Name: Clone + Hash + Eq> Command<Name> {
                 span: span.clone(),
                 name: object_internal,
                 typ: (),
-                command: process::Command::Loop(label.clone().map(Internal::Original)),
+                command: process::Command::Loop(label.clone().map(Internal::Original), Captures::new()),
             }),
 
             Self::SendType(loc, argument, command) => {

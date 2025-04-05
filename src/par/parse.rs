@@ -1,5 +1,3 @@
-// why not rename this file to parser.rs?
-
 use super::{
     language::{
         Apply, ApplyBranch, ApplyBranches, Command, CommandBranch, CommandBranches, Construct,
@@ -322,7 +320,7 @@ pub struct SyntaxError {
 }
 impl Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        "Syntax error.".fmt(f)
+        write!(f, "Syntax error")
     }
 }
 impl core::error::Error for SyntaxError {}

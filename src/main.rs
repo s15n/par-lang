@@ -1,21 +1,17 @@
-use crate::interact::Handle;
-use crate::par::language::{Definition, Internal};
-use crate::par::runtime::Context;
-use crate::playground::{Compiled, Playground};
-use crate::spawn::TokioSpawn;
+use crate::playground::Playground;
 use clap::{arg, command, value_parser, Command};
-use colored::Colorize;
 use eframe::egui;
-use std::fs::File;
 use std::path::PathBuf;
-use std::sync::Arc;
 
-mod interact;
+pub mod icombs;
 mod language_server;
 mod location;
 mod par;
 mod playground;
+mod readback;
 mod spawn;
+#[cfg(test)]
+mod tests;
 
 fn main() {
     let matches = command!()
@@ -74,8 +70,8 @@ fn run_playground(file: Option<PathBuf>) {
 }
 
 // todo: this does not work
-fn run_function(file: PathBuf, function: String) {
-    let Ok(code) = File::open(file).and_then(|mut file| {
+fn run_function(_file: PathBuf, _function: String) {
+    /*let Ok(code) = File::open(file).and_then(|mut file| {
         use std::io::Read;
         let mut buf = String::new();
         file.read_to_string(&mut buf)?;
@@ -149,7 +145,7 @@ fn run_function(file: PathBuf, function: String) {
             // 417, 339, 508
         )
             .expect("egui crashed");
-    })
+    })*/
 }
 
 fn run_language_server() {

@@ -1,7 +1,7 @@
 use super::io::IO;
 use crate::language_server::data::{semantic_token_modifiers, semantic_token_types};
 use crate::location::Span;
-use crate::par::language::{Declaration, Definition, Internal, Name, TypeDef};
+use crate::par::language::{Internal, Name};
 use crate::par::types::TypeError;
 use crate::playground::{Checked, Compiled};
 use lsp_types::{self as lsp, Uri};
@@ -42,7 +42,7 @@ impl Instance {
 
                 let mut inside_item = false;
 
-                for TypeDef { span, name, .. } in &compiled.program.type_defs {
+                for (name, (span, _, _)) in compiled.program.type_defs.globals.as_ref() {
                     if !is_inside(pos, span) {
                         continue;
                     }
@@ -52,7 +52,7 @@ impl Instance {
                 }
 
                 if !inside_item {
-                    for Declaration { span, name, typ } in &compiled.program.declarations {
+                    for (name, (span, typ)) in &compiled.program.declarations {
                         if !is_inside(pos, span) {
                             continue;
                         }
@@ -66,11 +66,11 @@ impl Instance {
                 }
 
                 if !inside_item {
-                    for Definition {
-                        span,
+                    for (
                         name,
-                        expression,
-                    } in &compiled.program.definitions
+                        (span,
+                        expression)
+                     ) in &compiled.program.definitions
                     {
                         if !is_inside(pos, span) {
                             continue;
@@ -132,7 +132,7 @@ impl Instance {
         TYPE_PARAMETER: type alias
          */
 
-        for TypeDef { span, name, .. } in &compiled.program.type_defs {
+        for (name, (span, _, _)) in compiled.program.type_defs.globals.as_ref() {
             symbols.insert(
                 name,
                 lsp::DocumentSymbol {
@@ -148,7 +148,7 @@ impl Instance {
             );
         }
 
-        for Declaration { span, name, typ } in &compiled.program.declarations {
+        for (name, (span, typ)) in &compiled.program.declarations {
             let mut detail = String::new();
             typ.pretty(&mut detail, 0).unwrap();
 
@@ -171,11 +171,7 @@ impl Instance {
             );
         }
 
-        for Definition {
-            span,
-            name,
-            expression,
-        } in &compiled.program.definitions
+        for (name, (span, expression)) in &compiled.program.definitions
         {
             let range = span.into();
             let selection_range = name.span().unwrap().into();
@@ -247,13 +243,14 @@ impl Instance {
 
         let mut original = None;
 
-        for definition in &compiled.program.definitions {
-            if is_inside(pos, &definition.name.span().unwrap()) {
+        //TODO: use map indexing
+        for (name, _) in &compiled.program.definitions {
+            if is_inside(pos, &name.span().unwrap()) {
                 let Some(declaration) = compiled
                     .program
                     .declarations
                     .iter()
-                    .find(|dec| dec.name == definition.name)
+                    .find(|(dec_name, _)| dec_name == &name)
                 else {
                     return None;
                 };
@@ -264,7 +261,7 @@ impl Instance {
         }
 
         for declaration in &compiled.program.declarations {
-            if is_inside(pos, &declaration.name.span().unwrap()) {
+            if is_inside(pos, &declaration.0.span().unwrap()) {
                 original = Some(declaration);
                 break;
             }
@@ -274,7 +271,7 @@ impl Instance {
 
         Some(lsp::GotoDefinitionResponse::Scalar(lsp::Location {
             uri: self.uri.clone(),
-            range: declaration.name.span().unwrap().into(),
+            range: declaration.0.span().unwrap().into(),
         }))
     }
 
@@ -293,13 +290,14 @@ impl Instance {
 
         let mut original = None;
 
-        for declaration in &compiled.program.declarations {
-            if is_inside(pos, &declaration.name.span().unwrap()) {
+        //TODO: use map indexing
+        for (name, _) in &compiled.program.declarations {
+            if is_inside(pos, &name.span().unwrap()) {
                 let Some(definition) = compiled
                     .program
                     .definitions
                     .iter()
-                    .find(|definition| definition.name == declaration.name)
+                    .find(|(def_name, _)| def_name == &name)
                 else {
                     return None;
                 };
@@ -310,7 +308,7 @@ impl Instance {
         }
 
         for definition in &compiled.program.definitions {
-            if is_inside(pos, &definition.name.span().unwrap()) {
+            if is_inside(pos, &definition.0.span().unwrap()) {
                 original = Some(definition);
                 break;
             }
@@ -320,7 +318,7 @@ impl Instance {
 
         Some(lsp::GotoDefinitionResponse::Scalar(lsp::Location {
             uri: self.uri.clone(),
-            range: definition.name.span().unwrap().into(),
+            range: definition.0.span().unwrap().into(),
         }))
     }
 
@@ -336,7 +334,7 @@ impl Instance {
 
         let mut semantic_tokens = Vec::new();
 
-        for TypeDef { name, .. } in &compiled.program.type_defs {
+        for (name, _) in compiled.program.type_defs.globals.as_ref() {
             let name_span = name.span().unwrap();
             semantic_tokens.push(lsp::SemanticToken {
                 delta_line: name_span.start.row as u32,
@@ -347,7 +345,7 @@ impl Instance {
             });
         }
 
-        for Declaration { name, typ, .. } in &compiled.program.declarations {
+        for (name, (_, typ)) in &compiled.program.declarations {
             let name_span = name.span().unwrap();
             semantic_tokens.push(lsp::SemanticToken {
                 delta_line: name_span.start.row as u32,
@@ -363,9 +361,7 @@ impl Instance {
             });
         }
 
-        for Definition {
-            name, expression, ..
-        } in &compiled.program.definitions
+        for (name, (_, expression)) in &compiled.program.definitions
         {
             let name_span = name.span().unwrap();
             semantic_tokens.push(lsp::SemanticToken {
@@ -416,14 +412,14 @@ impl Instance {
                 .program
                 .definitions
                 .iter()
-                .map(|definition| lsp::CodeLens {
-                    range: definition.name.span().unwrap().into(),
+                .map(|(name, _)| lsp::CodeLens {
+                    range: name.span().unwrap().into(),
                     command: Some(lsp::Command {
                         title: "$(play) Run".to_owned(),
                         command: "run".to_owned(),
                         arguments: Some(vec![
                             self.uri.to_string().into(),
-                            definition.name.to_string().into(),
+                            name.to_string().into(),
                         ]),
                     }),
                     data: None,
@@ -446,17 +442,15 @@ impl Instance {
                 .program
                 .definitions
                 .iter()
-                .filter(|definition| {
+                .filter(|(name, _)| {
                     !compiled
                         .program
                         .declarations
                         .iter()
-                        .any(|declaration| definition.name == declaration.name)
+                        .any(|(dec_name, _)| &dec_name == name) //TODO: use map indexing
                 })
                 .map(
-                    |Definition {
-                         name, expression, ..
-                     }| {
+                    |(name, (_, expression))| {
                         let mut label = ": ".to_owned();
                         expression.get_type().pretty(&mut label, 0).unwrap();
 
@@ -482,11 +476,12 @@ impl Instance {
             return None;
         };
 
+        //TODO: use map indexing
         let Some(_definition) = compiled
             .program
             .definitions
             .iter()
-            .find(|definition| definition.name.to_string().as_str() == def_name)
+            .find(|(name, _)| name.to_string().as_str() == def_name)
         else {
             return None;
         };
@@ -510,7 +505,7 @@ impl Instance {
         // todo: progress reporting
         let compiled = stacker::grow(32 * 1024 * 1024, || Compiled::from_string(&code.unwrap()))
             .map_err(|err| CompileError::Compile(err))
-            .and_then(|compiled| compiled.checked.map_err(|err| CompileError::Types(err)));
+            .and_then(|compiled| compiled.checked.map_err(|err| CompileError::Compile(err)));
 
         let result = match &compiled {
             Ok(_) => {

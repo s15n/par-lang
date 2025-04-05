@@ -81,8 +81,8 @@ pub fn diagnostic_for_error(err: &CompileError) -> lsp::Diagnostic {
             )
         }
 
-        CompileError::Compile(Error::Runtime(_)) => {
-            unreachable!("Runtime error at compile time")
+        CompileError::Compile(Error::InetCompile(_err)) => {
+            todo!()
         }
     };
     let message = match help {

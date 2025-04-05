@@ -38,9 +38,10 @@ pub enum Command<Name, Typ> {
     Begin {
         unfounded: bool,
         label: Option<Name>,
+        captures: Captures<Name>,
         body: Arc<Process<Name, Typ>>,
     },
-    Loop(Option<Name>),
+    Loop(Option<Name>, Captures<Name>),
     SendType(Type<Name>, Arc<Process<Name, Typ>>),
     ReceiveType(Name, Arc<Process<Name, Typ>>),
 }
@@ -211,13 +212,15 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
                     Command::Begin {
                         unfounded,
                         label,
+                        captures,
                         body: process,
                     } => Command::Begin {
                         unfounded: unfounded.clone(),
                         label: label.clone(),
+                        captures: captures.clone(),
                         body: process.optimize(),
                     },
-                    Command::Loop(label) => Command::Loop(label.clone()),
+                    Command::Loop(label, captures) => Command::Loop(label.clone(), captures.clone()),
                     Command::SendType(argument, process) => {
                         Command::SendType(argument.clone(), process.optimize())
                     }
@@ -282,25 +285,27 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Command<Name, Typ> {
             Self::Begin {
                 unfounded,
                 label,
+                captures: _,
                 body: process,
             } => {
-                let (_, caps) = process.fix_captures(loop_points);
+                let (_, loop_caps) = process.fix_captures(loop_points);
                 let mut loop_points = loop_points.clone();
-                loop_points.insert(label.clone(), caps);
+                loop_points.insert(label.clone(), loop_caps.clone());
                 let (process, caps) = process.fix_captures(&loop_points);
                 (
                     Self::Begin {
                         unfounded: unfounded.clone(),
                         label: label.clone(),
+                        captures: loop_caps.clone(),
                         body: process,
                     },
                     caps,
                 )
             }
-            Self::Loop(label) => (
-                Self::Loop(label.clone()),
-                loop_points.get(label).cloned().unwrap_or_default(),
-            ),
+            Self::Loop(label, _) => {
+                let loop_caps = loop_points.get(label).cloned().unwrap_or_default();
+                (Self::Loop(label.clone(), loop_caps.clone()), loop_caps)
+            }
             Self::SendType(argument, process) => {
                 let (process, caps) = process.fix_captures(loop_points);
                 (Self::SendType(argument.clone(), process), caps)
@@ -459,6 +464,7 @@ impl<Name: Display, Typ> Process<Name, Typ> {
                     Command::Begin {
                         unfounded,
                         label,
+                        captures,
                         body: process,
                     } => {
                         if *unfounded {
@@ -468,14 +474,30 @@ impl<Name: Display, Typ> Process<Name, Typ> {
                         if let Some(label) = label {
                             write!(f, " {}", label)?;
                         }
+                        write!(f, " |")?;
+                        for (i, cap) in captures.names.keys().enumerate() {
+                            if i > 0 {
+                                write!(f, " ")?;
+                            }
+                            write!(f, "{}", cap)?;
+                        }
+                        write!(f, "| ")?;
                         process.pretty(f, indent)
                     }
 
-                    Command::Loop(label) => {
+                    Command::Loop(label, captures) => {
                         write!(f, " loop")?;
                         if let Some(label) = label {
                             write!(f, " {}", label)?;
                         }
+                        write!(f, " |")?;
+                        for (i, cap) in captures.names.keys().enumerate() {
+                            if i > 0 {
+                                write!(f, " ")?;
+                            }
+                            write!(f, "{}", cap)?;
+                        }
+                        write!(f, "|")?;
                         Ok(())
                     }
 
