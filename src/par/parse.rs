@@ -624,7 +624,7 @@ fn typ_recv_type(input: &mut Input) -> Result<TypeNode<Name>> {
     .map(|((open, _), (names, _, then))| {
         let span = open.span.join(then.span());
         names.into_iter().rfold(then, |then, name| {
-            TypeNode::SendType(span, name, Box::new(then))
+            TypeNode::ReceiveType(span, name, Box::new(then))
         })
     })
     .parse_next(input)
