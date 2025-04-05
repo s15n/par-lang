@@ -220,7 +220,9 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
                         captures: captures.clone(),
                         body: process.optimize(),
                     },
-                    Command::Loop(label, captures) => Command::Loop(label.clone(), captures.clone()),
+                    Command::Loop(label, captures) => {
+                        Command::Loop(label.clone(), captures.clone())
+                    }
                     Command::SendType(argument, process) => {
                         Command::SendType(argument.clone(), process.optimize())
                     }

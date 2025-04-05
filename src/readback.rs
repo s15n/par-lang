@@ -483,12 +483,18 @@ pub fn prepare_type_for_readback(
                     type_defs.get(&loc, &name, &args).unwrap()
                 }
             }
-            Type::Recursive { span: _, asc, label, body } => {
-                Type::expand_recursive(&asc, &label, &*body, &type_defs).unwrap()
-            }
-            Type::Iterative { span: _, asc, label, body } => {
-                Type::expand_iterative(&asc, &label, &*body, &type_defs).unwrap()
-            }
+            Type::Recursive {
+                span: _,
+                asc,
+                label,
+                body,
+            } => Type::expand_recursive(&asc, &label, &*body, &type_defs).unwrap(),
+            Type::Iterative {
+                span: _,
+                asc,
+                label,
+                body,
+            } => Type::expand_iterative(&asc, &label, &*body, &type_defs).unwrap(),
             ty => break ty,
         };
     }

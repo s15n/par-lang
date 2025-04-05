@@ -66,12 +66,7 @@ impl Instance {
                 }
 
                 if !inside_item {
-                    for (
-                        name,
-                        (span,
-                        expression)
-                     ) in &compiled.program.definitions
-                    {
+                    for (name, (span, expression)) in &compiled.program.definitions {
                         if !is_inside(pos, span) {
                             continue;
                         }
@@ -171,8 +166,7 @@ impl Instance {
             );
         }
 
-        for (name, (span, expression)) in &compiled.program.definitions
-        {
+        for (name, (span, expression)) in &compiled.program.definitions {
             let range = span.into();
             let selection_range = name.span().unwrap().into();
             symbols
@@ -361,8 +355,7 @@ impl Instance {
             });
         }
 
-        for (name, (_, expression)) in &compiled.program.definitions
-        {
+        for (name, (_, expression)) in &compiled.program.definitions {
             let name_span = name.span().unwrap();
             semantic_tokens.push(lsp::SemanticToken {
                 delta_line: name_span.start.row as u32,
@@ -417,10 +410,7 @@ impl Instance {
                     command: Some(lsp::Command {
                         title: "$(play) Run".to_owned(),
                         command: "run".to_owned(),
-                        arguments: Some(vec![
-                            self.uri.to_string().into(),
-                            name.to_string().into(),
-                        ]),
+                        arguments: Some(vec![self.uri.to_string().into(), name.to_string().into()]),
                     }),
                     data: None,
                 })
@@ -449,23 +439,21 @@ impl Instance {
                         .iter()
                         .any(|(dec_name, _)| &dec_name == name) //TODO: use map indexing
                 })
-                .map(
-                    |(name, (_, expression))| {
-                        let mut label = ": ".to_owned();
-                        expression.get_type().pretty(&mut label, 0).unwrap();
+                .map(|(name, (_, expression))| {
+                    let mut label = ": ".to_owned();
+                    expression.get_type().pretty(&mut label, 0).unwrap();
 
-                        lsp::InlayHint {
-                            position: name.span().unwrap().end.into(),
-                            label: lsp::InlayHintLabel::String(label),
-                            kind: Some(lsp::InlayHintKind::TYPE),
-                            text_edits: None,
-                            tooltip: None,
-                            padding_left: None,
-                            padding_right: None,
-                            data: None,
-                        }
-                    },
-                )
+                    lsp::InlayHint {
+                        position: name.span().unwrap().end.into(),
+                        label: lsp::InlayHintLabel::String(label),
+                        kind: Some(lsp::InlayHintKind::TYPE),
+                        text_edits: None,
+                        tooltip: None,
+                        padding_left: None,
+                        padding_right: None,
+                        data: None,
+                    }
+                })
                 .collect(),
         )
     }

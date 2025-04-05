@@ -687,7 +687,10 @@ impl<Name: Clone + Hash + Eq> Construct<Name> {
                 span: span.clone(),
                 name: Internal::Result(None),
                 typ: (),
-                command: process::Command::Loop(Some(Internal::Result(label.clone())), Captures::new()),
+                command: process::Command::Loop(
+                    Some(Internal::Result(label.clone())),
+                    Captures::new(),
+                ),
             }),
 
             Self::SendType(loc, argument, construct) => {
@@ -858,7 +861,10 @@ impl<Name: Clone + Hash + Eq> Apply<Name> {
                 span: span.clone(),
                 name: Internal::Object(None),
                 typ: (),
-                command: process::Command::Loop(Some(Internal::Object(label.clone())), Captures::new()),
+                command: process::Command::Loop(
+                    Some(Internal::Object(label.clone())),
+                    Captures::new(),
+                ),
             }),
 
             Self::SendType(loc, argument, apply) => {
@@ -1110,7 +1116,10 @@ impl<Name: Clone + Hash + Eq> Command<Name> {
                 span: span.clone(),
                 name: object_internal,
                 typ: (),
-                command: process::Command::Loop(label.clone().map(Internal::Original), Captures::new()),
+                command: process::Command::Loop(
+                    label.clone().map(Internal::Original),
+                    Captures::new(),
+                ),
             }),
 
             Self::SendType(loc, argument, command) => {

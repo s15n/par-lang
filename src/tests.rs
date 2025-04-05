@@ -299,7 +299,10 @@ async fn test_whole_programs() -> Result<(), String> {
         };
         for (idx, j) in i.tests.into_iter().enumerate() {
             let def_name = format!("test_{}", idx);
-            let def_name = Internal::Original(language::Name { span: Default::default(), string: def_name });
+            let def_name = Internal::Original(language::Name {
+                span: Default::default(),
+                string: def_name,
+            });
             let tree = net
                 .lock()
                 .unwrap()
@@ -307,7 +310,10 @@ async fn test_whole_programs() -> Result<(), String> {
             let pattern = match j.pattern {
                 TestPattern::Code(_) => {
                     let def_name = format!("test_pat_{}", idx);
-                    let def_name = Internal::Original(language::Name { span: Default::default(), string: def_name.into() });
+                    let def_name = Internal::Original(language::Name {
+                        span: Default::default(),
+                        string: def_name.into(),
+                    });
                     let tree = net
                         .lock()
                         .unwrap()

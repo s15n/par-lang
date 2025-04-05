@@ -346,11 +346,7 @@ impl SharedState {
         &self.shared.type_defs
     }
 
-    pub fn as_with_type(
-        &self,
-        port: PortContents,
-        ty: Type<Name>,
-    ) -> BoxFuture<ReadbackResult> {
+    pub fn as_with_type(&self, port: PortContents, ty: Type<Name>) -> BoxFuture<ReadbackResult> {
         async move {
             let tree = match port {
                 PortContents::Aux(tx) => {

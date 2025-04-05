@@ -6,10 +6,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use super::{
-    language::Program,
-    process,
-};
+use super::{language::Program, process};
 use crate::location::{Span, Spanning};
 use crate::par::language::{Declaration, Definition, TypeDef, TypeNode};
 use miette::LabeledSpan;
@@ -503,10 +500,7 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
         Ok(!self.is_positive(type_defs)?)
     }
 
-    pub fn is_positive(
-        &self,
-        type_defs: &TypeDefs<Name>,
-    ) -> Result<bool, TypeError<Name>> {
+    pub fn is_positive(&self, type_defs: &TypeDefs<Name>) -> Result<bool, TypeError<Name>> {
         Ok(match self {
             Type::Chan(_, t) => t.is_negative(type_defs)?,
             Type::Var(_, _) => false,
@@ -540,10 +534,7 @@ impl<Name: Clone + Eq + Hash> Type<Name> {
         })
     }
 
-    pub fn is_negative(
-        &self,
-        type_defs: &TypeDefs<Name>,
-    ) -> Result<bool, TypeError<Name>> {
+    pub fn is_negative(&self, type_defs: &TypeDefs<Name>) -> Result<bool, TypeError<Name>> {
         Ok(match self {
             Type::Chan(_, t) => t.is_positive(type_defs)?,
             Type::Var(_, _) => false,
@@ -1394,10 +1385,7 @@ where
             .read()
             .unwrap()
             .iter()
-            .map(|(name, checked)| (name.clone(), (
-                checked.span.clone(),
-                checked.def.clone(),
-            )))
+            .map(|(name, checked)| (name.clone(), (checked.span.clone(), checked.def.clone())))
             .collect()
     }
     pub fn get_declarations(&self) -> IndexMap<Name, (Span, Type<Name>)> {

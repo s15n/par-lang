@@ -3,11 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{
-    location::Span,
-    par::types::TypeDefs,
-    playground::CheckedProgram,
-};
+use crate::{location::Span, par::types::TypeDefs, playground::CheckedProgram};
 use indexmap::{IndexMap, IndexSet};
 use std::hash::Hash;
 
@@ -463,10 +459,14 @@ impl Compiler {
                 index_map.sort_keys();
                 Type::Choice(loc, index_map)
             }
-            Type::Recursive { asc, label, body, .. } => self.normalize_type(
+            Type::Recursive {
+                asc, label, body, ..
+            } => self.normalize_type(
                 Type::expand_recursive(&asc, &label, &body, &self.type_defs).unwrap(),
             ),
-            Type::Iterative { asc, label, body, .. } => self.normalize_type(
+            Type::Iterative {
+                asc, label, body, ..
+            } => self.normalize_type(
                 Type::expand_iterative(&asc, &label, &body, &self.type_defs).unwrap(),
             ),
             Type::Chan(_, body) => {
@@ -481,20 +481,21 @@ impl Compiler {
         }
     }
 
-    fn compile_expression(
-        &mut self,
-        expr: &Expression<Name, Type<Name>>,
-    ) -> Result<TypedTree> {
+    fn compile_expression(&mut self, expr: &Expression<Name, Type<Name>>) -> Result<TypedTree> {
         match expr {
             Expression::Reference(_, name, _) => self.instantiate_name(name, false),
-            Expression::Fork { captures, chan_name, chan_type, process, .. } => {
-                self.with_captures(captures, |this| {
-                    let (v0, v1) = this.create_typed_wire(chan_type.clone());
-                    this.bind_variable(chan_name.clone(), v0)?;
-                    this.compile_process(process)?;
-                    Ok(v1)
-                })
-            }
+            Expression::Fork {
+                captures,
+                chan_name,
+                chan_type,
+                process,
+                ..
+            } => self.with_captures(captures, |this| {
+                let (v0, v1) = this.create_typed_wire(chan_type.clone());
+                this.bind_variable(chan_name.clone(), v0)?;
+                this.compile_process(process)?;
+                Ok(v1)
+            }),
         }
     }
 
@@ -507,15 +508,20 @@ impl Compiler {
             self.show_state();
         }*/
         match proc {
-            Process::Let { name, value, then, .. } => {
+            Process::Let {
+                name, value, then, ..
+            } => {
                 let value = self.compile_expression(value)?;
                 self.bind_variable(name.clone(), value)?;
                 self.compile_process(then)
             }
 
-            Process::Do { span, name, typ, command } => {
-                self.compile_command(span, name.clone(), typ.clone(), command)
-            }
+            Process::Do {
+                span,
+                name,
+                typ,
+                command,
+            } => self.compile_command(span, name.clone(), typ.clone(), command),
 
             Process::Telltypes(_, _) => unreachable!(),
         }
@@ -660,7 +666,12 @@ impl Compiler {
                 self.net.link(a, Tree::e());
                 self.compile_process(process)?;
             }
-            Command::Begin { label, captures, body, .. } => {
+            Command::Begin {
+                label,
+                captures,
+                body,
+                ..
+            } => {
                 let label = LoopLabel(label.clone());
                 self.context.vars.sort_keys();
 

@@ -15,7 +15,7 @@ use crate::par::language::{Declaration, Definition, TypeDef};
 use crate::{
     icombs::{compile_file, IcCompiled},
     par::{
-        language::{CompileError, Program, Name, Internal},
+        language::{CompileError, Internal, Name, Program},
         parse::{parse_program, SyntaxError},
         process::Expression,
         types::{self, Type, TypeDefs, TypeError},
@@ -50,12 +50,19 @@ impl Compiled {
                 let type_defs = program
                     .type_defs
                     .into_iter()
-                    .map(|TypeDef { span, name, params, typ }| TypeDef {
-                        span,
-                        name: Internal::Original(name),
-                        params: params.into_iter().map(|x| Internal::Original(x)).collect(),
-                        typ: typ.map_names(&mut Internal::Original),
-                    })
+                    .map(
+                        |TypeDef {
+                             span,
+                             name,
+                             params,
+                             typ,
+                         }| TypeDef {
+                            span,
+                            name: Internal::Original(name),
+                            params: params.into_iter().map(|x| Internal::Original(x)).collect(),
+                            typ: typ.map_names(&mut Internal::Original),
+                        },
+                    )
                     .collect();
                 let declarations = program
                     .declarations
@@ -69,13 +76,19 @@ impl Compiled {
                 let compile_result = program
                     .definitions
                     .into_iter()
-                    .map(|Definition { span, name, expression }| {
-                        expression.compile().map(|compiled| Definition {
-                            span,
-                            name: Internal::Original(name.clone()),
-                            expression: compiled.optimize().fix_captures(&IndexMap::new()).0,
-                        })
-                    })
+                    .map(
+                        |Definition {
+                             span,
+                             name,
+                             expression,
+                         }| {
+                            expression.compile().map(|compiled| Definition {
+                                span,
+                                name: Internal::Original(name.clone()),
+                                expression: compiled.optimize().fix_captures(&IndexMap::new()).0,
+                            })
+                        },
+                    )
                     .collect::<Result<_, CompileError>>();
                 compile_result
                     .map_err(|error| Error::Compile(error))
@@ -95,13 +108,19 @@ impl Compiled {
         let pretty = program
             .definitions
             .iter()
-            .map(|Definition { span: _, name, expression }| {
-                let mut buf = String::new();
-                write!(&mut buf, "def {} = ", name).expect("write failed");
-                expression.pretty(&mut buf, 0).expect("write failed");
-                write!(&mut buf, "\n\n").expect("write failed");
-                buf
-            })
+            .map(
+                |Definition {
+                     span: _,
+                     name,
+                     expression,
+                 }| {
+                    let mut buf = String::new();
+                    write!(&mut buf, "def {} = ", name).expect("write failed");
+                    expression.pretty(&mut buf, 0).expect("write failed");
+                    write!(&mut buf, "\n\n").expect("write failed");
+                    buf
+                },
+            )
             .collect();
 
         // attempt to type check
@@ -125,13 +144,8 @@ impl Compiled {
 pub struct CheckedProgram {
     pub type_defs: TypeDefs<Internal<Name>>,
     pub declarations: IndexMap<Internal<Name>, (Span, Type<Internal<Name>>)>,
-    pub definitions: IndexMap<
-        Internal<Name>,
-        (
-            Span,
-            Arc<Expression<Internal<Name>, Type<Internal<Name>>>>,
-        ),
-    >,
+    pub definitions:
+        IndexMap<Internal<Name>, (Span, Arc<Expression<Internal<Name>, Type<Internal<Name>>>>)>,
 }
 
 #[derive(Clone)]
