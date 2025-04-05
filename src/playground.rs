@@ -186,8 +186,8 @@ impl Playground {
             style.wrap_mode = Some(egui::TextWrapMode::Extend);
         });
 
-        Box::new(Self {
-            file_path: None,
+        let mut playground = Box::new(Self {
+            file_path: file_path.clone(),
             code: "".to_owned(),
             compiled: None,
             compiled_code: Arc::from(""),
@@ -195,7 +195,13 @@ impl Playground {
             show_compiled: false,
             show_ic: false,
             readback_state: Default::default(),
-        })
+        });
+
+        if let Some(path) = file_path {
+            playground.open(path);
+        }
+
+        playground
     }
 }
 
