@@ -3,7 +3,7 @@ use std::{
     fmt::Write,
     fs::File,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use eframe::egui;
@@ -12,13 +12,17 @@ use indexmap::IndexMap;
 
 use crate::location::Span;
 use crate::par::language::{Declaration, Definition, TypeDef};
-use crate::{interact::{Event, Handle, Request}, par::{
-    language::{CompileError, Internal, Name, Program},
-    parse::{parse_program, SyntaxError},
-    process,
-    runtime::{self, Context, Operation},
-    types::{self, Type, TypeError},
-}, spawn::TokioSpawn};
+use crate::{
+    icombs::{compile_file, IcCompiled},
+    par::{
+        language::{CompileError, Internal, Name, Program},
+        parse::{parse_program, SyntaxError},
+        process::Expression,
+        types::{self, Type, TypeDefs, TypeError},
+    },
+    readback::ReadbackState,
+    spawn::TokioSpawn,
+};
 use miette::{LabeledSpan, SourceOffset, SourceSpan};
 
 pub struct Playground {
@@ -26,16 +30,16 @@ pub struct Playground {
     code: String,
     compiled: Option<Result<Compiled, Error>>,
     compiled_code: Arc<str>,
-    interact: Option<Interact>,
     editor_font_size: f32,
     show_compiled: bool,
+    show_ic: bool,
+    readback_state: Option<crate::readback::ReadbackState>,
 }
 
 #[derive(Clone)]
 pub(crate) struct Compiled {
-    pub(crate) program: Program<Internal<Name>, Arc<process::Expression<Internal<Name>, ()>>>,
     pub(crate) pretty: String,
-    pub(crate) checked: Result<Checked, TypeError<Internal<Name>>>,
+    pub(crate) checked: Result<Checked, Error>,
 }
 
 impl Compiled {
@@ -46,104 +50,119 @@ impl Compiled {
                 let type_defs = program
                     .type_defs
                     .into_iter()
-                    .map(|TypeDef { span, name, params, typ }| {
-                        TypeDef {
+                    .map(
+                        |TypeDef {
+                             span,
+                             name,
+                             params,
+                             typ,
+                         }| TypeDef {
                             span,
                             name: Internal::Original(name),
-                            params: params.into_iter().map(Internal::Original).collect(),
+                            params: params.into_iter().map(|x| Internal::Original(x)).collect(),
                             typ: typ.map_names(&mut Internal::Original),
-                        }
-                    })
+                        },
+                    )
                     .collect();
                 let declarations = program
                     .declarations
                     .into_iter()
-                    .map(|Declaration { span, name, typ }| {
-                        Declaration {
-                            span,
-                            name: Internal::Original(name),
-                            typ: typ.map_names(&mut Internal::Original),
-                        }
+                    .map(|Declaration { span, name, typ }| Declaration {
+                        span,
+                        name: Internal::Original(name),
+                        typ: typ.map_names(&mut Internal::Original),
                     })
                     .collect();
                 let compile_result = program
                     .definitions
                     .into_iter()
-                    .map(|Definition { span, name, expression }| {
-                        expression.compile().map(|compiled| {
-                            Definition {
+                    .map(
+                        |Definition {
+                             span,
+                             name,
+                             expression,
+                         }| {
+                            expression.compile().map(|compiled| Definition {
                                 span,
                                 name: Internal::Original(name.clone()),
                                 expression: compiled.optimize().fix_captures(&IndexMap::new()).0,
-                            }
-                        })
-                    })
+                            })
+                        },
+                    )
                     .collect::<Result<_, CompileError>>();
-                match compile_result {
-                    Ok(compiled) => Ok(Compiled::from_program(Program {
-                        type_defs,
-                        declarations,
-                        definitions: compiled,
-                    })),
-                    Err(error) => Err(Error::Compile(error)),
-                }
+                compile_result
+                    .map_err(|error| Error::Compile(error))
+                    .and_then(|compiled| {
+                        Ok(Compiled::from_program(Program {
+                            type_defs,
+                            declarations,
+                            definitions: compiled,
+                        })?)
+                    })
             })
     }
 
     pub(crate) fn from_program(
-        program: Program<Internal<Name>, Arc<process::Expression<Internal<Name>, ()>>>,
-    ) -> Self {
+        program: Program<Internal<Name>, Arc<Expression<Internal<Name>, ()>>>,
+    ) -> Result<Self, Error> {
         let pretty = program
             .definitions
             .iter()
-            .map(|Definition { name, expression: def, .. }| {
-                let mut buf = String::new();
-                write!(&mut buf, "define {} = ", name).expect("write failed");
-                def.pretty(&mut buf, 0).expect("write failed");
-                write!(&mut buf, "\n\n").expect("write failed");
-                buf
-            })
+            .map(
+                |Definition {
+                     span: _,
+                     name,
+                     expression,
+                 }| {
+                    let mut buf = String::new();
+                    write!(&mut buf, "def {} = ", name).expect("write failed");
+                    expression.pretty(&mut buf, 0).expect("write failed");
+                    write!(&mut buf, "\n\n").expect("write failed");
+                    buf
+                },
+            )
             .collect();
 
         // attempt to type check
-        let definitions = match types::Context::new_with_type_checking(&program) {
-            Ok(context) => context.get_checked_definitions(),
-            Err(error) => {
-                return Compiled {
-                    program,
-                    pretty,
-                    checked: Err(error),
-                }
-            }
+        let ctx = match types::Context::new_with_type_checking(&program) {
+            Ok(context) => context,
+            Err(error) => return Err(Error::Type(error)),
         };
-        let new_program = Program {
-            type_defs: program.type_defs.clone(),
-            declarations: program.declarations.clone(),
-            definitions,
+        let new_program = CheckedProgram {
+            type_defs: ctx.get_type_defs().clone(),
+            declarations: ctx.get_declarations().clone(),
+            definitions: ctx.get_checked_definitions().clone(),
         };
-        Compiled {
-            program,
+        return Ok(Compiled {
             pretty,
-            checked: Ok(Checked::from_program(new_program)),
-        }
+            checked: Checked::from_program(new_program).map_err(|err| Error::InetCompile(err)),
+        });
     }
 }
 
-type CheckedProgram = Program<Internal<Name>, Arc<process::Expression<Internal<Name>, Type<Internal<Name>>>>>;
+#[derive(Debug, Default)]
+pub struct CheckedProgram {
+    pub type_defs: TypeDefs<Internal<Name>>,
+    pub declarations: IndexMap<Internal<Name>, (Span, Type<Internal<Name>>)>,
+    pub definitions:
+        IndexMap<Internal<Name>, (Span, Arc<Expression<Internal<Name>, Type<Internal<Name>>>>)>,
+}
 
 #[derive(Clone)]
 pub(crate) struct Checked {
-    pub(crate) program: CheckedProgram,
+    pub(crate) program: Arc<CheckedProgram>,
+    pub(crate) ic_compiled: Option<crate::icombs::IcCompiled>,
 }
 
 impl Checked {
     pub(crate) fn from_program(
-        // not used for anything, so there's no reason to store it ATM.
         program: CheckedProgram,
-    ) -> Self {
-        Self {
-            program
-        }
+    ) -> Result<Self, crate::icombs::compiler::Error> {
+        // attempt to compile to interaction combinators
+        Ok(Checked {
+            ic_compiled: Some(compile_file(&program)?),
+            program: Arc::new(program),
+        })
     }
 }
 
@@ -151,14 +170,8 @@ impl Checked {
 pub(crate) enum Error {
     Parse(SyntaxError),
     Compile(CompileError),
+    InetCompile(crate::icombs::compiler::Error),
     Type(TypeError<Internal<Name>>),
-    Runtime(runtime::Error<Internal<Name>>),
-}
-
-#[derive(Clone)]
-pub(crate) struct Interact {
-    pub(crate) code: Arc<str>,
-    pub(crate) handle: Arc<Mutex<Handle<Internal<Name>, ()>>>,
 }
 
 impl Playground {
@@ -173,21 +186,22 @@ impl Playground {
             style.wrap_mode = Some(egui::TextWrapMode::Extend);
         });
 
-        let mut playground = Self {
-            file_path: None,
+        let mut playground = Box::new(Self {
+            file_path: file_path.clone(),
             code: "".to_owned(),
             compiled: None,
             compiled_code: Arc::from(""),
-            interact: None,
             editor_font_size: 16.0,
             show_compiled: false,
-        };
+            show_ic: false,
+            readback_state: Default::default(),
+        });
 
-        if let Some(file_path) = &file_path {
-            playground.open(file_path.clone());
+        if let Some(path) = file_path {
+            playground.open(path);
         }
 
-        Box::new(playground)
+        playground
     }
 }
 
@@ -311,55 +325,42 @@ impl Playground {
 
     fn get_theme(&self, ui: &egui::Ui) -> ColorTheme {
         if ui.visuals().dark_mode {
-            fix_dark_theme(ColorTheme::GITHUB_DARK)
+            fix_dark_theme(ColorTheme::GRUVBOX_DARK)
         } else {
             fix_light_theme(ColorTheme::GITHUB_LIGHT)
         }
     }
 
-    fn run(
-        interact: &mut Option<Interact>,
+    fn readback(
+        readback_state: &mut Option<ReadbackState>,
         ui: &mut egui::Ui,
-        program: &Program<Internal<Name>, Arc<process::Expression<Internal<Name>, ()>>>,
-        compiled_code: Arc<str>,
+        program: Arc<CheckedProgram>,
+        compiled: &IcCompiled,
     ) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for Definition { name: internal_name, expression, .. } in &program.definitions {
-                if let Internal::Original(name) = internal_name {
-                    if ui.button(&name.string).clicked() {
-                        if let Some(int) = interact.take() {
-                            int.handle.lock().expect("lock failed").cancel();
-                        }
-                        *interact = Some(Interact {
-                            code: Arc::clone(&compiled_code),
-                            handle: Handle::start_expression(
-                                Arc::new({
-                                    let ctx = ui.ctx().clone();
-                                    move || ctx.request_repaint()
-                                }),
-                                Context::new(
-                                    Arc::new(TokioSpawn),
-                                    Arc::new(
-                                        program
-                                            .definitions
-                                            .iter()
-                                            .map(|Definition { name, expression, .. }| (name.clone(), expression.clone()))
-                                            .collect(),
-                                    ),
-                                ),
-                                expression,
-                            ),
-                        });
-                        ui.close_menu();
-                    }
+        for (internal_name, _) in &program.definitions {
+            if let Internal::Original(name) = internal_name {
+                if ui.button(&name.string).clicked() {
+                    let ty = compiled
+                        .get_type_of(&Internal::Original(name.clone()))
+                        .unwrap();
+                    let mut net = compiled.create_net();
+                    let child_net = compiled.get_with_name(&internal_name).unwrap();
+                    let tree = net.inject_net(child_net).with_type(ty.clone());
+                    *readback_state = Some(ReadbackState::initialize(
+                        ui,
+                        net,
+                        tree,
+                        Arc::new(TokioSpawn),
+                        &program,
+                    ));
                 }
             }
-        });
+        }
     }
 
     fn recompile(&mut self) {
-        self.compiled = stacker::grow(32 * 1024 * 1024, || {
-            Some(Compiled::from_string(self.code.as_str()))
+        stacker::grow(32 * 1024 * 1024, || {
+            self.compiled = Some(Compiled::from_string(self.code.as_str()));
         });
         self.compiled_code = Arc::from(self.code.as_str());
     }
@@ -373,30 +374,33 @@ impl Playground {
                     self.recompile();
                 }
 
-                if let Some(Ok(Compiled { program, .. })) = &mut self.compiled {
+                if let Some(Ok(Compiled { checked, .. })) = &mut self.compiled {
                     ui.checkbox(
                         &mut self.show_compiled,
                         egui::RichText::new("Show compiled"),
                     );
+                    ui.checkbox(&mut self.show_ic, egui::RichText::new("Show IC"));
 
-                    if !self.show_compiled {
-                        egui::menu::menu_custom_button(
-                            ui,
-                            egui::Button::new(
-                                egui::RichText::new("Run")
-                                    .strong()
-                                    .color(egui::Color32::BLACK),
-                            )
-                            .fill(green().lerp_to_gamma(egui::Color32::WHITE, 0.3)),
-                            |ui| {
-                                Self::run(
-                                    &mut self.interact,
-                                    ui,
-                                    program,
-                                    self.compiled_code.clone(),
-                                );
-                            },
-                        );
+                    if let Ok(checked) = checked {
+                        if let Some(ic_compiled) = checked.ic_compiled.as_ref() {
+                            egui::menu::menu_custom_button(
+                                ui,
+                                egui::Button::new(
+                                    egui::RichText::new("Run")
+                                        .strong()
+                                        .color(egui::Color32::BLACK),
+                                )
+                                .fill(green().lerp_to_gamma(egui::Color32::WHITE, 0.3)),
+                                |ui| {
+                                    Self::readback(
+                                        &mut self.readback_state,
+                                        ui,
+                                        checked.program.clone(),
+                                        ic_compiled,
+                                    );
+                                },
+                            );
+                        }
                     }
                 }
             });
@@ -425,153 +429,32 @@ impl Playground {
                                 .with_theme(theme)
                                 .with_numlines(true)
                                 .show(ui, pretty);
-                        } else if let Ok(_) = checked {
-                            // :)
-                            ui.label(
-                                egui::RichText::new("Type checking successful").color(green()),
-                            );
-                        } else if let Err(err) = checked {
-                            let error =
-                                Error::Type(err.clone()).display(self.compiled_code.clone());
+                        } else if let Ok(checked) = checked {
+                            if let Some(ic_compiled) = checked.ic_compiled.as_ref() {
+                                if self.show_ic {
+                                    CodeEditor::default()
+                                        .id_source("ic_compiled")
+                                        .with_rows(32)
+                                        .with_fontsize(self.editor_font_size)
+                                        .with_theme(theme)
+                                        .with_numlines(true)
+                                        .show(ui, &mut format!("{}", ic_compiled));
+                                }
 
+                                if !self.show_compiled && !self.show_ic {
+                                    if let Some(rb) = &mut self.readback_state {
+                                        rb.show_readback(ui, checked.program.clone())
+                                    }
+                                }
+                            }
+                        } else if let Err(err) = checked {
+                            let error = err.display(self.compiled_code.clone());
                             ui.label(egui::RichText::new(error).color(red()).code());
-                        }
-                    }
-                    if !self.show_compiled {
-                        if let Some(int) = &self.interact {
-                            self.show_interact(ui, int.clone());
                         }
                     }
                 });
             });
         });
-    }
-
-    fn show_interact(&mut self, ui: &mut egui::Ui, int: Interact) {
-        let handle = int.handle.lock().expect("lock failed");
-
-        egui::Frame::default()
-            .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
-            .inner_margin(egui::Margin::same(4))
-            .outer_margin(egui::Margin::same(2))
-            .show(ui, |ui| {
-                ui.horizontal_top(|ui| {
-                    let mut to_the_side = Vec::new();
-
-                    ui.vertical(|ui| {
-                        for event in handle.events() {
-                            match event {
-                                Event::Send(_, argument) => {
-                                    self.show_interact(
-                                        ui,
-                                        Interact {
-                                            code: Arc::clone(&int.code),
-                                            handle: Arc::clone(&argument),
-                                        },
-                                    );
-                                }
-
-                                Event::Receive(_, parameter) => {
-                                    to_the_side.push(Arc::clone(&parameter))
-                                }
-
-                                Event::Choose(_, chosen) => {
-                                    ui.horizontal(|ui| {
-                                        ui.label(
-                                            egui::RichText::new("+").strong().code().color(blue()),
-                                        );
-                                        ui.label(
-                                            egui::RichText::new(format!("{}", chosen))
-                                                .strong()
-                                                .code(),
-                                        );
-                                    });
-                                }
-
-                                Event::Either(_, chosen) => {
-                                    ui.horizontal(|ui| {
-                                        ui.label(
-                                            egui::RichText::new(">").strong().code().color(green()),
-                                        );
-                                        ui.label(
-                                            egui::RichText::new(format!("{}", chosen))
-                                                .strong()
-                                                .code(),
-                                        );
-                                    });
-                                }
-
-                                Event::Break(_) => {
-                                    ui.horizontal(|ui| {
-                                        ui.label(egui::RichText::new("break").italics().code());
-                                    });
-                                }
-
-                                Event::Continue(_) => {
-                                    ui.horizontal(|ui| {
-                                        ui.label(egui::RichText::new("continue").italics().code());
-                                    });
-                                }
-                            }
-                        }
-
-                        if let Some(result) = handle.interaction() {
-                            ui.horizontal(|ui| match result {
-                                Ok(Request::Dynamic(_)) => {
-                                    ui.horizontal(|ui| {
-                                        drop(handle);
-                                        ui.label(
-                                            egui::RichText::new("<UI>")
-                                                .strong()
-                                                .code()
-                                                .color(red()),
-                                        );
-                                    });
-                                }
-                                Ok(Request::Either(loc, choices)) => {
-                                    ui.vertical(|ui| {
-                                        drop(handle);
-                                        for choice in choices.iter() {
-                                            if ui
-                                                .button(
-                                                    egui::RichText::new(format!("{}", choice))
-                                                        .strong(),
-                                                )
-                                                .clicked()
-                                            {
-                                                Handle::choose(
-                                                    Arc::clone(&int.handle),
-                                                    loc.clone(),
-                                                    choice.clone(),
-                                                );
-                                            }
-                                        }
-                                    });
-                                }
-                                Err(error) => {
-                                    ui.label(
-                                        egui::RichText::new(
-                                            Error::Runtime(error).display(int.code.clone()),
-                                        )
-                                        .color(red())
-                                        .code(),
-                                    );
-                                }
-                            });
-                        }
-                    });
-
-                    for side in to_the_side {
-                        self.show_interact(
-                            ui,
-                            Interact {
-                                code: Arc::clone(&int.code),
-                                handle: side,
-                            },
-                        );
-                    }
-                });
-            });
     }
 }
 
@@ -579,29 +462,9 @@ impl Playground {
 pub fn labels_from_span(_code: &str, span: &Span) -> Vec<LabeledSpan> {
     vec![LabeledSpan::new_with_span(
         None,
-        SourceSpan::new(SourceOffset::from(span.start.offset), span.len())
+        SourceSpan::new(SourceOffset::from(span.start.offset), span.len()),
     )]
 }
-pub fn span_to_source_span(_code: &str, span: &Span) -> Option<SourceSpan> {
-    Some(SourceSpan::new(SourceOffset::from(span.start.offset), span.len()))
-}
-
-#[derive(Debug, miette::Diagnostic)]
-struct RuntimeError {
-    #[label]
-    span: Option<SourceSpan>,
-    #[label(collection)]
-    others: Vec<LabeledSpan>,
-    #[related]
-    related: Vec<miette::ErrReport>,
-    message: String,
-}
-impl core::fmt::Display for RuntimeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        format!("Runtime Error: {}.", self.message).fmt(f)
-    }
-}
-impl core::error::Error for RuntimeError {}
 
 impl Error {
     pub fn display(&self, code: Arc<str>) -> String {
@@ -631,140 +494,9 @@ impl Error {
 
             Self::Type(error) => format!("{:?}", error.to_report(code)),
 
-            Self::Runtime(error) => format!(
-                "{:?}",
-                miette::Report::from(Self::display_runtime_error(&code, error))
-            ),
-        }
-    }
-
-    fn display_runtime_error(
-        code: &str,
-        error: &runtime::Error<Internal<Name>>,
-    ) -> RuntimeError {
-        use runtime::Error::*;
-        match error {
-            NameNotDefined(loc, name) => RuntimeError {
-                span: span_to_source_span(code, loc),
-                related: Vec::new(),
-                others: Vec::new(),
-                message: format!("`{}` is not defined.", name),
-            },
-            ShadowedObligation(loc, name) => RuntimeError {
-                span: span_to_source_span(code, loc),
-                related: Vec::new(),
-                others: Vec::new(),
-                message: format!("Cannot re-assign `{}` before handling it.", name),
-            },
-            UnfulfilledObligations(loc, names) => RuntimeError {
-                span: span_to_source_span(code, loc),
-                related: Vec::new(),
-                others: Vec::new(),
-                message: format!(
-                    "Cannot end this process before handling {}.",
-                    names
-                        .iter()
-                        .enumerate()
-                        .map(|(i, name)| if i == 0 {
-                            format!("`{}`", name)
-                        } else {
-                            format!(", `{}`", name)
-                        })
-                        .collect::<String>()
-                ),
-            },
-            IncompatibleOperations(op1, op2) => RuntimeError {
-                span: None,
-                related: Vec::new(),
-                others: [
-                    Self::display_operation(code, op1),
-                    Self::display_operation(code, op2),
-                ]
-                .into_iter()
-                .flatten()
-                .collect(),
-                message: "These operations are incompatible.".to_owned(),
-            },
-            NoSuchLoopPoint(loc, _) => RuntimeError {
-                span: span_to_source_span(code, loc),
-                others: Vec::new(),
-                related: Vec::new(),
-                message: "There is no matching loop point in scope.".to_owned(),
-            },
-            Multiple(error1, error2) => RuntimeError {
-                span: None,
-                others: Vec::new(),
-                related: vec![
-                    miette::Report::from(Self::display_runtime_error(code, error1)),
-                    miette::Report::from(Self::display_runtime_error(code, error2)),
-                ],
-                message: "multiple errors".to_owned(),
-            },
-        }
-    }
-
-    fn display_operation(code: &str, op: &Operation<Internal<Name>>) -> Vec<LabeledSpan> {
-        match op {
-            Operation::Unknown(loc) => labels_from_span(code, loc)
-                .into_iter()
-                .map(|mut x| {
-                    x.set_label(Some("Unknown operation.".to_owned()));
-                    x
-                })
-                .collect(),
-            Operation::Send(loc) => labels_from_span(code, loc)
-                .into_iter()
-                .map(|mut x| {
-                    x.set_label(Some("This side is sending a value.".to_owned()));
-                    x
-                })
-                .collect(),
-            Operation::Receive(loc) => labels_from_span(code, loc)
-                .into_iter()
-                .map(|mut x| {
-                    x.set_label(Some("This side is receiving a value.".to_owned()));
-                    x
-                })
-                .collect(),
-            Operation::Choose(loc, chosen) => labels_from_span(code, loc)
-                .into_iter()
-                .map(|mut x| {
-                    x.set_label(Some(format!("This side is choosing `{}`.", chosen)));
-                    x
-                })
-                .collect(),
-            Operation::Match(loc, choices) => labels_from_span(code, loc)
-                .into_iter()
-                .map(|mut x| {
-                    x.set_label(Some(format!(
-                        "This side is offering either of {}.",
-                        choices
-                            .iter()
-                            .enumerate()
-                            .map(|(i, name)| if i == 0 {
-                                format!("`{}`", name)
-                            } else {
-                                format!(", `{}`", name)
-                            })
-                            .collect::<String>(),
-                    )));
-                    x
-                })
-                .collect(),
-            Operation::Break(loc) => labels_from_span(code, loc)
-                .into_iter()
-                .map(|mut x| {
-                    x.set_label(Some("This side is breaking.".to_owned()));
-                    x
-                })
-                .collect(),
-            Operation::Continue(loc) => labels_from_span(code, loc)
-                .into_iter()
-                .map(|mut x| {
-                    x.set_label(Some("This side is continuing.".to_owned()));
-                    x
-                })
-                .collect(),
+            Self::InetCompile(err) => {
+                format!("inet compilation error: {}", err.display(&code))
+            }
         }
     }
 }
@@ -780,8 +512,6 @@ fn par_syntax() -> Syntax {
             "dec",
             "def",
             "type",
-            "declare",
-            "define",
             "chan",
             "let",
             "do",
