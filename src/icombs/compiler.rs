@@ -98,6 +98,7 @@ impl From<Name> for Var {
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LoopLabel(Option<Name>);
 
+#[derive(Debug)]
 pub struct Context {
     vars: IndexMap<Var, (TypedTree, VariableKind)>,
     loop_points: IndexMap<LoopLabel, Vec<LoopLabel>>,
@@ -184,6 +185,7 @@ impl Context {
     }
 }
 
+#[derive(Debug)]
 pub struct Compiler {
     net: Net,
     context: Context,
@@ -254,6 +256,44 @@ impl Compiler {
         Ok(Tree::Package(id).with_type(typ))
     }
 
+    /// Optimize away erasure underneath auxiliary ports of dup and con nodes where it is safe to do so.
+    ///
+    /// Expects vars to be already have been substituted.
+    fn apply_safe_rules(&mut self, tree: Tree) -> Tree {
+        match tree {
+            Tree::Dup(a, b) => {
+                let a = self.apply_safe_rules(*a);
+                let b = self.apply_safe_rules(*b);
+                match (a, b) {
+                    // This is unconditionally valid on the initial net because no "sup" nodes (dups with opposite polarity) are created in an initial net.
+                    (Tree::Era, x) | (x, Tree::Era) => x,
+                    (a, b) => Tree::Dup(Box::new(a), Box::new(b)),
+                }
+            }
+            Tree::Con(a, b) => {
+                let a = self.apply_safe_rules(*a);
+                let b = self.apply_safe_rules(*b);
+                match (a, b) {
+                    (Tree::Era, Tree::Era) => {
+                        // Eta reduction is always correct
+                        Tree::Era
+                    }
+                    (a, b) => {
+                        // TODO optimize `!` and `?`
+                        Tree::Con(Box::new(a), Box::new(b))
+                    }
+                }
+            }
+            tree => tree,
+        }
+    }
+
+    /// Reduces the tree in ways that aren't regular interactions. This might be invalid after the net has been reduced with regular interactions such as after calling [`Self::normal()`].
+    fn non_principal_interactions(&mut self, mut tree: Tree) -> Tree {
+        self.net.substitute_tree(&mut tree);
+        self.apply_safe_rules(tree)
+    }
+
     fn in_package(
         &mut self,
         f: impl FnOnce(&mut Self, usize) -> Result<TypedTree>,
@@ -264,7 +304,29 @@ impl Compiler {
         // Allocate package
         self.id_to_ty.push(Type::Break(Span::default()));
         self.id_to_package.push(Default::default());
-        let tree = self.with_captures(&Captures::default(), |this| f(this, id))?;
+        let mut tree = self.with_captures(&Captures::default(), |this| f(this, id))?;
+
+        // Non-principal interaction optimization pass
+        tree.tree = self.non_principal_interactions(tree.tree);
+        self.lazy_redexes = core::mem::take(&mut self.lazy_redexes)
+            .into_iter()
+            .map(|(tree, tree1)| {
+                (
+                    self.non_principal_interactions(tree),
+                    self.non_principal_interactions(tree1),
+                )
+            })
+            .collect();
+        self.net.redexes = core::mem::take(&mut self.net.redexes)
+            .into_iter()
+            .map(|(tree, tree1)| {
+                (
+                    self.non_principal_interactions(tree),
+                    self.non_principal_interactions(tree1),
+                )
+            })
+            .collect();
+
         self.net.ports.push_back(tree.tree);
 
         self.net.packages = Arc::new(self.id_to_package.clone().into_iter().enumerate().collect());
@@ -684,7 +746,7 @@ impl Compiler {
                     ),
                 );
                 if let Some((prev_tree, _)) = prev {
-                    self.net.link(prev_tree.tree, Tree::Era);
+                    self.net.link(prev_tree.tree, Tree::e());
                 }
 
                 let mut labels_in_scope: Vec<_> =

@@ -392,12 +392,14 @@ impl Playground {
                                 )
                                 .fill(green().lerp_to_gamma(egui::Color32::WHITE, 0.3)),
                                 |ui| {
-                                    Self::readback(
-                                        &mut self.readback_state,
-                                        ui,
-                                        checked.program.clone(),
-                                        ic_compiled,
-                                    );
+                                    egui::ScrollArea::vertical().show(ui, |ui| {
+                                        Self::readback(
+                                            &mut self.readback_state,
+                                            ui,
+                                            checked.program.clone(),
+                                            ic_compiled,
+                                        );
+                                    })
                                 },
                             );
                         }
