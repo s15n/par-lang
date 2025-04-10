@@ -261,52 +261,38 @@ impl Compiler {
     /// Optimize away erasure underneath auxiliary ports of dup and con nodes where it is safe to do so.
     ///
     /// Expects vars to be already have been substituted.
-    fn apply_safe_rules(&mut self, mut tree: TypedTree) -> TypedTree {
-        // TODO pass correct type to know when to optimize `!` and `?`
-        let sub_typed_tree = |tree: Tree| -> TypedTree {
-            TypedTree {
-                tree,
-                ty: Type::Break(Default::default()),
-            }
-        };
-        let mut new_tree = None;
-        match &tree.tree {
+    fn apply_safe_rules(&mut self, tree: Tree) -> Tree {
+        match tree {
             Tree::Dup(a, b) => {
-                let a = self.apply_safe_rules(sub_typed_tree(*a.clone())).tree;
-                let b = self.apply_safe_rules(sub_typed_tree(*b.clone())).tree;
+                let a = self.apply_safe_rules(*a);
+                let b = self.apply_safe_rules(*b);
                 match (a, b) {
                     // This is unconditionally valid on the initial net because no "sup" nodes (dups with opposite polarity) are created in an initial net.
-                    (Tree::Era, x) | (x, Tree::Era) => {
-                        new_tree = Some(x);
-                    }
-                    (a, b) => new_tree = Some(Tree::Dup(Box::new(a), Box::new(b))),
+                    (Tree::Era, x) | (x, Tree::Era) => x,
+                    (a, b) => Tree::Dup(Box::new(a), Box::new(b)),
                 }
             }
             Tree::Con(a, b) => {
-                let a = self.apply_safe_rules(sub_typed_tree(*a.clone())).tree;
-                let b = self.apply_safe_rules(sub_typed_tree(*b.clone())).tree;
+                let a = self.apply_safe_rules(*a);
+                let b = self.apply_safe_rules(*b);
                 match (a, b) {
                     (Tree::Era, Tree::Era) => {
                         // Eta reduction is always correct
-                        new_tree = Some(Tree::Era)
+                        Tree::Era
                     }
                     (a, b) => {
                         // TODO optimize `!` and `?`
-                        new_tree = Some(Tree::Con(Box::new(a), Box::new(b)))
+                        Tree::Con(Box::new(a), Box::new(b))
                     }
                 }
             }
-            _ => (),
+            tree => tree,
         }
-        if let Some(new_tree) = new_tree {
-            tree.tree = new_tree;
-        }
-        tree
     }
 
     /// Reduces the tree in ways that aren't regular interactions. This might be invalid after the net has been reduced with regular interactions such as after calling [`Self::normal()`].
-    fn non_principal_interactions(&mut self, mut tree: TypedTree) -> TypedTree {
-        self.net.substitute_tree(&mut tree.tree);
+    fn non_principal_interactions(&mut self, mut tree: Tree) -> Tree {
+        self.net.substitute_tree(&mut tree);
         self.apply_safe_rules(tree)
     }
 
@@ -320,45 +306,29 @@ impl Compiler {
         // Allocate package
         self.id_to_ty.push(Type::Break(Loc::External));
         self.id_to_package.push(Default::default());
-        let tree = self.with_captures(&Captures::default(), |this| f(this, id))?;
-        let tree = self.non_principal_interactions(tree);
+        let mut tree = self.with_captures(&Captures::default(), |this| f(this, id))?;
+
+        // Non-principal interaction optimization pass
+        tree.tree = self.non_principal_interactions(tree.tree);
         self.lazy_redexes = core::mem::take(&mut self.lazy_redexes)
             .into_iter()
             .map(|(tree, tree1)| {
-                // TODO fix ty
-                let tree = self
-                    .non_principal_interactions(TypedTree {
-                        tree: tree,
-                        ty: Type::Break(Default::default()),
-                    })
-                    .tree;
-                let tree1 = self
-                    .non_principal_interactions(TypedTree {
-                        tree: tree1,
-                        ty: Type::Break(Default::default()),
-                    })
-                    .tree;
-                (tree, tree1)
+                (
+                    self.non_principal_interactions(tree),
+                    self.non_principal_interactions(tree1),
+                )
             })
             .collect();
         self.net.redexes = core::mem::take(&mut self.net.redexes)
             .into_iter()
             .map(|(tree, tree1)| {
-                let tree = self
-                    .non_principal_interactions(TypedTree {
-                        tree: tree,
-                        ty: Type::Break(Default::default()),
-                    })
-                    .tree;
-                let tree1 = self
-                    .non_principal_interactions(TypedTree {
-                        tree: tree1,
-                        ty: Type::Break(Default::default()),
-                    })
-                    .tree;
-                (tree, tree1)
+                (
+                    self.non_principal_interactions(tree),
+                    self.non_principal_interactions(tree1),
+                )
             })
             .collect();
+
         self.net.ports.push_back(tree.tree);
 
         self.net.packages = Arc::new(self.id_to_package.clone().into_iter().enumerate().collect());
