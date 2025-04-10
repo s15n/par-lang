@@ -341,6 +341,24 @@ impl Compiler {
                 (tree, tree1)
             })
             .collect();
+        self.net.redexes = core::mem::take(&mut self.net.redexes)
+            .into_iter()
+            .map(|(tree, tree1)| {
+                let tree = self
+                    .non_principal_interactions(TypedTree {
+                        tree: tree,
+                        ty: Type::Break(Default::default()),
+                    })
+                    .tree;
+                let tree1 = self
+                    .non_principal_interactions(TypedTree {
+                        tree: tree1,
+                        ty: Type::Break(Default::default()),
+                    })
+                    .tree;
+                (tree, tree1)
+            })
+            .collect();
         self.net.ports.push_back(tree.tree);
 
         self.net.packages = Arc::new(self.id_to_package.clone().into_iter().enumerate().collect());
