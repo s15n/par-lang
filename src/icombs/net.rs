@@ -268,6 +268,7 @@ impl Net {
         }
     }
 
+    /// Where vars occur in the given tree which already have been linked from the other side, finish linking them.
     pub fn substitute_tree(&mut self, tree: &mut Tree) {
         match tree {
             Tree::Con(a, b) | Tree::Dup(a, b) => {
@@ -495,14 +496,7 @@ impl Net {
 
     fn assert_tree_valid(&self, tree: &Tree) -> Vec<usize> {
         match tree {
-            Tree::Con(a, b) => {
-                let mut a = self.assert_tree_valid(a.as_ref());
-                let mut b = self.assert_tree_valid(b.as_ref());
-                a.append(&mut b);
-                a
-            }
-            Tree::Dup(a, b) => {
-                // do the same thing as Con
+            Tree::Con(a, b) | Tree::Dup(a, b) => {
                 let mut a = self.assert_tree_valid(a.as_ref());
                 let mut b = self.assert_tree_valid(b.as_ref());
                 a.append(&mut b);
