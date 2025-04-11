@@ -19,7 +19,6 @@ use crate::{
         readback::{ReadbackResult, SharedState},
         Tree,
     },
-    location::Span,
     par::types::Type,
 };
 

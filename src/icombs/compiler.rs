@@ -43,7 +43,7 @@ pub enum Error {
 }
 
 impl Error {
-    pub fn display(&self, code: &str) -> String {
+    pub fn display(&self, _code: &str) -> String {
         "inet compilation error".to_string()
         //TODO: fix error messages
         /*match self {
