@@ -340,25 +340,52 @@ mod test {
             tokens,
             vec![
                 Token {
-                    kind: TokenKind::Ident,
+                    kind: TokenKind::Identifier,
                     raw: "abc",
-                    loc: Loc::Code { line: 1, column: 1 },
-                    span: 0..3
+                    span: Span {
+                        start: Point {
+                            offset: 0,
+                            row: 0,
+                            column: 0
+                        },
+                        end: Point {
+                            offset: 3,
+                            row: 0,
+                            column: 3
+                        }
+                    },
                 },
                 Token {
-                    kind: TokenKind::Ident,
+                    kind: TokenKind::Identifier,
                     raw: "not_a_comment",
-                    loc: Loc::Code { line: 5, column: 4 },
-                    span: 27..40
+                    span: Span {
+                        start: Point {
+                            offset: 27,
+                            row: 4,
+                            column: 3
+                        },
+                        end: Point {
+                            offset: 40,
+                            row: 4,
+                            column: 16
+                        }
+                    },
                 },
                 Token {
                     kind: TokenKind::Unknown,
                     raw: "/",
-                    loc: Loc::Code {
-                        line: 5,
-                        column: 25
+                    span: Span {
+                        start: Point {
+                            offset: 48,
+                            row: 4,
+                            column: 24
+                        },
+                        end: Point {
+                            offset: 49,
+                            row: 4,
+                            column: 25
+                        }
                     },
-                    span: 48..49
                 }
             ]
         )
