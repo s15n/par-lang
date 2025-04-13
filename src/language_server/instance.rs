@@ -52,28 +52,32 @@ impl Instance {
                 }
 
                 if !inside_item {
-                    for (name, (span, typ)) in &compiled.program.declarations {
-                        if !is_inside(pos, span) {
+                    for (name, declaration) in &compiled.program.declarations {
+                        if !is_inside(pos, &declaration.span) {
                             continue;
                         }
                         inside_item = true;
                         let mut msg = format!("Declaration: {}: ", name.to_string());
                         let indent = msg.len();
-                        typ.pretty(&mut msg, indent + 1).unwrap();
+                        declaration.typ.pretty(&mut msg, indent + 1).unwrap();
                         message = Some(msg);
                         break;
                     }
                 }
 
                 if !inside_item {
-                    for (name, (span, expression)) in &compiled.program.definitions {
-                        if !is_inside(pos, span) {
+                    for (name, definition) in &compiled.program.definitions {
+                        if !is_inside(pos, &definition.span) {
                             continue;
                         }
                         //inside_item = true;
                         let mut msg = format!("Definition: {}: ", name.to_string());
                         let indent = msg.len();
-                        expression.get_type().pretty(&mut msg, indent + 1).unwrap();
+                        definition
+                            .expression
+                            .get_type()
+                            .pretty(&mut msg, indent + 1)
+                            .unwrap();
                         message = Some(msg);
                         break;
                     }
@@ -143,31 +147,31 @@ impl Instance {
             );
         }
 
-        for (name, (span, typ)) in &compiled.program.declarations {
+        for (name, declaration) in &compiled.program.declarations {
             let mut detail = String::new();
-            typ.pretty(&mut detail, 0).unwrap();
+            declaration.typ.pretty(&mut detail, 0).unwrap();
 
             symbols.insert(
                 name,
                 lsp::DocumentSymbol {
                     name: name.to_string(),
                     detail: Some(detail),
-                    kind: if typ.is_receive() {
+                    kind: if declaration.typ.is_receive() {
                         lsp::SymbolKind::FUNCTION
                     } else {
                         lsp::SymbolKind::CONSTANT
                     },
                     tags: None,
                     deprecated: None, // must be specified
-                    range: span.into(),
+                    range: declaration.span.into(),
                     selection_range: name.span().unwrap().into(),
                     children: None,
                 },
             );
         }
 
-        for (name, (span, expression)) in &compiled.program.definitions {
-            let range = span.into();
+        for (name, definition) in &compiled.program.definitions {
+            let range = definition.span.into();
             let selection_range = name.span().unwrap().into();
             symbols
                 .entry(name)
@@ -176,7 +180,7 @@ impl Instance {
                     symbol.selection_range = selection_range;
                 })
                 .or_insert({
-                    let typ = expression.get_type();
+                    let typ = definition.expression.get_type();
                     let mut detail = String::new();
                     typ.pretty(&mut detail, 0).unwrap();
 
@@ -237,15 +241,9 @@ impl Instance {
 
         let mut original = None;
 
-        //TODO: use map indexing
         for (name, _) in &compiled.program.definitions {
             if is_inside(pos, &name.span().unwrap()) {
-                let Some(declaration) = compiled
-                    .program
-                    .declarations
-                    .iter()
-                    .find(|(dec_name, _)| dec_name == &name)
-                else {
+                let Some(declaration) = compiled.program.declarations.get(name) else {
                     return None;
                 };
 
@@ -254,8 +252,8 @@ impl Instance {
             }
         }
 
-        for declaration in &compiled.program.declarations {
-            if is_inside(pos, &declaration.0.span().unwrap()) {
+        for (name, declaration) in &compiled.program.declarations {
+            if is_inside(pos, &name.span().unwrap()) {
                 original = Some(declaration);
                 break;
             }
@@ -265,7 +263,7 @@ impl Instance {
 
         Some(lsp::GotoDefinitionResponse::Scalar(lsp::Location {
             uri: self.uri.clone(),
-            range: declaration.0.span().unwrap().into(),
+            range: declaration.name.span().unwrap().into(),
         }))
     }
 
@@ -339,13 +337,13 @@ impl Instance {
             });
         }
 
-        for (name, (_, typ)) in &compiled.program.declarations {
+        for (name, declaration) in &compiled.program.declarations {
             let name_span = name.span().unwrap();
             semantic_tokens.push(lsp::SemanticToken {
                 delta_line: name_span.start.row as u32,
                 delta_start: name_span.start.column as u32,
                 length: name_span.len() as u32,
-                token_type: if typ.is_receive() {
+                token_type: if declaration.typ.is_receive() {
                     semantic_token_types::FUNCTION
                 } else {
                     semantic_token_types::VARIABLE
@@ -355,13 +353,13 @@ impl Instance {
             });
         }
 
-        for (name, (_, expression)) in &compiled.program.definitions {
+        for (name, definition) in &compiled.program.definitions {
             let name_span = name.span().unwrap();
             semantic_tokens.push(lsp::SemanticToken {
                 delta_line: name_span.start.row as u32,
                 delta_start: name_span.start.column as u32,
                 length: name_span.len() as u32,
-                token_type: if expression.get_type().is_receive() {
+                token_type: if definition.expression.get_type().is_receive() {
                     semantic_token_types::FUNCTION
                 } else {
                     semantic_token_types::VARIABLE
@@ -432,16 +430,14 @@ impl Instance {
                 .program
                 .definitions
                 .iter()
-                .filter(|(name, _)| {
-                    !compiled
-                        .program
-                        .declarations
-                        .iter()
-                        .any(|(dec_name, _)| &dec_name == name) //TODO: use map indexing
-                })
-                .map(|(name, (_, expression))| {
+                .filter(|(name, _)| !compiled.program.declarations.contains_key(*name))
+                .map(|(name, definition)| {
                     let mut label = ": ".to_owned();
-                    expression.get_type().pretty(&mut label, 0).unwrap();
+                    definition
+                        .expression
+                        .get_type()
+                        .pretty(&mut label, 0)
+                        .unwrap();
 
                     lsp::InlayHint {
                         position: name.span().unwrap().end.into(),

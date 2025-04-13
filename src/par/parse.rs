@@ -6,18 +6,21 @@ use super::{
     lexer::{lex, Input, Token, TokenKind},
 };
 use crate::location::{Point, Span, Spanning};
-use crate::par::language::{Declaration, Definition, Name, Program, TypeDef, TypeNode};
+use crate::par::{
+    language::Name,
+    program::{Declaration, Definition, Program, TypeDef},
+    types::Type,
+};
 use core::fmt::Display;
 use indexmap::IndexMap;
 use miette::{SourceOffset, SourceSpan};
 use winnow::token::literal;
 use winnow::{
-    combinator::{alt, cut_err, not, opt, preceded, repeat, separated, terminated, trace},
+    combinator::{alt, cut_err, opt, preceded, repeat, separated, terminated, trace},
     error::{
         AddContext, ContextError, ErrMode, ModalError, ParserError, StrContext, StrContextValue,
     },
     stream::{Accumulate, Stream},
-    token::any,
     Parser,
 };
 
@@ -161,50 +164,6 @@ where
     })
 }
 
-pub fn comment<'s, E>() -> impl Parser<&'s str, &'s str, E>
-where
-    E: ParserError<&'s str>,
-{
-    // below should be a valid block comment
-    /* /* */ */
-    // So have to consider nested comments
-    let comment_block_rest = move |input: &mut &'s str| -> core::result::Result<(), E> {
-        let mut nesting = 0;
-        loop {
-            let next_2 = match input.len() {
-                0 => break Ok(()),
-                1 => break Err(ParserError::from_input(input)),
-                _ => &input.as_bytes()[..2],
-            };
-            match next_2 {
-                s @ b"/*" => {
-                    nesting += 1;
-                    *input = &input[s.len()..];
-                }
-                s @ b"*/" if nesting > 0 => {
-                    nesting -= 1;
-                    *input = &input[s.len()..];
-                }
-                s @ b"*/" => {
-                    *input = &input[s.len()..];
-                    break Ok(());
-                }
-                _ => {
-                    let mut it = input.chars();
-                    it.next(); // skip a char
-                    *input = it.as_str();
-                }
-            }
-        }
-    };
-    alt((
-        preceded("//", repeat(0.., (not("\n"), any)).map(|()| ())),
-        preceded("/*", comment_block_rest).map(|()| ()),
-    ))
-    //.context(StrContext::Label("comment"))
-    .take()
-}
-
 fn name(input: &mut Input) -> Result<Name> {
     t(TokenKind::Identifier)
         .map(Name::from)
@@ -235,7 +194,7 @@ fn program(
     pub enum Item<Name, Expr> {
         TypeDef(TypeDef<Name>),
         Declaration(Declaration<Name>),
-        Definition(Definition<Name, Expr>, Option<TypeNode<Name>>),
+        Definition(Definition<Name, Expr>, Option<Type<Name>>),
     }
 
     let parser = repeat(
@@ -411,7 +370,7 @@ fn declaration(input: &mut Input) -> Result<Declaration<Name>> {
 
 fn definition(
     input: &mut Input,
-) -> Result<(Definition<Name, Expression<Name>>, Option<TypeNode<Name>>)> {
+) -> Result<(Definition<Name, Expression<Name>>, Option<Type<Name>>)> {
     commit_after(
         t(TokenKind::Def),
         (name, annotation, t(TokenKind::Eq), expression),
@@ -462,7 +421,7 @@ where
     .context(StrContext::Label("either/choice branches"))
 }
 
-fn typ(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ(input: &mut Input) -> Result<Type<Name>> {
     alt((
         typ_name,
         typ_chan,
@@ -482,79 +441,79 @@ fn typ(input: &mut Input) -> Result<TypeNode<Name>> {
     .parse_next(input)
 }
 
-fn typ_name(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_name(input: &mut Input) -> Result<Type<Name>> {
     trace(
         "typ_name",
         (name, type_args).map(|(name, type_args)| match type_args {
             Some((type_args_span, type_args)) => {
-                TypeNode::Name(name.span.join(type_args_span), name, type_args)
+                Type::Name(name.span.join(type_args_span), name, type_args)
             }
-            None => TypeNode::Name(name.span.clone(), name, vec![]),
+            None => Type::Name(name.span.clone(), name, vec![]),
         }),
     )
     .parse_next(input)
 }
 
-fn typ_chan(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_chan(input: &mut Input) -> Result<Type<Name>> {
     commit_after(
         t(TokenKind::Chan),
         typ.context(StrContext::Label("chan type")),
     )
-    .map(|(pre, typ)| TypeNode::Chan(pre.span.join(typ.span()), Box::new(typ)))
+    .map(|(pre, typ)| Type::Chan(pre.span.join(typ.span()), Box::new(typ)))
     .parse_next(input)
 }
 
-fn typ_send(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_send(input: &mut Input) -> Result<Type<Name>> {
     commit_after(t(TokenKind::LParen), (list(typ), t(TokenKind::RParen), typ))
         .map(|(open, (args, _, then))| {
             let span = open.span.join(then.span());
             args.into_iter().rfold(then, |then, arg| {
-                TypeNode::Send(span, Box::new(arg), Box::new(then))
+                Type::Send(span, Box::new(arg), Box::new(then))
             })
         })
         .parse_next(input)
 }
 
-fn typ_receive(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_receive(input: &mut Input) -> Result<Type<Name>> {
     commit_after(t(TokenKind::LBrack), (list(typ), t(TokenKind::RBrack), typ))
         .map(|(open, (args, _, then))| {
             let span = open.span.join(then.span());
             args.into_iter().rfold(then, |then, arg| {
-                TypeNode::Receive(span, Box::new(arg), Box::new(then))
+                Type::Receive(span, Box::new(arg), Box::new(then))
             })
         })
         .parse_next(input)
 }
 
-fn typ_either(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_either(input: &mut Input) -> Result<Type<Name>> {
     commit_after(t(TokenKind::Either), branches_body(typ))
         .map(|(pre, (branches_span, branches))| {
-            TypeNode::Either(pre.span.join(branches_span), branches)
+            Type::Either(pre.span.join(branches_span), branches)
         })
         .parse_next(input)
 }
 
-fn typ_choice(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_choice(input: &mut Input) -> Result<Type<Name>> {
     branches_body(typ_branch)
-        .map(|(span, branches)| TypeNode::Choice(span, branches))
+        .map(|(span, branches)| Type::Choice(span, branches))
         .parse_next(input)
 }
 
-fn typ_break(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_break(input: &mut Input) -> Result<Type<Name>> {
     t(TokenKind::Bang)
-        .map(|token| TypeNode::Break(token.span))
+        .map(|token| Type::Break(token.span))
         .parse_next(input)
 }
 
-fn typ_continue(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_continue(input: &mut Input) -> Result<Type<Name>> {
     t(TokenKind::Quest)
-        .map(|token| TypeNode::Continue(token.span))
+        .map(|token| Type::Continue(token.span))
         .parse_next(input)
 }
 
-fn typ_recursive(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_recursive(input: &mut Input) -> Result<Type<Name>> {
     commit_after(t(TokenKind::Recursive), (loop_label, typ))
-        .map(|(pre, (label, typ))| TypeNode::Recursive {
+        .map(|(pre, (label, typ))| Type::Recursive {
             span: pre.span.join(typ.span()),
             asc: Default::default(),
             label,
@@ -563,12 +522,12 @@ fn typ_recursive(input: &mut Input) -> Result<TypeNode<Name>> {
         .parse_next(input)
 }
 
-fn typ_iterative(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_iterative(input: &mut Input) -> Result<Type<Name>> {
     commit_after(
         t(TokenKind::Iterative),
         (loop_label, typ).context(StrContext::Label("iterative type body")),
     )
-    .map(|(pre, (label, typ))| TypeNode::Iterative {
+    .map(|(pre, (label, typ))| Type::Iterative {
         span: pre.span.join(typ.span()),
         asc: Default::default(),
         label,
@@ -577,13 +536,13 @@ fn typ_iterative(input: &mut Input) -> Result<TypeNode<Name>> {
     .parse_next(input)
 }
 
-fn typ_self(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_self(input: &mut Input) -> Result<Type<Name>> {
     commit_after(
         t(TokenKind::Self_),
         loop_label.context(StrContext::Label("self type loop label")),
     )
     .map(|(token, label)| {
-        TypeNode::Self_(
+        Type::Self_(
             match &label {
                 Some(label) => token.span.join(label.span),
                 None => token.span.clone(),
@@ -594,7 +553,7 @@ fn typ_self(input: &mut Input) -> Result<TypeNode<Name>> {
     .parse_next(input)
 }
 
-fn typ_send_type<'s>(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_send_type<'s>(input: &mut Input) -> Result<Type<Name>> {
     commit_after(
         tn!("(type": TokenKind::LParen, TokenKind::Type),
         (
@@ -606,13 +565,13 @@ fn typ_send_type<'s>(input: &mut Input) -> Result<TypeNode<Name>> {
     .map(|((open, _), (names, _, then))| {
         let span = open.span.join(then.span());
         names.into_iter().rfold(then, |then, name| {
-            TypeNode::SendType(span, name, Box::new(then))
+            Type::SendType(span, name, Box::new(then))
         })
     })
     .parse_next(input)
 }
 
-fn typ_recv_type(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_recv_type(input: &mut Input) -> Result<Type<Name>> {
     commit_after(
         tn!("[type": TokenKind::LBrack, TokenKind::Type),
         (
@@ -624,7 +583,7 @@ fn typ_recv_type(input: &mut Input) -> Result<TypeNode<Name>> {
     .map(|((open, _), (names, _, then))| {
         let span = open.span.join(then.span());
         names.into_iter().rfold(then, |then, name| {
-            TypeNode::ReceiveType(span, name, Box::new(then))
+            Type::ReceiveType(span, name, Box::new(then))
         })
     })
     .parse_next(input)
@@ -637,25 +596,25 @@ fn type_params(input: &mut Input) -> Result<Option<(Span, Vec<Name>)>> {
         .parse_next(input)
 }
 
-fn type_args<'s>(input: &mut Input) -> Result<Option<(Span, Vec<TypeNode<Name>>)>> {
+fn type_args<'s>(input: &mut Input) -> Result<Option<(Span, Vec<Type<Name>>)>> {
     // TODO should be able to use `<` to improve error message
     opt((t(TokenKind::Lt), list(typ), t(TokenKind::Gt)))
         .map(|opt| opt.map(|(open, types, close)| (open.span.join(close.span), types)))
         .parse_next(input)
 }
 
-fn typ_branch(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_branch(input: &mut Input) -> Result<Type<Name>> {
     // try recv_type first so `(` is unambiguous on `typ_branch_received`
     alt((typ_branch_then, typ_branch_recv_type, typ_branch_receive)).parse_next(input)
 }
 
-fn typ_branch_then(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_branch_then(input: &mut Input) -> Result<Type<Name>> {
     commit_after(t(TokenKind::Arrow), typ)
         .map(|(_, typ)| typ)
         .parse_next(input)
 }
 
-fn typ_branch_receive(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_branch_receive(input: &mut Input) -> Result<Type<Name>> {
     commit_after(
         t(TokenKind::LParen),
         (list(typ), t(TokenKind::RParen), typ_branch),
@@ -663,13 +622,13 @@ fn typ_branch_receive(input: &mut Input) -> Result<TypeNode<Name>> {
     .map(|(open, (args, _, then))| {
         let span = open.span.join(then.span());
         args.into_iter().rfold(then, |then, arg| {
-            TypeNode::Receive(span, Box::new(arg), Box::new(then))
+            Type::Receive(span, Box::new(arg), Box::new(then))
         })
     })
     .parse_next(input)
 }
 
-fn typ_branch_recv_type(input: &mut Input) -> Result<TypeNode<Name>> {
+fn typ_branch_recv_type(input: &mut Input) -> Result<Type<Name>> {
     (
         tn!("(type": TokenKind::LParen, TokenKind::Type),
         cut_err((list(name), t(TokenKind::RParen), typ_branch)),
@@ -677,13 +636,13 @@ fn typ_branch_recv_type(input: &mut Input) -> Result<TypeNode<Name>> {
         .map(|((open, _), (names, _, then))| {
             let span = open.span.join(then.span());
             names.into_iter().rfold(then, |then, name| {
-                TypeNode::ReceiveType(span, name, Box::new(then))
+                Type::ReceiveType(span, name, Box::new(then))
             })
         })
         .parse_next(input)
 }
 
-fn annotation(input: &mut Input) -> Result<Option<TypeNode<Name>>> {
+fn annotation(input: &mut Input) -> Result<Option<Type<Name>>> {
     opt(commit_after(t(TokenKind::Colon), typ))
         .map(|opt| opt.map(|(_, typ)| typ))
         .parse_next(input)

@@ -1,8 +1,7 @@
-use super::parse::comment;
 use crate::location::{Point, Span};
 use core::str::FromStr;
 use winnow::{
-    combinator::{alt, peek},
+    combinator::{alt, not, peek, preceded, repeat},
     error::{EmptyError, ParserError},
     stream::{ParseSlice, TokenSlice},
     token::{any, literal, take_while},
@@ -301,6 +300,50 @@ pub fn lex<'s>(input: &'s str) -> Vec<Token<'s>> {
         Ok(tokens)
     })(input)
     .expect("lexing failed")
+}
+
+pub fn comment<'s, E>() -> impl Parser<&'s str, &'s str, E>
+where
+    E: ParserError<&'s str>,
+{
+    // below should be a valid block comment
+    /* /* */ */
+    // So have to consider nested comments
+    let comment_block_rest = move |input: &mut &'s str| -> core::result::Result<(), E> {
+        let mut nesting = 0;
+        loop {
+            let next_2 = match input.len() {
+                0 => break Ok(()),
+                1 => break Err(ParserError::from_input(input)),
+                _ => &input.as_bytes()[..2],
+            };
+            match next_2 {
+                s @ b"/*" => {
+                    nesting += 1;
+                    *input = &input[s.len()..];
+                }
+                s @ b"*/" if nesting > 0 => {
+                    nesting -= 1;
+                    *input = &input[s.len()..];
+                }
+                s @ b"*/" => {
+                    *input = &input[s.len()..];
+                    break Ok(());
+                }
+                _ => {
+                    let mut it = input.chars();
+                    it.next(); // skip a char
+                    *input = it.as_str();
+                }
+            }
+        }
+    };
+    alt((
+        preceded("//", repeat(0.., (not("\n"), any)).map(|()| ())),
+        preceded("/*", comment_block_rest).map(|()| ()),
+    ))
+    //.context(StrContext::Label("comment"))
+    .take()
 }
 
 #[cfg(test)]

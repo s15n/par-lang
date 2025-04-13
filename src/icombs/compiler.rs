@@ -3,7 +3,13 @@ use std::{
     sync::Arc,
 };
 
-use crate::{location::Span, par::types::TypeDefs, playground::CheckedProgram};
+use crate::{
+    location::Span,
+    par::{
+        program::{CheckedProgram, Definition},
+        types::TypeDefs,
+    },
+};
 use indexmap::{IndexMap, IndexSet};
 use std::hash::Hash;
 
@@ -190,7 +196,7 @@ pub struct Compiler {
     net: Net,
     context: Context,
     type_defs: TypeDefs<Name>,
-    definitions: IndexMap<Name, (Span, Arc<Expression<Name, Type<Name>>>)>,
+    definitions: IndexMap<Name, Definition<Name, Arc<Expression<Name, Type<Name>>>>>,
     global_name_to_id: IndexMap<Name, usize>,
     id_to_ty: Vec<Type<Name>>,
     id_to_package: Vec<Net>,
@@ -238,7 +244,7 @@ impl Compiler {
             });
         }
         let global = match self.definitions.get(name).cloned() {
-            Some((_, expr)) => expr,
+            Some(def) => def.expression,
             _ => return Err(Error::GlobalNotFound(name.clone())),
         };
         /*let debug = false;
@@ -802,7 +808,7 @@ impl Compiler {
     }
 }
 
-pub fn compile_file(program: &CheckedProgram) -> Result<IcCompiled> {
+pub fn compile_file(program: &CheckedProgram<Name>) -> Result<IcCompiled> {
     let mut compiler = Compiler {
         net: Net::default(),
         context: Context {

@@ -16,7 +16,8 @@ use crate::{
         Net,
     },
     par::language::{self, Internal},
-    playground::{self, CheckedProgram},
+    par::program::CheckedProgram,
+    playground,
     spawn::TokioSpawn,
 };
 
@@ -71,7 +72,7 @@ pub struct TestingState {
     pub shared: SharedState,
     pub spawner: Arc<dyn Spawn + Send + Sync>,
     pub net: Arc<Mutex<Net>>,
-    pub prog: Arc<CheckedProgram>,
+    pub prog: Arc<CheckedProgram<Name>>,
 }
 
 impl TestingState {
@@ -319,7 +320,7 @@ async fn test_whole_programs() -> Result<(), String> {
                         .unwrap()
                         .inject_net(ic_compiled.get_with_name(&def_name).unwrap());
                     let res = ReadbackResult::Suspended(
-                        tree.with_type(prog.declarations.get(&def_name).unwrap().clone().1),
+                        tree.with_type(prog.declarations.get(&def_name).unwrap().typ.clone()),
                     );
                     state.result_to_pattern(res).await
                 }
@@ -328,7 +329,7 @@ async fn test_whole_programs() -> Result<(), String> {
             let testing_result = state
                 .matches(
                     ReadbackResult::Suspended(
-                        tree.with_type(prog.declarations.get(&def_name).unwrap().clone().1),
+                        tree.with_type(prog.declarations.get(&def_name).unwrap().typ.clone()),
                     ),
                     pattern,
                 )

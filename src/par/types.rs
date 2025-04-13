@@ -6,9 +6,8 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use super::{language::Program, process};
+use super::process;
 use crate::location::{Span, Spanning};
-use crate::par::language::{Declaration, Definition, TypeDef, TypeNode};
 use miette::LabeledSpan;
 
 #[derive(Clone, Debug)]
@@ -54,7 +53,43 @@ pub enum Operation<Name> {
     ReceiveType(Span),
 }
 
-pub type Type<Name> = TypeNode<Name>;
+#[derive(Clone, Debug)]
+pub enum Type<Name> {
+    Chan(Span, Box<Self>),
+    /// type variable
+    Var(Span, Name),
+    /// named type
+    Name(Span, Name, Vec<Type<Name>>),
+    Send(Span, Box<Self>, Box<Self>),
+    Receive(Span, Box<Self>, Box<Self>),
+    Either(Span, IndexMap<Name, Self>),
+    Choice(Span, IndexMap<Name, Self>),
+    /// ! (unit)
+    Break(Span),
+    /// ? (bottom)
+    Continue(Span),
+    Recursive {
+        span: Span,
+        /*
+        The ascendents of the type (denoted by the names of the respective loop points):
+        If you `begin` on a `recursive`, and it expands, so its `self`s get replaced by new
+        `recursive`s, these new `recursive`s will have as their *ascendent* the original `recursive`.
+        This is for totality checking.
+         */
+        asc: IndexSet<Option<Name>>,
+        label: Option<Name>,
+        body: Box<Self>,
+    },
+    Iterative {
+        span: Span,
+        asc: IndexSet<Option<Name>>,
+        label: Option<Name>,
+        body: Box<Self>,
+    },
+    Self_(Span, Option<Name>),
+    SendType(Span, Name, Box<Self>),
+    ReceiveType(Span, Name, Box<Self>),
+}
 
 #[derive(Clone, Debug)]
 pub struct TypeDefs<Name> {
@@ -72,15 +107,14 @@ impl<Name: Clone + Eq + Hash> Default for TypeDefs<Name> {
 }
 
 impl<Name: Clone + Eq + Hash> TypeDefs<Name> {
-    pub fn new_with_validation(globals: &[TypeDef<Name>]) -> Result<Self, TypeError<Name>> {
+    pub fn new_with_validation<'a>(
+        globals: impl Iterator<Item = (&'a Span, &'a Name, &'a Vec<Name>, &'a Type<Name>)>,
+    ) -> Result<Self, TypeError<Name>>
+    where
+        Name: 'a,
+    {
         let mut globals_map = IndexMap::new();
-        for TypeDef {
-            span,
-            name,
-            params,
-            typ,
-        } in globals
-        {
+        for (span, name, params, typ) in globals {
             if let Some((span1, _, _)) =
                 globals_map.insert(name.clone(), (span.clone(), params.clone(), typ.clone()))
             {
@@ -1274,45 +1308,12 @@ impl<Name> Context<Name>
 where
     Name: Clone + Eq + Hash,
 {
-    pub fn new_with_type_checking(
-        program: &Program<Name, Arc<process::Expression<Name, ()>>>,
-    ) -> Result<Self, TypeError<Name>> {
-        let type_defs = TypeDefs::new_with_validation(&program.type_defs)?;
-
-        let mut unchecked_definitions = IndexMap::new();
-        for Definition {
-            span,
-            name,
-            expression,
-        } in &program.definitions
-        {
-            if let Some((span1, _)) =
-                unchecked_definitions.insert(name.clone(), (span.clone(), expression.clone()))
-            {
-                return Err(TypeError::NameAlreadyDefined(
-                    span.clone(),
-                    span1.clone(),
-                    name.clone(),
-                ));
-            }
-        }
-
-        let mut declarations = IndexMap::new();
-        for Declaration { span, name, typ } in &program.declarations {
-            if !unchecked_definitions.contains_key(name) {
-                return Err(TypeError::DeclaredButNotDefined(span.clone(), name.clone()));
-            }
-            if let Some((span1, _)) = declarations.insert(name.clone(), (span.clone(), typ.clone()))
-            {
-                return Err(TypeError::NameAlreadyDeclared(
-                    span.clone(),
-                    span1,
-                    name.clone(),
-                ));
-            }
-        }
-
-        let mut context = Context {
+    pub fn new(
+        type_defs: TypeDefs<Name>,
+        declarations: IndexMap<Name, (Span, Type<Name>)>,
+        unchecked_definitions: IndexMap<Name, (Span, Arc<process::Expression<Name, ()>>)>,
+    ) -> Self {
+        Self {
             type_defs,
             declarations: Arc::new(declarations),
             unchecked_definitions: Arc::new(unchecked_definitions),
@@ -1320,21 +1321,10 @@ where
             current_deps: IndexSet::new(),
             variables: IndexMap::new(),
             loop_points: IndexMap::new(),
-        };
-
-        let names_to_check = context
-            .unchecked_definitions
-            .iter()
-            .map(|(name, (span, _))| (span.clone(), name.clone()))
-            .collect::<Vec<_>>();
-        for (span, name) in names_to_check {
-            context.check_definition(&span, &name)?;
         }
-
-        Ok(context)
     }
 
-    fn check_definition(
+    pub fn check_definition(
         &mut self,
         span: &Span,
         name: &Name,
@@ -1388,9 +1378,11 @@ where
             .map(|(name, checked)| (name.clone(), (checked.span.clone(), checked.def.clone())))
             .collect()
     }
+
     pub fn get_declarations(&self) -> IndexMap<Name, (Span, Type<Name>)> {
         (*self.declarations).clone()
     }
+
     pub fn get_type_defs(&self) -> &TypeDefs<Name> {
         &self.type_defs
     }

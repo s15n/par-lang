@@ -9,8 +9,7 @@ use indexmap::IndexSet;
 
 use crate::{
     icombs::{net::number_to_string, Net},
-    par::types::TypeDefs,
-    playground::CheckedProgram,
+    par::{program::CheckedProgram, types::TypeDefs},
 };
 
 use crate::{
@@ -123,7 +122,7 @@ pub struct ReadbackState {
 }
 
 impl ReadbackState {
-    pub fn show_readback(&mut self, ui: &mut egui::Ui, prog: Arc<CheckedProgram>) {
+    pub fn show_readback(&mut self, ui: &mut egui::Ui, prog: Arc<CheckedProgram<Name>>) {
         ui.vertical(|ui| {
             self.root_impl.show_message(ui);
             ui.horizontal(|ui| {
@@ -137,7 +136,7 @@ impl ReadbackState {
         net: Net,
         tree: TypedTree,
         spawner: Arc<dyn Spawn + Send + Sync>,
-        program: &Arc<CheckedProgram>,
+        program: &Arc<CheckedProgram<Name>>,
     ) -> Self {
         let root_impl = ReadbackImplLevel::from_type(&tree.ty, &program, &mut Default::default());
         let ctx = ui.ctx().clone();
@@ -172,7 +171,7 @@ impl ReadbackStateInner {
     fn show_history_line<'h>(
         &mut self,
         ui: &mut egui::Ui,
-        prog: Arc<CheckedProgram>,
+        prog: Arc<CheckedProgram<Name>>,
         events: &'h [Event],
     ) -> &'h [Event] {
         let mut polarity = None::<Polarity>;
@@ -231,7 +230,7 @@ impl ReadbackStateInner {
     fn show_history<'h>(
         &mut self,
         ui: &mut egui::Ui,
-        prog: Arc<CheckedProgram>,
+        prog: Arc<CheckedProgram<Name>>,
         events: &'h [Event],
     ) {
         let mut events = events;
@@ -247,7 +246,7 @@ impl ReadbackStateInner {
         &mut self,
         ui: &mut egui::Ui,
         handle: Arc<Mutex<Handle>>,
-        prog: Arc<CheckedProgram>,
+        prog: Arc<CheckedProgram<Name>>,
     ) {
         egui::Frame::default()
             .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
@@ -362,7 +361,7 @@ impl ReadbackStateInner {
         &mut self,
         handle: Arc<Mutex<Handle>>,
         port: ReadbackResult,
-        prog: Arc<CheckedProgram>,
+        prog: Arc<CheckedProgram<Name>>,
     ) -> BoxFuture<()> {
         async move {
             let handle_2 = handle.clone();
@@ -521,7 +520,7 @@ impl core::ops::BitAnd<ReadbackImplLevel> for ReadbackImplLevel {
 impl ReadbackImplLevel {
     fn from_type(
         typ: &Type<Name>,
-        prog: &CheckedProgram,
+        prog: &CheckedProgram<Name>,
         type_variables: &mut BTreeSet<Name>,
     ) -> Self {
         use core::ops::BitAnd;

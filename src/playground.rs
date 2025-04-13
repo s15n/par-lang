@@ -10,19 +10,19 @@ use eframe::egui;
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use indexmap::IndexMap;
 
-use crate::location::Span;
-use crate::par::language::{Declaration, Definition, TypeDef};
+use crate::par::program::{Declaration, Definition, Program, TypeDef};
 use crate::{
     icombs::{compile_file, IcCompiled},
     par::{
-        language::{CompileError, Internal, Name, Program},
+        language::{CompileError, Internal, Name},
         parse::{parse_program, SyntaxError},
         process::Expression,
-        types::{self, Type, TypeDefs, TypeError},
+        types::TypeError,
     },
     readback::ReadbackState,
     spawn::TokioSpawn,
 };
+use crate::{location::Span, par::program::CheckedProgram};
 use miette::{LabeledSpan, SourceOffset, SourceSpan};
 
 pub struct Playground {
@@ -124,39 +124,26 @@ impl Compiled {
             .collect();
 
         // attempt to type check
-        let ctx = match types::Context::new_with_type_checking(&program) {
-            Ok(context) => context,
+        let checked_program = match program.type_check() {
+            Ok(checked) => checked,
             Err(error) => return Err(Error::Type(error)),
-        };
-        let new_program = CheckedProgram {
-            type_defs: ctx.get_type_defs().clone(),
-            declarations: ctx.get_declarations().clone(),
-            definitions: ctx.get_checked_definitions().clone(),
         };
         return Ok(Compiled {
             pretty,
-            checked: Checked::from_program(new_program).map_err(|err| Error::InetCompile(err)),
+            checked: Checked::from_program(checked_program).map_err(|err| Error::InetCompile(err)),
         });
     }
 }
 
-#[derive(Debug, Default)]
-pub struct CheckedProgram {
-    pub type_defs: TypeDefs<Internal<Name>>,
-    pub declarations: IndexMap<Internal<Name>, (Span, Type<Internal<Name>>)>,
-    pub definitions:
-        IndexMap<Internal<Name>, (Span, Arc<Expression<Internal<Name>, Type<Internal<Name>>>>)>,
-}
-
 #[derive(Clone)]
 pub(crate) struct Checked {
-    pub(crate) program: Arc<CheckedProgram>,
+    pub(crate) program: Arc<CheckedProgram<Internal<Name>>>,
     pub(crate) ic_compiled: Option<crate::icombs::IcCompiled>,
 }
 
 impl Checked {
     pub(crate) fn from_program(
-        program: CheckedProgram,
+        program: CheckedProgram<Internal<Name>>,
     ) -> Result<Self, crate::icombs::compiler::Error> {
         // attempt to compile to interaction combinators
         Ok(Checked {
@@ -334,7 +321,7 @@ impl Playground {
     fn readback(
         readback_state: &mut Option<ReadbackState>,
         ui: &mut egui::Ui,
-        program: Arc<CheckedProgram>,
+        program: Arc<CheckedProgram<Internal<Name>>>,
         compiled: &IcCompiled,
     ) {
         for (internal_name, _) in &program.definitions {

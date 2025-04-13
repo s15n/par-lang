@@ -7,7 +7,7 @@ use super::{
     types::Type,
 };
 use crate::location::{Point, Span, Spanning};
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
 
 #[derive(Clone, Debug)]
 pub struct Name {
@@ -16,75 +16,8 @@ pub struct Name {
 }
 
 #[derive(Clone, Debug)]
-pub struct Program<Name, Expr> {
-    pub type_defs: Vec<TypeDef<Name>>,
-    pub declarations: Vec<Declaration<Name>>,
-    pub definitions: Vec<Definition<Name, Expr>>,
-}
-
-#[derive(Clone, Debug)]
-pub struct TypeDef<Name> {
-    pub span: Span,
-    pub name: Name,
-    pub params: Vec<Name>,
-    pub typ: TypeNode<Name>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Declaration<Name> {
-    pub span: Span,
-    pub name: Name,
-    pub typ: TypeNode<Name>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Definition<Name, Expr> {
-    pub span: Span,
-    pub name: Name,
-    pub expression: Expr,
-}
-
-#[derive(Clone, Debug)]
-pub enum TypeNode<Name> {
-    Chan(Span, Box<Self>),
-    /// type variable
-    Var(Span, Name),
-    /// named type
-    Name(Span, Name, Vec<Type<Name>>),
-    Send(Span, Box<Self>, Box<Self>),
-    Receive(Span, Box<Self>, Box<Self>),
-    Either(Span, IndexMap<Name, Self>),
-    Choice(Span, IndexMap<Name, Self>),
-    /// ! (unit)
-    Break(Span),
-    /// ? (bottom)
-    Continue(Span),
-    Recursive {
-        span: Span,
-        /*
-        The ascendents of the type (denoted by the names of the respective loop points):
-        If you `begin` on a `recursive`, and it expands, so its `self`s get replaced by new
-        `recursive`s, these new `recursive`s will have as their *ascendent* the original `recursive`.
-        This is for totality checking.
-         */
-        asc: IndexSet<Option<Name>>,
-        label: Option<Name>,
-        body: Box<Self>,
-    },
-    Iterative {
-        span: Span,
-        asc: IndexSet<Option<Name>>,
-        label: Option<Name>,
-        body: Box<Self>,
-    },
-    Self_(Span, Option<Name>),
-    SendType(Span, Name, Box<Self>),
-    ReceiveType(Span, Name, Box<Self>),
-}
-
-#[derive(Clone, Debug)]
 pub enum Pattern<Name> {
-    Name(Span, Name, Option<TypeNode<Name>>),
+    Name(Span, Name, Option<Type<Name>>),
     Receive(Span, Box<Self>, Box<Self>),
     Continue(Span),
     ReceiveType(Span, Name, Box<Self>),
@@ -108,7 +41,7 @@ pub enum Expression<Name> {
     Fork {
         span: Span,
         channel: Name,
-        annotation: Option<TypeNode<Name>>,
+        annotation: Option<Type<Name>>,
         process: Box<Process<Name>>,
     },
     Construction(Construct<Name>),
@@ -134,7 +67,7 @@ pub enum Construct<Name> {
         then: Box<Self>,
     },
     Loop(Span, Option<Name>),
-    SendType(Span, TypeNode<Name>, Box<Self>),
+    SendType(Span, Type<Name>, Box<Self>),
     ReceiveType(Span, Name, Box<Self>),
 }
 
@@ -161,7 +94,7 @@ pub enum Apply<Name> {
         then: Box<Self>,
     },
     Loop(Span, Option<Name>),
-    SendType(Span, TypeNode<Name>, Box<Self>),
+    SendType(Span, Type<Name>, Box<Self>),
 }
 
 #[derive(Clone, Debug)]
@@ -206,7 +139,7 @@ pub enum Command<Name> {
         then: Box<Self>,
     },
     Loop(Span, Option<Name>),
-    SendType(Span, TypeNode<Name>, Box<Self>),
+    SendType(Span, Type<Name>, Box<Self>),
     ReceiveType(Span, Name, Box<Self>),
 }
 
@@ -296,16 +229,6 @@ impl<Name: Display> Display for Internal<Name> {
                 write!(f, "#object")
             }
             Self::Match(level) => write!(f, "#match{}", level),
-        }
-    }
-}
-
-impl<Name, Expr> Default for Program<Name, Expr> {
-    fn default() -> Self {
-        Self {
-            type_defs: Vec::new(),
-            declarations: Vec::new(),
-            definitions: Vec::new(),
         }
     }
 }
@@ -436,7 +359,7 @@ impl<Name: Clone + Hash + Eq> Pattern<Name> {
         }
     }
 
-    fn annotation(&self) -> Option<TypeNode<Internal<Name>>> {
+    fn annotation(&self) -> Option<Type<Internal<Name>>> {
         match self {
             Self::Name(_, _, annotation) => original(annotation),
             Self::Receive(loc, first, rest) => {
@@ -1223,8 +1146,8 @@ impl<Name> Spanning for CommandBranch<Name> {
 }
 
 fn original<Name: Clone + Eq + Hash>(
-    annotation: &Option<TypeNode<Name>>,
-) -> Option<TypeNode<Internal<Name>>> {
+    annotation: &Option<Type<Name>>,
+) -> Option<Type<Internal<Name>>> {
     annotation
         .clone()
         .map(|t| t.map_names(&mut Internal::Original))
