@@ -1,10 +1,5 @@
 type Nat = recursive either { .zero!, .add1 self }
 
-def drop: [Nat] ! = [n] n begin {
-  .zero!  => !
-  .add1 n => n loop
-}
-
 type Move = either {
   .rock!
   .paper!
@@ -56,13 +51,13 @@ def start_game = [p1, p2] begin :game {
       p2.play_move[move2]
     } in calculate_round(move1, move2) {
       .first! => do {
-        p1.win p2.lose
-        drop(limit)?
+        p1.win
+        p2.lose
       } in (.first_won!) loop :game
 
       .second! => do {
-        p1.lose p2.win
-        drop(limit)?
+        p1.lose
+        p2.win
       } in (.second_won!) loop :game
 
       .draw! => do { p1.draw p2.draw } in limit loop :round
