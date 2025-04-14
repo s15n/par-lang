@@ -656,7 +656,7 @@ impl Compiler {
                 self.net.link(Tree::c(v1.tree, expr.tree), subject.tree);
                 self.compile_process(process)?;
             }
-            Command::Receive(target, _, process) => {
+            Command::Receive(target, _, _, process) => {
                 // < name[target] process >
                 // ==
                 // name = free

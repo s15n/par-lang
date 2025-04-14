@@ -1,6 +1,6 @@
 use super::io::IO;
 use crate::language_server::data::{semantic_token_modifiers, semantic_token_types};
-use crate::location::Span;
+use crate::location::{Span, Spanning};
 use crate::par::language::{Internal, Name};
 use crate::par::types::TypeError;
 use crate::playground::{Checked, Compiled};
@@ -141,7 +141,7 @@ impl Instance {
                     tags: None,
                     deprecated: None, // must be specified
                     range: span.into(),
-                    selection_range: name.span().unwrap().into(),
+                    selection_range: name.span().into(),
                     children: None,
                 },
             );
@@ -164,7 +164,7 @@ impl Instance {
                     tags: None,
                     deprecated: None, // must be specified
                     range: declaration.span.into(),
-                    selection_range: name.span().unwrap().into(),
+                    selection_range: name.span().into(),
                     children: None,
                 },
             );
@@ -172,7 +172,7 @@ impl Instance {
 
         for (name, definition) in &compiled.program.definitions {
             let range = definition.span.into();
-            let selection_range = name.span().unwrap().into();
+            let selection_range = name.span().into();
             symbols
                 .entry(name)
                 .and_modify(|symbol| {
@@ -242,7 +242,7 @@ impl Instance {
         let mut original = None;
 
         for (name, _) in &compiled.program.definitions {
-            if is_inside(pos, &name.span().unwrap()) {
+            if is_inside(pos, &name.span()) {
                 let Some(declaration) = compiled.program.declarations.get(name) else {
                     return None;
                 };
@@ -253,7 +253,7 @@ impl Instance {
         }
 
         for (name, declaration) in &compiled.program.declarations {
-            if is_inside(pos, &name.span().unwrap()) {
+            if is_inside(pos, &name.span()) {
                 original = Some(declaration);
                 break;
             }
@@ -263,7 +263,7 @@ impl Instance {
 
         Some(lsp::GotoDefinitionResponse::Scalar(lsp::Location {
             uri: self.uri.clone(),
-            range: declaration.name.span().unwrap().into(),
+            range: declaration.name.span().into(),
         }))
     }
 
@@ -284,7 +284,7 @@ impl Instance {
 
         //TODO: use map indexing
         for (name, _) in &compiled.program.declarations {
-            if is_inside(pos, &name.span().unwrap()) {
+            if is_inside(pos, &name.span()) {
                 let Some(definition) = compiled
                     .program
                     .definitions
@@ -300,7 +300,7 @@ impl Instance {
         }
 
         for definition in &compiled.program.definitions {
-            if is_inside(pos, &definition.0.span().unwrap()) {
+            if is_inside(pos, &definition.0.span()) {
                 original = Some(definition);
                 break;
             }
@@ -310,7 +310,7 @@ impl Instance {
 
         Some(lsp::GotoDefinitionResponse::Scalar(lsp::Location {
             uri: self.uri.clone(),
-            range: definition.0.span().unwrap().into(),
+            range: definition.0.span().into(),
         }))
     }
 
@@ -327,7 +327,7 @@ impl Instance {
         let mut semantic_tokens = Vec::new();
 
         for (name, _) in compiled.program.type_defs.globals.as_ref() {
-            let name_span = name.span().unwrap();
+            let name_span = name.span();
             semantic_tokens.push(lsp::SemanticToken {
                 delta_line: name_span.start.row as u32,
                 delta_start: name_span.start.column as u32,
@@ -338,7 +338,7 @@ impl Instance {
         }
 
         for (name, declaration) in &compiled.program.declarations {
-            let name_span = name.span().unwrap();
+            let name_span = name.span();
             semantic_tokens.push(lsp::SemanticToken {
                 delta_line: name_span.start.row as u32,
                 delta_start: name_span.start.column as u32,
@@ -354,7 +354,7 @@ impl Instance {
         }
 
         for (name, definition) in &compiled.program.definitions {
-            let name_span = name.span().unwrap();
+            let name_span = name.span();
             semantic_tokens.push(lsp::SemanticToken {
                 delta_line: name_span.start.row as u32,
                 delta_start: name_span.start.column as u32,
@@ -404,7 +404,7 @@ impl Instance {
                 .definitions
                 .iter()
                 .map(|(name, _)| lsp::CodeLens {
-                    range: name.span().unwrap().into(),
+                    range: name.span().into(),
                     command: Some(lsp::Command {
                         title: "$(play) Run".to_owned(),
                         command: "run".to_owned(),
@@ -440,7 +440,7 @@ impl Instance {
                         .unwrap();
 
                     lsp::InlayHint {
-                        position: name.span().unwrap().end.into(),
+                        position: name.span().end.into(),
                         label: lsp::InlayHintLabel::String(label),
                         kind: Some(lsp::InlayHintKind::TYPE),
                         text_edits: None,

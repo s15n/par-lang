@@ -6,11 +6,11 @@ use std::{
     sync::Arc,
 };
 
-use eframe::egui;
+use eframe::egui::{self, RichText};
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use indexmap::IndexMap;
 
-use crate::par::program::{Declaration, Definition, Program, TypeDef};
+use crate::par::program::{Declaration, Definition, Program, TypeDef, TypeOnHover};
 use crate::{
     icombs::{compile_file, IcCompiled},
     par::{
@@ -34,6 +34,7 @@ pub struct Playground {
     show_compiled: bool,
     show_ic: bool,
     readback_state: Option<crate::readback::ReadbackState>,
+    cursor_pos: (usize, usize),
 }
 
 #[derive(Clone)]
@@ -138,6 +139,7 @@ impl Compiled {
 #[derive(Clone)]
 pub(crate) struct Checked {
     pub(crate) program: Arc<CheckedProgram<Internal<Name>>>,
+    pub(crate) type_on_hover: Arc<TypeOnHover<Internal<Name>>>,
     pub(crate) ic_compiled: Option<crate::icombs::IcCompiled>,
 }
 
@@ -148,6 +150,7 @@ impl Checked {
         // attempt to compile to interaction combinators
         Ok(Checked {
             ic_compiled: Some(compile_file(&program)?),
+            type_on_hover: Arc::new(TypeOnHover::new(&program)),
             program: Arc::new(program),
         })
     }
@@ -182,6 +185,7 @@ impl Playground {
             show_compiled: false,
             show_ic: false,
             readback_state: Default::default(),
+            cursor_pos: (0, 0),
         });
 
         if let Some(path) = file_path {
@@ -259,14 +263,20 @@ impl eframe::App for Playground {
 
                         ui.separator();
 
-                        CodeEditor::default()
+                        let cursor = CodeEditor::default()
                             .id_source("code")
                             .with_syntax(par_syntax())
                             .with_rows(32)
                             .with_fontsize(self.editor_font_size)
                             .with_theme(self.get_theme(ui))
                             .with_numlines(true)
-                            .show(ui, &mut self.code);
+                            .show(ui, &mut self.code)
+                            .cursor_range;
+
+                        if let Some(cursor) = cursor {
+                            self.cursor_pos =
+                                (cursor.primary.rcursor.row, cursor.primary.rcursor.column);
+                        }
                     });
                 });
 
@@ -409,6 +419,19 @@ impl Playground {
                         pretty, checked, ..
                     })) = &mut self.compiled
                     {
+                        if let Ok(checked) = checked {
+                            if let Some(typ) = checked
+                                .type_on_hover
+                                .query(self.cursor_pos.0, self.cursor_pos.1)
+                            {
+                                ui.horizontal(|ui| {
+                                    let mut buf = String::new();
+                                    typ.pretty(&mut buf, 0).unwrap();
+                                    ui.label(RichText::new(buf).code().color(green()));
+                                });
+                            }
+                        }
+
                         if self.show_compiled {
                             CodeEditor::default()
                                 .id_source("compiled")

@@ -1,5 +1,5 @@
 use super::types::Type;
-use crate::location::Span;
+use crate::location::{Span, Spanning};
 use indexmap::IndexMap;
 use std::{
     fmt::{self, Display, Write},
@@ -30,7 +30,7 @@ pub enum Process<Name, Typ> {
 pub enum Command<Name, Typ> {
     Link(Arc<Expression<Name, Typ>>),
     Send(Arc<Expression<Name, Typ>>, Arc<Process<Name, Typ>>),
-    Receive(Name, Option<Type<Name>>, Arc<Process<Name, Typ>>),
+    Receive(Name, Option<Type<Name>>, Typ, Arc<Process<Name, Typ>>),
     Choose(Name, Arc<Process<Name, Typ>>),
     Match(Arc<[Name]>, Box<[Arc<Process<Name, Typ>>]>),
     Break,
@@ -197,9 +197,12 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
                     Command::Send(argument, process) => {
                         Command::Send(argument.optimize(), process.optimize())
                     }
-                    Command::Receive(parameter, annotation, process) => {
-                        Command::Receive(parameter.clone(), annotation.clone(), process.optimize())
-                    }
+                    Command::Receive(parameter, annotation, typ, process) => Command::Receive(
+                        parameter.clone(),
+                        annotation.clone(),
+                        typ.clone(),
+                        process.optimize(),
+                    ),
                     Command::Choose(chosen, process) => {
                         Command::Choose(chosen.clone(), process.optimize())
                     }
@@ -238,6 +241,33 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
     }
 }
 
+impl<Name: Clone + Spanning, Typ: Clone> Process<Name, Typ> {
+    pub fn types_at_spans(&self, consume: &mut impl FnMut(Span, Typ)) {
+        match self {
+            Process::Let {
+                name, typ, then, ..
+            } => {
+                consume(name.span(), typ.clone());
+                then.types_at_spans(consume);
+            }
+            Process::Do {
+                span,
+                name,
+                typ,
+                command,
+                ..
+            } => {
+                consume(name.span(), typ.clone());
+                consume(span.clone(), typ.clone());
+                command.types_at_spans(consume);
+            }
+            Process::Telltypes(_, process) => {
+                process.types_at_spans(consume);
+            }
+        }
+    }
+}
+
 impl<Name: Clone + Hash + Eq, Typ: Clone> Command<Name, Typ> {
     pub fn fix_captures(
         &self,
@@ -254,11 +284,11 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Command<Name, Typ> {
                 caps.extend(caps1);
                 (Self::Send(argument, process), caps)
             }
-            Self::Receive(parameter, annotation, process) => {
+            Self::Receive(parameter, annotation, typ, process) => {
                 let (process, mut caps) = process.fix_captures(loop_points);
                 caps.remove(parameter);
                 (
-                    Self::Receive(parameter.clone(), annotation.clone(), process),
+                    Self::Receive(parameter.clone(), annotation.clone(), typ.clone(), process),
                     caps,
                 )
             }
@@ -315,6 +345,46 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Command<Name, Typ> {
             Self::ReceiveType(parameter, process) => {
                 let (process, caps) = process.fix_captures(loop_points);
                 (Self::ReceiveType(parameter.clone(), process), caps)
+            }
+        }
+    }
+}
+
+impl<Name: Clone + Spanning, Typ: Clone> Command<Name, Typ> {
+    pub fn types_at_spans(&self, consume: &mut impl FnMut(Span, Typ)) {
+        match self {
+            Self::Link(expression) => {
+                expression.types_at_spans(consume);
+            }
+            Self::Send(argument, process) => {
+                argument.types_at_spans(consume);
+                process.types_at_spans(consume);
+            }
+            Self::Receive(param, _, param_type, process) => {
+                consume(param.span(), param_type.clone());
+                process.types_at_spans(consume);
+            }
+            Self::Choose(_, process) => {
+                process.types_at_spans(consume);
+            }
+            Self::Match(_, branches) => {
+                for process in branches {
+                    process.types_at_spans(consume);
+                }
+            }
+            Self::Break => {}
+            Self::Continue(process) => {
+                process.types_at_spans(consume);
+            }
+            Self::Begin { body, .. } => {
+                body.types_at_spans(consume);
+            }
+            Self::Loop(_, _) => {}
+            Self::SendType(_, process) => {
+                process.types_at_spans(consume);
+            }
+            Self::ReceiveType(_, process) => {
+                process.types_at_spans(consume);
             }
         }
     }
@@ -383,6 +453,28 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Expression<Name, Typ> {
     }
 }
 
+impl<Name: Clone + Spanning, Typ: Clone> Expression<Name, Typ> {
+    pub fn types_at_spans(&self, consume: &mut impl FnMut(Span, Typ)) {
+        match self {
+            Self::Reference(_, name, typ) => {
+                consume(name.span(), typ.clone());
+            }
+            Self::Fork {
+                span,
+                chan_name,
+                chan_type,
+                expr_type,
+                process,
+                ..
+            } => {
+                consume(span.clone(), expr_type.clone());
+                consume(chan_name.span(), chan_type.clone());
+                process.types_at_spans(consume);
+            }
+        }
+    }
+}
+
 impl<Name, Typ: Clone> Expression<Name, Typ> {
     pub fn get_type(&self) -> Typ {
         match self {
@@ -431,7 +523,7 @@ impl<Name: Display, Typ> Process<Name, Typ> {
                         process.pretty(f, indent)
                     }
 
-                    Command::Receive(parameter, _, process) => {
+                    Command::Receive(parameter, _, _, process) => {
                         write!(f, "[{}]", parameter)?;
                         process.pretty(f, indent)
                     }

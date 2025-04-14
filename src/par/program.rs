@@ -2,7 +2,7 @@ use std::{hash::Hash, sync::Arc};
 
 use indexmap::IndexMap;
 
-use crate::location::Span;
+use crate::location::{Span, Spanning};
 
 use super::{
     process,
@@ -131,5 +131,57 @@ impl<Name, Expr> Default for Program<Name, Expr> {
             declarations: Vec::new(),
             definitions: Vec::new(),
         }
+    }
+}
+
+pub struct TypeOnHover<Name> {
+    sorted_pairs: Vec<(Span, Type<Name>)>,
+}
+
+impl<Name: Clone + Spanning> TypeOnHover<Name> {
+    pub fn new(program: &CheckedProgram<Name>) -> Self {
+        let mut pairs = Vec::new();
+
+        for (_, definition) in &program.definitions {
+            definition
+                .expression
+                .types_at_spans(&mut |span, typ| pairs.push((span, typ)));
+        }
+
+        pairs.dedup_by_key(|(span, _)| span.start.offset);
+        pairs.sort_by_key(|(span, _)| span.start.offset);
+
+        TypeOnHover {
+            sorted_pairs: pairs,
+        }
+    }
+}
+
+impl<Name: Clone> TypeOnHover<Name> {
+    pub fn query(&self, row: usize, column: usize) -> Option<Type<Name>> {
+        // find index with the greatest start that is <= than span.start
+        let (mut lo, mut hi) = (0, self.sorted_pairs.len());
+        while lo + 1 < hi {
+            let mi = (lo + hi) / 2;
+            let mp = self.sorted_pairs[mi].0.start;
+            if mp.row < row || (mp.row == row && mp.column <= column) {
+                lo = mi;
+            } else {
+                hi = mi;
+            }
+        }
+
+        let (span, typ) = &self.sorted_pairs[lo];
+
+        // check if queried row/column is in the found span
+        if row < span.start.row || (row == span.start.row && column < span.start.column) {
+            return None;
+        }
+        if span.end.row < row || (span.end.row == row && span.end.column < column) {
+            return None;
+        }
+
+        // found a good span
+        Some(typ.clone())
     }
 }

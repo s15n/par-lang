@@ -1623,7 +1623,7 @@ where
                 (process::Command::Send(argument, process), inferred_types)
             }
 
-            process::Command::Receive(parameter, annotation, process) => {
+            process::Command::Receive(parameter, annotation, (), process) => {
                 let Type::Send(_, parameter_type, then_type) = typ else {
                     return Err(TypeError::InvalidOperation(
                         span.clone(),
@@ -1638,7 +1638,12 @@ where
                 self.put(span, object.clone(), *then_type.clone())?;
                 let (process, inferred_types) = analyze_process(self, process)?;
                 (
-                    process::Command::Receive(parameter.clone(), annotation.clone(), process),
+                    process::Command::Receive(
+                        parameter.clone(),
+                        annotation.clone(),
+                        *parameter_type.clone(),
+                        process,
+                    ),
                     inferred_types,
                 )
             }
@@ -2043,7 +2048,7 @@ where
                 )
             }
 
-            process::Command::Receive(parameter, annotation, process) => {
+            process::Command::Receive(parameter, annotation, (), process) => {
                 let Some(param_type) = annotation else {
                     return Err(TypeError::ParameterTypeMustBeKnown(
                         span.clone(),
@@ -2054,7 +2059,12 @@ where
                 self.put(span, parameter.clone(), param_type.clone())?;
                 let (process, then_type) = self.infer_process(process, subject)?;
                 (
-                    process::Command::Receive(parameter.clone(), annotation.clone(), process),
+                    process::Command::Receive(
+                        parameter.clone(),
+                        annotation.clone(),
+                        param_type.clone(),
+                        process,
+                    ),
                     Type::Send(
                         span.clone(),
                         Box::new(param_type.clone()),
