@@ -2384,7 +2384,7 @@ impl<Name: Display> Type<Name> {
                 write!(f, "{{")?;
                 for (branch, typ) in branches {
                     indentation(f, indent + 1)?;
-                    write!(f, "{} => ", branch)?;
+                    write!(f, ".{} => ", branch)?;
                     typ.pretty(f, indent + 1)?;
                 }
                 indentation(f, indent)?;
@@ -2395,48 +2395,54 @@ impl<Name: Display> Type<Name> {
             Self::Continue(_) => write!(f, "?"),
 
             Self::Recursive {
-                asc, label, body, ..
+                /*asc,*/ label,
+                body,
+                ..
             } => {
                 write!(f, "recursive ")?;
                 if let Some(label) = label {
                     write!(f, ":{} ", label)?;
                 }
-                if asc.len() > 0 {
-                    write!(f, "/* descends ")?;
-                    for (i, label) in asc.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, ", ")?;
-                        }
-                        match label {
-                            Some(label) => write!(f, ":{}", label)?,
-                            None => write!(f, "unlabeled")?,
-                        }
+                /*if asc.len() > 0 {
+                write!(f, "/* descends ")?;
+                for (i, label) in asc.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
                     }
-                    write!(f, " */ ")?;
+                    match label {
+                        Some(label) => write!(f, ":{}", label)?,
+                        None => write!(f, "unlabeled")?,
+                    }
                 }
+                write!(f, " */
+ ")?;
+                }*/
                 body.pretty(f, indent)
             }
 
             Self::Iterative {
-                asc, label, body, ..
+                /*asc,*/ label,
+                body,
+                ..
             } => {
                 write!(f, "iterative ")?;
                 if let Some(label) = label {
                     write!(f, ":{} ", label)?;
                 }
-                if asc.len() > 0 {
-                    write!(f, "/* descends ")?;
-                    for (i, label) in asc.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, ", ")?;
-                        }
-                        match label {
-                            Some(label) => write!(f, ":{}", label)?,
-                            None => write!(f, "unlabeled")?,
-                        }
+                /*if asc.len() > 0 {
+                write!(f, "/* descends ")?;
+                for (i, label) in asc.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
                     }
-                    write!(f, " */ ")?;
+                    match label {
+                        Some(label) => write!(f, ":{}", label)?,
+                        None => write!(f, "unlabeled")?,
+                    }
                 }
+                write!(f, " */
+ ")?;
+                }*/
                 body.pretty(f, indent)
             }
 

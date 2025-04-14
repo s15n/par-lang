@@ -148,8 +148,8 @@ impl<Name: Clone + Spanning> TypeOnHover<Name> {
                 .types_at_spans(&mut |span, typ| pairs.push((span, typ)));
         }
 
-        pairs.dedup_by_key(|(span, _)| span.start.offset);
         pairs.sort_by_key(|(span, _)| span.start.offset);
+        pairs.dedup_by_key(|(span, _)| span.start.offset);
 
         TypeOnHover {
             sorted_pairs: pairs,

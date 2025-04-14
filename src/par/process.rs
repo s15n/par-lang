@@ -245,20 +245,20 @@ impl<Name: Clone + Spanning, Typ: Clone> Process<Name, Typ> {
     pub fn types_at_spans(&self, consume: &mut impl FnMut(Span, Typ)) {
         match self {
             Process::Let {
-                name, typ, then, ..
+                name,
+                typ,
+                value,
+                then,
+                ..
             } => {
+                value.types_at_spans(consume);
                 consume(name.span(), typ.clone());
                 then.types_at_spans(consume);
             }
             Process::Do {
-                span,
-                name,
-                typ,
-                command,
-                ..
+                name, typ, command, ..
             } => {
                 consume(name.span(), typ.clone());
-                consume(span.clone(), typ.clone());
                 command.types_at_spans(consume);
             }
             Process::Telltypes(_, process) => {
@@ -460,14 +460,11 @@ impl<Name: Clone + Spanning, Typ: Clone> Expression<Name, Typ> {
                 consume(name.span(), typ.clone());
             }
             Self::Fork {
-                span,
                 chan_name,
                 chan_type,
-                expr_type,
                 process,
                 ..
             } => {
-                consume(span.clone(), expr_type.clone());
                 consume(chan_name.span(), chan_type.clone());
                 process.types_at_spans(consume);
             }
