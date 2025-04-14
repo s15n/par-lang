@@ -151,7 +151,7 @@ impl<Name: Clone + Spanning> TypeOnHover<Name> {
         pairs.sort_by_key(|(span, _)| span.start.offset);
         pairs.dedup_by_key(|(span, _)| span.start.offset);
 
-        TypeOnHover {
+        Self {
             sorted_pairs: pairs,
         }
     }
