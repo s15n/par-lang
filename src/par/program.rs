@@ -159,7 +159,7 @@ impl<Name: Clone + Spanning> TypeOnHover<Name> {
 
 impl<Name: Clone> TypeOnHover<Name> {
     pub fn query(&self, row: usize, column: usize) -> Option<Type<Name>> {
-        // find index with the greatest start that is <= than span.start
+        // find index with the greatest start that is <= than (row, column)
         let (mut lo, mut hi) = (0, self.sorted_pairs.len());
         while lo + 1 < hi {
             let mi = (lo + hi) / 2;
@@ -173,7 +173,7 @@ impl<Name: Clone> TypeOnHover<Name> {
 
         let (span, typ) = &self.sorted_pairs[lo];
 
-        // check if queried row/column is in the found span
+        // check if queried (row, column) is in the found span
         if row < span.start.row || (row == span.start.row && column < span.start.column) {
             return None;
         }
