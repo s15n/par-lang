@@ -6,6 +6,9 @@ use crate::par::types::TypeError;
 use crate::playground::{Checked, Compiled};
 use lsp_types::{self as lsp, Uri};
 use std::collections::HashMap;
+use eframe::egui::RichText;
+use tracing_subscriber::fmt::format;
+use crate::par::program::NameWithType;
 
 #[derive(Debug, Clone)]
 pub enum CompileError {
@@ -38,7 +41,7 @@ impl Instance {
 
         let payload = match &self.compiled {
             Some(Ok(compiled)) => {
-                let mut message: Option<String> = Some(format!("{}:{}", pos.line, pos.character));
+                /*let mut message: Option<String> = Some(format!("{}:{}", pos.line, pos.character));
 
                 let mut inside_item = false;
 
@@ -87,14 +90,27 @@ impl Instance {
                     message
                 } else {
                     return None;
+                }*/
+                if let Some(NameWithType(name, typ)) = compiled
+                    .type_on_hover
+                    .query(pos.line as usize, pos.character as usize)
+                {
+                    let mut buf = format!("{}: ", name);
+                    typ.pretty(&mut buf, 0).unwrap();
+                    lsp::MarkedString::LanguageString(lsp::LanguageString {
+                        language: "par".to_owned(),
+                        value: buf,
+                    })
+                } else {
+                    return None;
                 }
             }
-            Some(Err(e)) => format!("Compiled error: {:?}", e),
-            None => "Not compiled".to_string(),
+            Some(Err(e)) => lsp::MarkedString::String(format!("Compiled error: {:?}", e)),
+            None => lsp::MarkedString::String("Not compiled".to_string()),
         };
 
         let hover = lsp::Hover {
-            contents: lsp::HoverContents::Scalar(lsp::MarkedString::String(payload)),
+            contents: lsp::HoverContents::Scalar(payload),
             range: None,
         };
         Some(hover)
@@ -149,18 +165,14 @@ impl Instance {
 
         for (name, declaration) in &compiled.program.declarations {
             let mut detail = String::new();
-            declaration.typ.pretty(&mut detail, 0).unwrap();
+            declaration.typ.pretty_compact(&mut detail).unwrap();
 
             symbols.insert(
                 name,
                 lsp::DocumentSymbol {
                     name: name.to_string(),
                     detail: Some(detail),
-                    kind: if declaration.typ.is_receive() {
-                        lsp::SymbolKind::FUNCTION
-                    } else {
-                        lsp::SymbolKind::CONSTANT
-                    },
+                    kind: lsp::SymbolKind::FUNCTION,
                     tags: None,
                     deprecated: None, // must be specified
                     range: declaration.span.into(),
@@ -182,16 +194,12 @@ impl Instance {
                 .or_insert({
                     let typ = definition.expression.get_type();
                     let mut detail = String::new();
-                    typ.pretty(&mut detail, 0).unwrap();
+                    typ.pretty_compact(&mut detail).unwrap();
 
                     lsp::DocumentSymbol {
                         name: name.to_string(),
                         detail: Some(detail),
-                        kind: if typ.is_receive() {
-                            lsp::SymbolKind::FUNCTION
-                        } else {
-                            lsp::SymbolKind::CONSTANT
-                        },
+                        kind: lsp::SymbolKind::FUNCTION,
                         tags: None,
                         deprecated: None, // must be specified
                         range,
@@ -343,11 +351,7 @@ impl Instance {
                 delta_line: name_span.start.row as u32,
                 delta_start: name_span.start.column as u32,
                 length: name_span.len() as u32,
-                token_type: if declaration.typ.is_receive() {
-                    semantic_token_types::FUNCTION
-                } else {
-                    semantic_token_types::VARIABLE
-                },
+                token_type: semantic_token_types::FUNCTION,
                 token_modifiers_bitset: semantic_token_modifiers::DECLARATION
                     | semantic_token_modifiers::READONLY,
             });
@@ -359,11 +363,7 @@ impl Instance {
                 delta_line: name_span.start.row as u32,
                 delta_start: name_span.start.column as u32,
                 length: name_span.len() as u32,
-                token_type: if definition.expression.get_type().is_receive() {
-                    semantic_token_types::FUNCTION
-                } else {
-                    semantic_token_types::VARIABLE
-                },
+                token_type: semantic_token_types::FUNCTION,
                 token_modifiers_bitset: semantic_token_modifiers::DEFINITION
                     | semantic_token_modifiers::READONLY,
             });
@@ -436,7 +436,7 @@ impl Instance {
                     definition
                         .expression
                         .get_type()
-                        .pretty(&mut label, 0)
+                        .pretty_compact(&mut label)
                         .unwrap();
 
                     lsp::InlayHint {

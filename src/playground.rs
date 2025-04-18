@@ -10,7 +10,7 @@ use eframe::egui::{self, RichText};
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use indexmap::IndexMap;
 
-use crate::par::program::{Declaration, Definition, Program, TypeDef, TypeOnHover};
+use crate::par::program::{Declaration, Definition, NameWithType, Program, TypeDef, TypeOnHover};
 use crate::{
     icombs::{compile_file, IcCompiled},
     par::{
@@ -420,7 +420,7 @@ impl Playground {
                     })) = &mut self.compiled
                     {
                         if let Ok(checked) = checked {
-                            if let Some(typ) = checked
+                            if let Some(NameWithType(_, typ)) = checked
                                 .type_on_hover
                                 .query(self.cursor_pos.0, self.cursor_pos.1)
                             {

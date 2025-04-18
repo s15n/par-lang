@@ -134,8 +134,11 @@ impl<Name, Expr> Default for Program<Name, Expr> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct NameWithType<Name>(pub Name, pub Type<Name>);
+
 pub struct TypeOnHover<Name> {
-    sorted_pairs: Vec<(Span, Type<Name>)>,
+    sorted_pairs: Vec<(Span, NameWithType<Name>)>,
 }
 
 impl<Name: Clone + Spanning> TypeOnHover<Name> {
@@ -145,7 +148,7 @@ impl<Name: Clone + Spanning> TypeOnHover<Name> {
         for (_, definition) in &program.definitions {
             definition
                 .expression
-                .types_at_spans(&mut |span, typ| pairs.push((span, typ)));
+                .types_at_spans(&mut |name, typ| pairs.push((name.span(), NameWithType(name, typ))));
         }
 
         pairs.sort_by_key(|(span, _)| span.start.offset);
@@ -158,7 +161,7 @@ impl<Name: Clone + Spanning> TypeOnHover<Name> {
 }
 
 impl<Name: Clone> TypeOnHover<Name> {
-    pub fn query(&self, row: usize, column: usize) -> Option<Type<Name>> {
+    pub fn query(&self, row: usize, column: usize) -> Option<NameWithType<Name>> {
         // find index with the greatest start that is <= than (row, column)
         let (mut lo, mut hi) = (0, self.sorted_pairs.len());
         while lo + 1 < hi {

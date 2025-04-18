@@ -242,7 +242,7 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Process<Name, Typ> {
 }
 
 impl<Name: Clone + Spanning, Typ: Clone> Process<Name, Typ> {
-    pub fn types_at_spans(&self, consume: &mut impl FnMut(Span, Typ)) {
+    pub fn types_at_spans(&self, consume: &mut impl FnMut(Name, Typ)) {
         match self {
             Process::Let {
                 name,
@@ -252,13 +252,13 @@ impl<Name: Clone + Spanning, Typ: Clone> Process<Name, Typ> {
                 ..
             } => {
                 value.types_at_spans(consume);
-                consume(name.span(), typ.clone());
+                consume(name.clone(), typ.clone());
                 then.types_at_spans(consume);
             }
             Process::Do {
                 name, typ, command, ..
             } => {
-                consume(name.span(), typ.clone());
+                consume(name.clone(), typ.clone());
                 command.types_at_spans(consume);
             }
             Process::Telltypes(_, process) => {
@@ -351,7 +351,7 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Command<Name, Typ> {
 }
 
 impl<Name: Clone + Spanning, Typ: Clone> Command<Name, Typ> {
-    pub fn types_at_spans(&self, consume: &mut impl FnMut(Span, Typ)) {
+    pub fn types_at_spans(&self, consume: &mut impl FnMut(Name, Typ)) {
         match self {
             Self::Link(expression) => {
                 expression.types_at_spans(consume);
@@ -361,7 +361,7 @@ impl<Name: Clone + Spanning, Typ: Clone> Command<Name, Typ> {
                 process.types_at_spans(consume);
             }
             Self::Receive(param, _, param_type, process) => {
-                consume(param.span(), param_type.clone());
+                consume(param.clone(), param_type.clone());
                 process.types_at_spans(consume);
             }
             Self::Choose(_, process) => {
@@ -454,10 +454,10 @@ impl<Name: Clone + Hash + Eq, Typ: Clone> Expression<Name, Typ> {
 }
 
 impl<Name: Clone + Spanning, Typ: Clone> Expression<Name, Typ> {
-    pub fn types_at_spans(&self, consume: &mut impl FnMut(Span, Typ)) {
+    pub fn types_at_spans(&self, consume: &mut impl FnMut(Name, Typ)) {
         match self {
             Self::Reference(_, name, typ) => {
-                consume(name.span(), typ.clone());
+                consume(name.clone(), typ.clone());
             }
             Self::Fork {
                 chan_name,
@@ -465,7 +465,7 @@ impl<Name: Clone + Spanning, Typ: Clone> Expression<Name, Typ> {
                 process,
                 ..
             } => {
-                consume(chan_name.span(), chan_type.clone());
+                consume(chan_name.clone(), chan_type.clone());
                 process.types_at_spans(consume);
             }
         }

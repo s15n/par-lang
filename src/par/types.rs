@@ -2332,7 +2332,6 @@ where
 }
 
 impl<Name: Display> Type<Name> {
-    // todo: commas in Send/Receive/SendType/ReceiveType
     pub fn pretty(&self, f: &mut impl Write, indent: usize) -> fmt::Result {
         match self {
             Self::Chan(_, body) => {
@@ -2356,17 +2355,37 @@ impl<Name: Display> Type<Name> {
             }
 
             Self::Send(_, arg, then) => {
+                let mut then = then;
                 write!(f, "(")?;
                 arg.pretty(f, indent)?;
-                write!(f, ") ")?;
-                then.pretty(f, indent)
+                while let Self::Send(_, arg, next) = then.as_ref() {
+                    write!(f, ", ")?;
+                    arg.pretty(f, indent)?;
+                    then = next;
+                }
+                if let Self::Break(_) = then.as_ref() {
+                    write!(f, ")!")
+                } else {
+                    write!(f, ") ")?;
+                    then.pretty(f, indent)
+                }
             }
 
             Self::Receive(_, param, then) => {
+                let mut then = then;
                 write!(f, "[")?;
                 param.pretty(f, indent)?;
-                write!(f, "] ")?;
-                then.pretty(f, indent)
+                while let Self::Receive(_, param, next) = then.as_ref() {
+                    write!(f, ", ")?;
+                    param.pretty(f, indent)?;
+                    then = next;
+                }
+                if let Self::Continue(_) = then.as_ref() {
+                    write!(f, "]?")
+                } else {
+                    write!(f, "] ")?;
+                    then.pretty(f, indent)
+                }
             }
 
             Self::Either(_, branches) => {
@@ -2454,14 +2473,161 @@ impl<Name: Display> Type<Name> {
                 Ok(())
             }
 
-            Self::SendType(_, name, body) => {
-                write!(f, "(type {}) ", name)?;
-                body.pretty(f, indent)
+            Self::SendType(_, name, then) => {
+                let mut then = then;
+                write!(f, "(type {name}")?;
+                while let Self::SendType(_, name, next) = then.as_ref() {
+                    write!(f, ", {name}")?;
+                    then = next;
+                }
+                write!(f, ") ")?;
+                then.pretty(f, indent)
             }
 
-            Self::ReceiveType(_, name, body) => {
-                write!(f, "[type {}] ", name)?;
-                body.pretty(f, indent)
+            Self::ReceiveType(_, name, then) => {
+                let mut then = then;
+                write!(f, "[type {name}")?;
+                while let Self::ReceiveType(_, name, next) = then.as_ref() {
+                    write!(f, ", {name}")?;
+                    then = next;
+                }
+                write!(f, "] ")?;
+                then.pretty(f, indent)
+            }
+        }
+    }
+
+    pub fn pretty_compact(&self, f: &mut impl Write) -> fmt::Result {
+        match self {
+            Self::Chan(_, body) => {
+                write!(f, "chan ")?;
+                body.pretty_compact(f)
+            }
+            Self::Var(_, name) => write!(f, "{}", name),
+            Self::Name(_, name, args) => {
+                write!(f, "{}", name)?;
+                if !args.is_empty() {
+                    write!(f, "<")?;
+                    for (i, arg) in args.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        arg.pretty_compact(f)?;
+                    }
+                    write!(f, ">")?
+                }
+                Ok(())
+            }
+
+            Self::Send(_, arg, then) => {
+                let mut then = then;
+                write!(f, "(")?;
+                arg.pretty_compact(f)?;
+                while let Self::Send(_, arg, next) = then.as_ref() {
+                    write!(f, ", ")?;
+                    arg.pretty_compact(f)?;
+                    then = next;
+                }
+                if let Self::Break(_) = then.as_ref() {
+                    write!(f, ")!")
+                } else {
+                    write!(f, ") ")?;
+                    then.pretty_compact(f)
+                }
+            }
+
+            Self::Receive(_, param, then) => {
+                let mut then = then;
+                write!(f, "[")?;
+                param.pretty_compact(f)?;
+                while let Self::Receive(_, param, next) = then.as_ref() {
+                    write!(f, ", ")?;
+                    param.pretty_compact(f)?;
+                    then = next;
+                }
+                if let Self::Continue(_) = then.as_ref() {
+                    write!(f, "]?")
+                } else {
+                    write!(f, "] ")?;
+                    then.pretty_compact(f)
+                }
+            }
+
+            Self::Either(_, branches) => {
+                let branches = branches.iter()
+                    .map(|(branch, _)| format!(".{branch}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "either {{ {branches} }}")
+            }
+
+            Self::Choice(_, branches) => {
+                let branches = branches.iter()
+                    .map(|(branch, _)| format!(".{branch}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "{{ {branches} }}")
+            }
+
+            Self::Break(_) => write!(f, "!"),
+            Self::Continue(_) => write!(f, "?"),
+
+            Self::Recursive {
+                /*asc,*/ label,
+                body,
+                ..
+            } => {
+                write!(f, "recursive ")?;
+                if !matches!(body.as_ref(), Self::Either(..)) {
+                    if let Some(label) = label {
+                        write!(f, ":{} ", label)?;
+                    }
+                }
+                body.pretty_compact(f)
+            }
+
+            Self::Iterative {
+                /*asc,*/ label,
+                body,
+                ..
+            } => {
+                write!(f, "iterative ")?;
+                if !matches!(body.as_ref(), Self::Choice(..)) {
+                    if let Some(label) = label {
+                        write!(f, ":{} ", label)?;
+                    }
+                }
+                body.pretty_compact(f)
+            }
+
+            Self::Self_(_, label) => {
+                write!(f, "self")?;
+                if let Some(label) = label {
+                    write!(f, " :{}", label)?;
+                }
+                Ok(())
+            }
+
+            Self::SendType(_, name, then) => {
+                let mut then = then;
+                write!(f, "(type {name}")?;
+                while let Self::SendType(_, name, next) = then.as_ref() {
+                    write!(f, ", {name}")?;
+                    then = next;
+                }
+                write!(f, ") ")?;
+                then.pretty_compact(f)
+            }
+
+            Self::ReceiveType(_, name, then) => {
+                let mut then = then;
+                write!(f, "[type {name}")?;
+                while let Self::ReceiveType(_, name, next) = then.as_ref() {
+                    write!(f, ", {name}")?;
+                    then = next;
+                }
+                write!(f, "] ")?;
+                then.pretty_compact(f)
             }
         }
     }
