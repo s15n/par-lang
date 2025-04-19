@@ -2,13 +2,13 @@ use super::io::IO;
 use crate::language_server::data::{semantic_token_modifiers, semantic_token_types};
 use crate::location::{Span, Spanning};
 use crate::par::language::{Internal, Name};
+use crate::par::program::NameWithType;
 use crate::par::types::TypeError;
 use crate::playground::{Checked, Compiled};
+use eframe::egui::RichText;
 use lsp_types::{self as lsp, Uri};
 use std::collections::HashMap;
-use eframe::egui::RichText;
 use tracing_subscriber::fmt::format;
-use crate::par::program::NameWithType;
 
 #[derive(Debug, Clone)]
 pub enum CompileError {

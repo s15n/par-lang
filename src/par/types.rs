@@ -2554,7 +2554,8 @@ impl<Name: Display> Type<Name> {
             }
 
             Self::Either(_, branches) => {
-                let branches = branches.iter()
+                let branches = branches
+                    .iter()
                     .map(|(branch, _)| format!(".{branch}"))
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -2562,7 +2563,8 @@ impl<Name: Display> Type<Name> {
             }
 
             Self::Choice(_, branches) => {
-                let branches = branches.iter()
+                let branches = branches
+                    .iter()
                     .map(|(branch, _)| format!(".{branch}"))
                     .collect::<Vec<_>>()
                     .join(", ");

@@ -146,9 +146,9 @@ impl<Name: Clone + Spanning> TypeOnHover<Name> {
         let mut pairs = Vec::new();
 
         for (_, definition) in &program.definitions {
-            definition
-                .expression
-                .types_at_spans(&mut |name, typ| pairs.push((name.span(), NameWithType(name, typ))));
+            definition.expression.types_at_spans(&mut |name, typ| {
+                pairs.push((name.span(), NameWithType(name, typ)))
+            });
         }
 
         pairs.sort_by_key(|(span, _)| span.start.offset);
