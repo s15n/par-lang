@@ -3,6 +3,11 @@ use std::{
     sync::Arc,
 };
 
+use super::net::{Net, Tree};
+use crate::par::{
+    process::{Captures, Command, Expression, Process},
+    types::Type,
+};
 use crate::{
     location::Span,
     par::{
@@ -12,12 +17,6 @@ use crate::{
 };
 use indexmap::{IndexMap, IndexSet};
 use std::hash::Hash;
-
-use super::net::{Net, Tree};
-use crate::par::{
-    process::{Captures, Command, Expression, Process},
-    types::Type,
-};
 
 use super::Name;
 
@@ -69,6 +68,22 @@ impl Error {
                 loc.display(code)
             ),
         }*/
+    }
+
+    pub fn spans(&self) -> (Span, Vec<Span>) {
+        match self {
+            Error::UnboundVar(span)
+            | Error::UnusedVar(span)
+            | Error::UnexpectedType(span, _)
+            | Error::UnguardedLoop(span, _) => (span.clone(), vec![]),
+
+            Error::GlobalNotFound(name) => (name.span(), vec![]),
+
+            Error::DependencyCycle { global, dependents } => (
+                global.span(),
+                dependents.iter().map(|name| name.span()).collect(),
+            ),
+        }
     }
 }
 

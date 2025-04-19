@@ -13,7 +13,7 @@ use tracing_subscriber::fmt::format;
 #[derive(Debug, Clone)]
 pub enum CompileError {
     Compile(crate::playground::Error),
-    Types(TypeError<Internal<Name>>),
+    //Types(TypeError<Internal<Name>>),
 }
 pub type CompileResult = Result<Checked, CompileError>;
 
@@ -105,7 +105,7 @@ impl Instance {
                     return None;
                 }
             }
-            Some(Err(e)) => lsp::MarkedString::String(format!("Compiled error: {:?}", e)),
+            Some(Err(e)) => return None,
             None => lsp::MarkedString::String("Not compiled".to_string()),
         };
 

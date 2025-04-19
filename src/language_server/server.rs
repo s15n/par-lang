@@ -227,7 +227,11 @@ impl<'c> LanguageServer<'c> {
         match compile_result {
             Ok(_) => { /* warnings */ }
             Err(err) => {
-                feedback.add_diagnostic(uri.clone(), diagnostic_for_error(&err));
+                // todo: better io management (store files as Arc<str>, for example)
+                feedback.add_diagnostic(
+                    uri.clone(),
+                    diagnostic_for_error(&err, self.io.read(uri).unwrap().into()),
+                );
             }
         };
     }
